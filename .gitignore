@@ -1,0 +1,31 @@
+# Виртуальное окружение
+.venv/
+
+# Кэш и байт-код Python
+__pycache__/
+*.py[cod]
+
+# Кэши и отчёты инструментов проверки
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Файлы IDE и редакторов
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Локальные настройки Claude Code и секреты
+.claude/settings.local.json
+.env
+.env.*
+!.env.example
+
+# Логи и сборка
+*.log
+build/
+dist/
