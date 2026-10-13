@@ -1,4 +1,4 @@
-"""Проверки игрового цикла, демонстрации диалога и точки входа."""
+"""Проверки игрового цикла, демонстраций диалога и анимации, точки входа."""
 
 import os
 
@@ -93,6 +93,42 @@ class AppEventsTest(unittest.TestCase):
         self.app.run()
         self.assertTrue(self.app.display.is_fullscreen)
         self.assertIsNotNone(self.app.screen.dialogue)  # ESC закрыл игру, а не диалог
+
+    def test_animation_demo_opens_and_returns_to_debug_screen(self) -> None:
+        pygame.event.post(key_down(pygame.K_a, pygame.KSCAN_A))
+        post_keys(pygame.K_BACKSPACE)
+        pygame.event.post(key_down(pygame.K_d, pygame.KSCAN_D))  # диалог после возврата работает как прежде
+        post_keys(pygame.K_ESCAPE)
+        self.app.run()
+        self.assertIsNone(self.app.screen.animation_demo)
+        self.assertIsNotNone(self.app.screen.dialogue)
+
+    def test_animation_demo_key_works_with_non_latin_layout(self) -> None:
+        pygame.event.post(key_down(ord("ф"), pygame.KSCAN_A))
+        post_keys(pygame.K_ESCAPE)
+        self.app.run()
+        self.assertIsNotNone(self.app.screen.animation_demo)
+
+    def test_d_in_animation_demo_moves_character_instead_of_dialogue(self) -> None:
+        pygame.event.post(key_down(pygame.K_a, pygame.KSCAN_A))
+        pygame.event.post(key_down(pygame.K_d, pygame.KSCAN_D))
+        post_keys(pygame.K_ESCAPE)
+        self.app.run()
+        self.assertIsNone(self.app.screen.dialogue)
+        self.assertEqual(self.app.screen.animation_demo.character.state, "walk")
+
+    def test_escape_and_f11_still_work_in_animation_demo(self) -> None:
+        pygame.event.post(key_down(pygame.K_a, pygame.KSCAN_A))
+        post_keys(pygame.K_F11, pygame.K_ESCAPE)
+        self.app.run()
+        self.assertTrue(self.app.display.is_fullscreen)
+        self.assertIsNotNone(self.app.screen.animation_demo)  # ESC закрыл игру, а не тест анимации
+
+    def test_window_close_works_in_animation_demo(self) -> None:
+        pygame.event.post(key_down(pygame.K_a, pygame.KSCAN_A))
+        pygame.event.post(pygame.event.Event(pygame.QUIT))
+        self.app.run()
+        self.assertFalse(self.app.running)
 
 
 class EntryPointTest(unittest.TestCase):

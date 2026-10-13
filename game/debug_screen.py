@@ -1,4 +1,4 @@
-"""Временный экран проверки технического фундамента и демонстрации диалогов.
+"""Временный экран проверки технического фундамента, демонстрации диалогов и анимации.
 
 Его заменит первая игровая сцена с теми же методами handle_event(), update() и draw().
 """
@@ -8,24 +8,20 @@ from __future__ import annotations
 import pygame
 
 import config
+from game.animation_demo import AnimationDemo
 from game.demo_dialogue import DEMO_SCRIPT, QUESTION_ID
 from game.dialogue import DialogueChoice, DialogueController
 from game.dialogue_box import DialogueBox
 from game.fonts import load_font, render_text
+from game.keys import matches_key
 
 # Как часто обновлять число FPS (в секундах): каждый кадр цифры бы мелькали.
 FPS_REFRESH_INTERVAL = 0.5
-HINTS = (("F11", "полный экран"), ("D", "тестовый диалог"), ("ESC", "выход"))
-
-
-def _is_demo_key(event: pygame.event.Event) -> bool:
-    # Сравниваем и код клавиши, и её физическое положение (скан-код): при нелатинской
-    # раскладке код клавиши может не совпасть с K_d.
-    return event.key == pygame.K_d or getattr(event, "scancode", None) == pygame.KSCAN_D
+HINTS = (("F11", "полный экран"), ("D", "тестовый диалог"), ("A", "тест анимации"), ("ESC", "выход"))
 
 
 class DebugScreen:
-    """Тёмный фон, название игры, подсказки по управлению, счётчик FPS и тестовый диалог."""
+    """Тёмный фон, название игры, подсказки по управлению, счётчик FPS, тестовые диалог и анимация."""
 
     def __init__(self, clock: pygame.time.Clock) -> None:
         self._clock = clock
@@ -60,26 +56,39 @@ class DebugScreen:
         self.dialogue: DialogueController | None = None
         # Ответ на вопрос из последнего завершённого прохода демонстрации.
         self.last_answer: DialogueChoice | None = None
+        self.animation_demo: AnimationDemo | None = None
 
     def handle_event(self, event: pygame.event.Event) -> None:
-        if self.dialogue is not None:
+        if self.animation_demo is not None:
+            # Пока открыт тест анимации, клавиши достаются ему (D там — шаг вправо, а не диалог).
+            self.animation_demo.handle_event(event)
+            if self.animation_demo.is_finished:
+                self.animation_demo = None
+        elif self.dialogue is not None:
             # Пока открыт диалог, клавиши достаются ему.
             self.dialogue.handle_event(event)
             if self.dialogue.is_finished:
                 self._finish_dialogue(self.dialogue)
-        elif event.type == pygame.KEYDOWN and _is_demo_key(event):
+        elif event.type == pygame.KEYDOWN and matches_key(event, pygame.K_d, pygame.KSCAN_D):
             self.dialogue = DialogueController(DEMO_SCRIPT)
             self._result_labels = []  # итог прошлого прохода устарел и мешал бы окну диалога
+        elif event.type == pygame.KEYDOWN and matches_key(event, pygame.K_a, pygame.KSCAN_A):
+            self.animation_demo = AnimationDemo()
 
     def update(self, dt: float) -> None:
         self._fps_timer += dt
         if self._fps_timer >= FPS_REFRESH_INTERVAL:
             self._fps_timer = 0.0
             self._fps_label = self._render_fps()
-        if self.dialogue is not None:
+        if self.animation_demo is not None:
+            self.animation_demo.update(dt)
+        elif self.dialogue is not None:
             self.dialogue.update(dt)
 
     def draw(self, surface: pygame.Surface) -> None:
+        if self.animation_demo is not None:
+            self.animation_demo.draw(surface)
+            return
         surface.fill(config.BACKGROUND_COLOR)
         for image, rect in self._labels + self._result_labels:
             surface.blit(image, rect)
