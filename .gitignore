@@ -24,8 +24,12 @@ htmlcov/
 .env
 .env.*
 !.env.example
+*.pem
+*.key
 
-# Логи и сборка
+# Логи, временные файлы и сборка
 *.log
+*.tmp
+*.bak
 build/
 dist/
