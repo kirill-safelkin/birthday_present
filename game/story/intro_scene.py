@@ -352,7 +352,11 @@ class IntroScene(Scene):
             return
         if self.dialogue is None:
             return  # во время пауз и эффектов нажатия ничего не пропускают
-        self.dialogue.handle_event(event)
+        actions = actions_for(event) if event.type == pygame.KEYDOWN else frozenset()
+        if Action.INTERACT in actions and Action.CONFIRM not in actions:
+            self.dialogue.confirm()  # как во всей игре: E продолжает реплику и выбирает ответ
+        else:
+            self.dialogue.handle_event(event)
         self._sync_dialogue()
 
     def update(self, dt: float) -> None:

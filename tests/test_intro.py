@@ -276,6 +276,35 @@ class ScriptTest(IntroTestCase):
             sprites["alice"].frame(frame_id)
 
 
+class KeysTest(IntroTestCase):
+    def test_e_continues_lines_and_picks_answers_like_enter(self) -> None:
+        # E — главная клавиша во всей игре, и во вступлении она тоже листает реплики.
+        scene = IntroScene()
+        while scene.dialogue is None:
+            scene.update(1 / 30)
+        first = scene.dialogue.node.id
+        scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))  # дописать
+        self.assertEqual(scene.dialogue.node.id, first)
+        self.assertFalse(scene.dialogue.is_typing)
+        scene.handle_event(key(pygame.K_e, pygame.KSCAN_E, pygame.KEYUP))
+        scene.handle_event(key(ord("у"), pygame.KSCAN_E))  # русская раскладка — та же клавиша
+        self.assertNotEqual(scene.dialogue.node.id, first)  # дальше
+        for _ in range(100000):  # до вопроса Алисы — только клавишей E
+            dialogue = scene.dialogue
+            if dialogue is not None and dialogue.node.choices and not dialogue.is_typing:
+                break
+            if dialogue is not None and not dialogue.is_typing:
+                scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
+            else:
+                scene.update(1 / 60)
+        self.assertEqual(scene.dialogue.node.id, CHOICE_ID)
+        scene.handle_event(key(pygame.K_DOWN))
+        chosen = scene.dialogue.node.choices[1]
+        scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
+        scene.update(1 / 60)
+        self.assertIs(scene.choice, chosen)  # E выбрал выделенный ответ, а не первый
+
+
 class SequenceTest(IntroTestCase):
     def test_full_order_of_events(self) -> None:
         events = play_through(IntroScene())

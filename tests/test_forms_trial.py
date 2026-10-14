@@ -516,6 +516,17 @@ class LayoutTest(TrialTestCase):
         self.assertLessEqual(self.scene.alice.x, GOOSE_POSITION[0] - 20)  # спрайты почти не перекрываются
         self.assertEqual(self.scene.nearby().kind, "goose")  # но поговорить можно
 
+    def test_whole_cabinet_front_is_interactive(self) -> None:
+        # Шкаф шириной CABINET_WIDTH отзывается, где бы перед ним ни стояла Алиса, а не только по центру.
+        half = CABINETS[0].rect.width // 2
+        for cabinet in CABINETS:
+            for dx in (-half + 2, -half // 2, 0, half // 2, half - 2):
+                with self.subTest(cabinet=cabinet.section.id, dx=dx):
+                    stand_at(self.scene, (cabinet.x + dx, cabinet.point[1]))
+                    target = self.scene.nearby()
+                    self.assertIsNotNone(target)
+                    self.assertEqual(target.section, cabinet.section.id)
+
     def test_targets_do_not_overlap(self) -> None:
         for cabinet in CABINETS:
             stand_at(self.scene, cabinet.point)

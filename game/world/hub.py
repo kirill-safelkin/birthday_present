@@ -51,6 +51,7 @@ WALK_BOUNDS = pygame.Rect(10, 44, WIDTH - 20, STATUS_TOP - 4 - 44)
 SPAWN = (160, 158)  # точка появления Алисы — внизу площади
 TOAST_SECONDS = 3.0
 TOAST_PRIORITY_SECONDS = 2.0  # столько свежее сообщение (например, итог испытания) важнее подсказки у цели
+PORTAL_TOUCH = 6  # вплотную к порталу с любой стороны (по ногам Алисы) — тоже можно войти
 MOSAIC_CENTER = (160, 106)  # мозаика в центре площади
 MOSAIC_RADIUS = 12  # на таком расстоянии от центра (по ногам Алисы) с ней можно взаимодействовать
 # Гнёзда фрагментов в мозаике: каждый — со стороны своего портала.
@@ -172,8 +173,12 @@ class HubScene(Scene):
         candidates: list[tuple[float, Interaction]] = []
         x, y = self.alice.x, self.alice.y
         for portal in PORTALS:
+            # У дорожки (point) — как раньше; а подойдя к порталу сбоку, сверху или снизу,
+            # Алиса тоже может войти: портал отзывается, когда она стоит к нему вплотную.
             distance = math.dist((x, y), portal.point)
-            if distance <= portal.radius:
+            touch = _distance_to_rect((x, y), portal.rect)
+            if distance <= portal.radius or touch <= PORTAL_TOUCH:
+                distance = min(distance, touch)
                 done = " (пройдено)" if self.progress.is_completed(portal.id) else ""
                 prompt = f"{portal.name}{done}   E — войти"
                 candidates.append((distance, Interaction("portal", portal.id, prompt)))
@@ -427,6 +432,12 @@ def _draw_trial_icon(surface: pygame.Surface, trial_id: str, center: tuple[int, 
         pygame.draw.rect(surface, (248, 214, 228), (x - 7, y, 14, 6))
         pygame.draw.rect(surface, (252, 238, 214), (x - 5, y - 5, 10, 5))
         pygame.draw.circle(surface, (210, 40, 60), (x, y - 7), 2)
+
+
+def _distance_to_rect(point: tuple[float, float], rect: pygame.Rect) -> float:
+    x = min(max(point[0], rect.left), rect.right)
+    y = min(max(point[1], rect.top), rect.bottom)
+    return math.dist(point, (x, y))
 
 
 def _draw_fragment(surface: pygame.Surface, trial_id: str, center: tuple[int, int]) -> None:

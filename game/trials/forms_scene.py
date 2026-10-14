@@ -192,8 +192,11 @@ class FormsTrialScene(Scene):
         feet = (self.alice.x, self.alice.y)
         candidates: list[tuple[float, Target]] = []
         for cabinet in CABINETS:
-            distance = math.dist(feet, cabinet.point)
-            if distance <= CABINET_REACH:
+            # Перед любой частью шкафа, а не только перед его серединой: шкафы не соприкасаются,
+            # поэтому выбор раздела однозначен.
+            dx = abs(feet[0] - cabinet.x)
+            distance = abs(feet[1] - CABINET_POINT_Y)
+            if dx <= CABINET_WIDTH // 2 and distance <= CABINET_REACH:
                 candidates.append((distance, Target("cabinet", section=cabinet.section.id)))
         for index, x in enumerate(SLOT_XS):
             distance = math.dist(feet, (x, SLOT_Y))

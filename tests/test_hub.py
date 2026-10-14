@@ -258,6 +258,27 @@ class PortalTest(HubTestCase):
         self.assertIsNone(self.hub.active_trial)
         self.assertEqual(self.hub.status_text(), "Стрелки/WASD — идти   E — действие")
 
+    def test_portal_works_from_any_side_it_can_be_touched(self) -> None:
+        # Вплотную к порталу — сверху, снизу или сбоку — подсказка та же, что у дорожки.
+        for portal in PORTALS:
+            rect = portal.rect
+            spots = [(rect.centerx, rect.top), (rect.centerx, rect.bottom + 6),
+                     (rect.left - 6, rect.centery + 3), (rect.right + 6, rect.centery + 3)]
+            touched = 0
+            for x, y in spots:
+                if not self.hub.collision.is_free(x, y):
+                    continue  # с этой стороны к порталу не подойти (край площади или дорожка)
+                with self.subTest(trial=portal.id, spot=(x, y)):
+                    self.hub.alice.set_position(x, y)
+                    target = self.hub.nearby()
+                    self.assertIsNotNone(target)
+                    self.assertEqual((target.kind, target.target), ("portal", portal.id))
+                    touched += 1
+            self.assertGreaterEqual(touched, 1)
+        portal = PORTALS[0]  # а в паре шагов от портала — ничего
+        self.hub.alice.set_position(portal.rect.centerx, portal.rect.top - 10)
+        self.assertIsNone(self.hub.nearby())
+
     def test_interaction_radius(self) -> None:
         for portal in PORTALS:
             with self.subTest(trial=portal.id):

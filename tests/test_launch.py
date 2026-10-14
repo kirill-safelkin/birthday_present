@@ -124,6 +124,22 @@ class NormalLaunchTest(LaunchTestCase):
         self.press(pygame.K_BACKSPACE)  # а из испытания — обратно на ту же площадь
         self.assertIs(self.app.scenes.current, hub)
 
+    def test_lost_focus_with_a_held_key_does_not_leave_alice_walking(self) -> None:
+        # Зажатая стрелка, потом окно теряет фокус (Alt+Tab) — отпускание до игры может не дойти.
+        self.play_intro()
+        alice = self.app.scenes.current.alice
+        self.send(key(pygame.K_RIGHT, pygame.KSCAN_RIGHT))
+        self.app._update(0.2)
+        self.assertTrue(alice.is_moving)
+        self.send(pygame.event.Event(pygame.WINDOWFOCUSLOST))
+        x = alice.x
+        self.app._update(0.5)
+        self.assertEqual(alice.x, x)  # стоит
+        self.assertFalse(alice.is_moving)
+        self.send(key(pygame.K_RIGHT, pygame.KSCAN_RIGHT))  # вернулись и снова нажали — это новое нажатие
+        self.app._update(0.2)
+        self.assertGreater(alice.x, x)
+
     def test_escape_f11_and_window_close_work_as_before(self) -> None:
         self.press(pygame.K_F11)
         self.assertTrue(self.app.display.is_fullscreen)
