@@ -1,0 +1,313 @@
+{
+  "name": "chuchmek",
+  "frame_size": [
+    64,
+    64
+  ],
+  "grid": {
+    "columns": 4,
+    "rows": 4
+  },
+  "source": "chuchmek_source_sheet.png",
+  "notes": [
+    "Frames have been extracted from the generated 4x4 reference sheet and normalized to 64x64.",
+    "Disconnected decorative specks/effects outside the main character silhouette were removed when possible.",
+    "Review the talk and run sequences before using them as continuous loops; some generated frames are pose variants rather than true animation in-betweens."
+  ],
+  "frames": {
+    "idle": {
+      "row": 0,
+      "column": 0,
+      "index": 0,
+      "file": "frames/idle.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        33,
+        24,
+        252,
+        286
+      ]
+    },
+    "wink": {
+      "row": 0,
+      "column": 1,
+      "index": 1,
+      "file": "frames/wink.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        28,
+        25,
+        257,
+        285
+      ]
+    },
+    "curious_glance": {
+      "row": 0,
+      "column": 2,
+      "index": 2,
+      "file": "frames/curious_glance.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        33,
+        21,
+        252,
+        289
+      ]
+    },
+    "clipboard_confident": {
+      "row": 0,
+      "column": 3,
+      "index": 3,
+      "file": "frames/clipboard_confident.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        27,
+        24,
+        254,
+        286
+      ]
+    },
+    "talk_01": {
+      "row": 1,
+      "column": 0,
+      "index": 4,
+      "file": "frames/talk_01.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        31,
+        11,
+        254,
+        293
+      ]
+    },
+    "talk_02": {
+      "row": 1,
+      "column": 1,
+      "index": 5,
+      "file": "frames/talk_02.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        28,
+        14,
+        259,
+        290
+      ]
+    },
+    "talk_gesture": {
+      "row": 1,
+      "column": 2,
+      "index": 6,
+      "file": "frames/talk_gesture.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        28,
+        14,
+        263,
+        288
+      ]
+    },
+    "talk_excited": {
+      "row": 1,
+      "column": 3,
+      "index": 7,
+      "file": "frames/talk_excited.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        31,
+        14,
+        252,
+        288
+      ]
+    },
+    "confused": {
+      "row": 2,
+      "column": 0,
+      "index": 8,
+      "file": "frames/confused.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        39,
+        7,
+        263,
+        293
+      ]
+    },
+    "panicked": {
+      "row": 2,
+      "column": 1,
+      "index": 9,
+      "file": "frames/panicked.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        28,
+        7,
+        269,
+        290
+      ]
+    },
+    "arms_up_panic": {
+      "row": 2,
+      "column": 2,
+      "index": 10,
+      "file": "frames/arms_up_panic.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        38,
+        4,
+        264,
+        296
+      ]
+    },
+    "smug_wink": {
+      "row": 2,
+      "column": 3,
+      "index": 11,
+      "file": "frames/smug_wink.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        37,
+        15,
+        261,
+        285
+      ]
+    },
+    "run_right_01": {
+      "row": 3,
+      "column": 0,
+      "index": 12,
+      "file": "frames/run_right_01.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        47,
+        3,
+        241,
+        270
+      ]
+    },
+    "run_right_02": {
+      "row": 3,
+      "column": 1,
+      "index": 13,
+      "file": "frames/run_right_02.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        45,
+        0,
+        236,
+        276
+      ]
+    },
+    "run_right_03": {
+      "row": 3,
+      "column": 2,
+      "index": 14,
+      "file": "frames/run_right_03.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        39,
+        0,
+        233,
+        282
+      ]
+    },
+    "run_right_04": {
+      "row": 3,
+      "column": 3,
+      "index": 15,
+      "file": "frames/run_right_04.png",
+      "cell_size": [
+        64,
+        64
+      ],
+      "source_bbox": [
+        38,
+        0,
+        236,
+        282
+      ]
+    }
+  },
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle"
+      ],
+      "fps": 1,
+      "loop": true
+    },
+    "talk": {
+      "frames": [
+        "talk_01",
+        "talk_02",
+        "talk_gesture",
+        "talk_excited"
+      ],
+      "fps": 5,
+      "loop": true
+    },
+    "run_right": {
+      "frames": [
+        "run_right_01",
+        "run_right_02",
+        "run_right_03",
+        "run_right_04"
+      ],
+      "fps": 8,
+      "loop": true
+    }
+  },
+  "poses": {
+    "wink": "wink",
+    "curious": "curious_glance",
+    "confident": "clipboard_confident",
+    "confused": "confused",
+    "panic": "panicked",
+    "panic_arms_up": "arms_up_panic",
+    "smug": "smug_wink"
+  }
+}

@@ -1,0 +1,208 @@
+{
+  "format": 1,
+  "id": "goose_inspector",
+  "display_name": "Гусь-инспектор",
+  "source": {
+    "archive": "goose_inspector_sprite_assets.zip",
+    "id": "goose_inspector",
+    "manifest": "art/characters/goose_inspector/original/goose_inspector.json"
+  },
+  "frame_size": [
+    64,
+    64
+  ],
+  "atlas": {
+    "file": "goose_inspector_atlas_64px.png",
+    "columns": 4,
+    "rows": 3
+  },
+  "frames": [
+    {
+      "id": "idle",
+      "index": 0,
+      "file": "frames/00_idle.png",
+      "description": "Нейтральная поза",
+      "source_file": "00_idle.png"
+    },
+    {
+      "id": "inspect",
+      "index": 1,
+      "file": "frames/01_inspect.png",
+      "description": "Строго изучает бумаги",
+      "source_file": "01_inspect.png"
+    },
+    {
+      "id": "talk",
+      "index": 2,
+      "file": "frames/02_talk.png",
+      "description": "Говорит/объявляет решение",
+      "source_file": "02_talk.png"
+    },
+    {
+      "id": "question",
+      "index": 3,
+      "file": "frames/03_question.png",
+      "description": "Растерянность",
+      "source_file": "03_question.png"
+    },
+    {
+      "id": "stamp",
+      "index": 4,
+      "file": "frames/04_stamp.png",
+      "description": "Ставит печать",
+      "source_file": "04_stamp.png"
+    },
+    {
+      "id": "reject",
+      "index": 5,
+      "file": "frames/05_reject.png",
+      "description": "Отклоняет формуляр",
+      "source_file": "05_reject.png"
+    },
+    {
+      "id": "approve",
+      "index": 6,
+      "file": "frames/06_approve.png",
+      "description": "Одобряет формуляр",
+      "source_file": "06_approve.png"
+    },
+    {
+      "id": "write",
+      "index": 7,
+      "file": "frames/07_write.png",
+      "description": "Делает запись",
+      "source_file": "07_write.png"
+    },
+    {
+      "id": "read",
+      "index": 8,
+      "file": "frames/08_read.png",
+      "description": "Читает документ",
+      "source_file": "08_read.png"
+    },
+    {
+      "id": "profile_right",
+      "index": 9,
+      "file": "frames/09_profile_right.png",
+      "description": "Профиль вправо",
+      "source_file": "09_profile_right.png"
+    },
+    {
+      "id": "profile_left",
+      "index": 10,
+      "file": "frames/10_profile_left.png",
+      "description": "Профиль влево",
+      "source_file": "10_profile_left.png"
+    },
+    {
+      "id": "celebrate",
+      "index": 11,
+      "file": "frames/11_celebrate.png",
+      "description": "Радуется успешному оформлению",
+      "source_file": "11_celebrate.png"
+    }
+  ],
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "inspect": {
+      "frames": [
+        "inspect"
+      ],
+      "fps": 3,
+      "loop": false,
+      "draft": false
+    },
+    "talk": {
+      "frames": [
+        "talk"
+      ],
+      "fps": 3,
+      "loop": true,
+      "draft": false
+    },
+    "think": {
+      "frames": [
+        "question"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": false
+    },
+    "stamp": {
+      "frames": [
+        "stamp"
+      ],
+      "fps": 4,
+      "loop": false,
+      "draft": false
+    },
+    "reject": {
+      "frames": [
+        "reject"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": false
+    },
+    "approve": {
+      "frames": [
+        "approve"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": false
+    },
+    "write": {
+      "frames": [
+        "write"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "read": {
+      "frames": [
+        "read"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "profile_right": {
+      "frames": [
+        "profile_right"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "profile_left": {
+      "frames": [
+        "profile_left"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "celebrate": {
+      "frames": [
+        "celebrate"
+      ],
+      "fps": 3,
+      "loop": false,
+      "draft": false
+    }
+  },
+  "notes": [
+    "Компактный комплект из 12 поз для второстепенного NPC.",
+    "Большинство поз — одноразовые сюжетные действия, не полноценные циклы. Для ходьбы доступны только одиночные профильные позы; при необходимости добавить цикл позже.",
+    "Атлас RGBA с прозрачным фоном; preview-файл содержит только шахматную подложку и номера."
+  ]
+}

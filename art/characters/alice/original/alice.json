@@ -1,0 +1,149 @@
+{
+  "character": "alice",
+  "frame_size": [
+    64,
+    64
+  ],
+  "atlas_size": [
+    256,
+    512
+  ],
+  "grid": {
+    "columns": 4,
+    "rows": 8,
+    "cell_size": [
+      64,
+      64
+    ]
+  },
+  "source_note": "Atlas normalized to transparent 64x64 cells. Side-walk rows were replaced with isolated, evenly sampled frames from a separate directional walk generation, ensuring left/right faces opposite directions. Vertical gait from the generated source remains subtler and should be reviewed at game scale.",
+  "animations": {
+    "idle_down": {
+      "row": 0,
+      "start_col": 0,
+      "frame_count": 1,
+      "fps": 2,
+      "loop": true,
+      "files": [
+        "frames/idle_down/000.png"
+      ]
+    },
+    "idle_right": {
+      "row": 0,
+      "start_col": 1,
+      "frame_count": 1,
+      "fps": 2,
+      "loop": true,
+      "files": [
+        "frames/idle_right/000.png"
+      ]
+    },
+    "idle_up": {
+      "row": 0,
+      "start_col": 2,
+      "frame_count": 1,
+      "fps": 2,
+      "loop": true,
+      "files": [
+        "frames/idle_up/000.png"
+      ]
+    },
+    "idle_left": {
+      "row": 0,
+      "start_col": 3,
+      "frame_count": 1,
+      "fps": 2,
+      "loop": true,
+      "files": [
+        "frames/idle_left/000.png"
+      ]
+    },
+    "walk_down": {
+      "row": 1,
+      "start_col": 0,
+      "frame_count": 4,
+      "fps": 8,
+      "loop": true,
+      "files": [
+        "frames/walk_down/000.png",
+        "frames/walk_down/001.png",
+        "frames/walk_down/002.png",
+        "frames/walk_down/003.png"
+      ]
+    },
+    "walk_left": {
+      "row": 2,
+      "start_col": 0,
+      "frame_count": 4,
+      "fps": 8,
+      "loop": true,
+      "files": [
+        "frames/walk_left/000.png",
+        "frames/walk_left/001.png",
+        "frames/walk_left/002.png",
+        "frames/walk_left/003.png"
+      ]
+    },
+    "walk_right": {
+      "row": 3,
+      "start_col": 0,
+      "frame_count": 4,
+      "fps": 8,
+      "loop": true,
+      "files": [
+        "frames/walk_right/000.png",
+        "frames/walk_right/001.png",
+        "frames/walk_right/002.png",
+        "frames/walk_right/003.png"
+      ]
+    },
+    "walk_up": {
+      "row": 4,
+      "start_col": 0,
+      "frame_count": 4,
+      "fps": 8,
+      "loop": true,
+      "files": [
+        "frames/walk_up/000.png",
+        "frames/walk_up/001.png",
+        "frames/walk_up/002.png",
+        "frames/walk_up/003.png"
+      ]
+    },
+    "talk_down": {
+      "row": 5,
+      "start_col": 0,
+      "frame_count": 2,
+      "fps": 6,
+      "loop": true,
+      "files": [
+        "frames/talk_down/000.png",
+        "frames/talk_down/001.png"
+      ]
+    },
+    "react_down": {
+      "row": 6,
+      "start_col": 0,
+      "frame_count": 3,
+      "fps": 5,
+      "loop": false,
+      "files": [
+        "frames/react_down/000.png",
+        "frames/react_down/001.png",
+        "frames/react_down/002.png"
+      ]
+    },
+    "happy_down": {
+      "row": 7,
+      "start_col": 0,
+      "frame_count": 3,
+      "fps": 5,
+      "loop": false,
+      "files": [
+        "frames/happy_down/000.png",
+        "frames/happy_down/001.png",
+        "frames/happy_down/002.png"
+      ]
+    }
+  }
+}

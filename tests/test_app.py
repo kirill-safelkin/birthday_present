@@ -16,6 +16,8 @@ from pathlib import Path  # noqa: E402
 import pygame  # noqa: E402
 
 from game.core.app import App  # noqa: E402
+from game.debug.demo_dialogue import DEMO_SCRIPT, QUESTION_ID  # noqa: E402
+from game.dialogue.model import DialogueController  # noqa: E402
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
@@ -123,6 +125,58 @@ class AppEventsTest(unittest.TestCase):
         self.app.run()
         self.assertTrue(self.app.display.is_fullscreen)
         self.assertIsNotNone(self.app.screen.animation_demo)  # ESC закрыл игру, а не тест анимации
+
+    def test_sprite_gallery_opens_and_returns_to_debug_screen(self) -> None:
+        pygame.event.post(key_down(pygame.K_p, pygame.KSCAN_P))
+        post_keys(pygame.K_RIGHT, pygame.K_DOWN, pygame.K_BACKSPACE)
+        pygame.event.post(key_down(pygame.K_a, pygame.KSCAN_A))  # тест анимации после галереи открывается
+        post_keys(pygame.K_BACKSPACE)
+        pygame.event.post(key_down(pygame.K_d, pygame.KSCAN_D))  # и диалог тоже
+        post_keys(pygame.K_ESCAPE)
+        self.app.run()
+        self.assertIsNone(self.app.screen.sprite_gallery)
+        self.assertIsNone(self.app.screen.animation_demo)
+        self.assertIsNotNone(self.app.screen.dialogue)
+
+    def test_sprite_gallery_key_works_with_non_latin_layout(self) -> None:
+        pygame.event.post(key_down(ord("з"), pygame.KSCAN_P))
+        post_keys(pygame.K_ESCAPE)
+        self.app.run()
+        self.assertIsNotNone(self.app.screen.sprite_gallery)
+
+    def test_d_and_a_in_sprite_gallery_do_not_open_other_screens(self) -> None:
+        pygame.event.post(key_down(pygame.K_p, pygame.KSCAN_P))
+        pygame.event.post(key_down(pygame.K_d, pygame.KSCAN_D))
+        pygame.event.post(key_down(pygame.K_a, pygame.KSCAN_A))
+        post_keys(pygame.K_ESCAPE)
+        self.app.run()
+        self.assertIsNone(self.app.screen.dialogue)
+        self.assertIsNone(self.app.screen.animation_demo)
+        self.assertIsNotNone(self.app.screen.sprite_gallery)
+
+    def test_escape_and_f11_still_work_in_sprite_gallery(self) -> None:
+        pygame.event.post(key_down(pygame.K_p, pygame.KSCAN_P))
+        post_keys(pygame.K_F11, pygame.K_ESCAPE)
+        self.app.run()
+        self.assertTrue(self.app.display.is_fullscreen)
+        self.assertIsNotNone(self.app.screen.sprite_gallery)  # ESC закрыл игру, а не галерею
+
+    def test_window_close_works_in_sprite_gallery(self) -> None:
+        pygame.event.post(key_down(pygame.K_p, pygame.KSCAN_P))
+        pygame.event.post(pygame.event.Event(pygame.QUIT))
+        self.app.run()
+        self.assertFalse(self.app.running)
+
+    def test_debug_screen_texts_fit_on_screen(self) -> None:
+        screen = self.app.screen
+        # Самый длинный итог диалога: две строки, в ответе — самый длинный вариант.
+        dialogue = DialogueController(DEMO_SCRIPT)
+        dialogue.answers[QUESTION_ID] = max(DEMO_SCRIPT.nodes[QUESTION_ID].choices, key=lambda choice: len(choice.text))
+        screen._finish_dialogue(dialogue)
+        self.assertEqual(len(screen._result_labels), 2)
+        canvas = pygame.Rect((0, 0), self.app.display.canvas.get_size())
+        for _, rect in screen._labels + screen._result_labels:
+            self.assertTrue(canvas.contains(rect), rect)
 
     def test_window_close_works_in_animation_demo(self) -> None:
         pygame.event.post(key_down(pygame.K_a, pygame.KSCAN_A))

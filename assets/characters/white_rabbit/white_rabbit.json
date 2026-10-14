@@ -1,0 +1,212 @@
+{
+  "format": 1,
+  "id": "white_rabbit",
+  "display_name": "Белый Кролик",
+  "source": {
+    "archive": "white_rabbit_sprite_assets.zip",
+    "id": "white_rabbit",
+    "manifest": "art/characters/white_rabbit/original/white_rabbit.json"
+  },
+  "frame_size": [
+    64,
+    64
+  ],
+  "atlas": {
+    "file": "white_rabbit_atlas_64px.png",
+    "columns": 4,
+    "rows": 4
+  },
+  "frames": [
+    {
+      "id": "idle_front",
+      "index": 0,
+      "file": "frames/00_idle_front.png",
+      "description": "Белый Кролик стоит с карманными часами",
+      "source_file": "frames/00_idle_front.png"
+    },
+    {
+      "id": "checks_watch_happy",
+      "index": 1,
+      "file": "frames/01_checks_watch_happy.png",
+      "description": "Смотрит на часы и улыбается",
+      "source_file": "frames/01_checks_watch_happy.png"
+    },
+    {
+      "id": "hurries_pointing",
+      "index": 2,
+      "file": "frames/02_hurries_pointing.png",
+      "description": "Торопливо указывает вперёд",
+      "source_file": "frames/02_hurries_pointing.png"
+    },
+    {
+      "id": "confused_watch",
+      "index": 3,
+      "file": "frames/03_confused_watch.png",
+      "description": "Растерянно смотрит на часы",
+      "source_file": "frames/03_confused_watch.png"
+    },
+    {
+      "id": "annoyed_watch",
+      "index": 4,
+      "file": "frames/04_annoyed_watch.png",
+      "description": "Сердится из-за опоздания",
+      "source_file": "frames/04_annoyed_watch.png"
+    },
+    {
+      "id": "panics_watch",
+      "index": 5,
+      "file": "frames/05_panics_watch.png",
+      "description": "Паникует, глядя на часы",
+      "source_file": "frames/05_panics_watch.png"
+    },
+    {
+      "id": "run_right_1",
+      "index": 6,
+      "file": "frames/06_run_right_1.png",
+      "description": "Бег вправо — кадр 1",
+      "source_file": "frames/06_run_right_1.png"
+    },
+    {
+      "id": "run_right_2",
+      "index": 7,
+      "file": "frames/07_run_right_2.png",
+      "description": "Бег вправо — кадр 2",
+      "source_file": "frames/07_run_right_2.png"
+    },
+    {
+      "id": "run_right_3",
+      "index": 8,
+      "file": "frames/08_run_right_3.png",
+      "description": "Бег вправо — кадр 3",
+      "source_file": "frames/08_run_right_3.png"
+    },
+    {
+      "id": "run_right_4",
+      "index": 9,
+      "file": "frames/09_run_right_4.png",
+      "description": "Бег вправо — кадр 4",
+      "source_file": "frames/09_run_right_4.png"
+    },
+    {
+      "id": "panic_gasp",
+      "index": 10,
+      "file": "frames/10_panic_gasp.png",
+      "description": "Вскрикивает от паники",
+      "source_file": "frames/10_panic_gasp.png"
+    },
+    {
+      "id": "exhausted_rest",
+      "index": 11,
+      "file": "frames/11_exhausted_rest.png",
+      "description": "Остановился перевести дух",
+      "source_file": "frames/11_exhausted_rest.png"
+    },
+    {
+      "id": "idle_seated",
+      "index": 12,
+      "file": "frames/12_idle_seated.png",
+      "description": "Сидит с часами",
+      "source_file": "frames/12_idle_seated.png"
+    },
+    {
+      "id": "reads_schedule",
+      "index": 13,
+      "file": "frames/13_reads_schedule.png",
+      "description": "Проверяет свиток или расписание",
+      "source_file": "frames/13_reads_schedule.png"
+    },
+    {
+      "id": "confident_point",
+      "index": 14,
+      "file": "frames/14_confident_point.png",
+      "description": "Самоуверенно указывает направление",
+      "source_file": "frames/14_confident_point.png"
+    },
+    {
+      "id": "back_view",
+      "index": 15,
+      "file": "frames/15_back_view.png",
+      "description": "Вид со спины с сумкой",
+      "source_file": "frames/15_back_view.png"
+    }
+  ],
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle_front"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "check_watch": {
+      "frames": [
+        "checks_watch_happy",
+        "confused_watch",
+        "annoyed_watch"
+      ],
+      "fps": 3,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "JSON помечен в README как черновая схема действий; в группе разные сюжетные позы"
+    },
+    "talk_or_point": {
+      "frames": [
+        "hurries_pointing",
+        "confident_point"
+      ],
+      "fps": 3,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "JSON помечен в README как черновая схема действий; в группе разные сюжетные позы"
+    },
+    "panic": {
+      "frames": [
+        "panics_watch",
+        "panic_gasp"
+      ],
+      "fps": 5,
+      "loop": false,
+      "draft": true,
+      "draft_reason": "JSON помечен в README как черновая схема действий; в группе разные сюжетные позы"
+    },
+    "run_right": {
+      "frames": [
+        "run_right_1",
+        "run_right_2",
+        "run_right_3",
+        "run_right_4"
+      ],
+      "fps": 10,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "README: беговой цикл нужно проверить в игре и при необходимости заменить кадры"
+    },
+    "rest": {
+      "frames": [
+        "exhausted_rest",
+        "idle_seated"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "JSON помечен в README как черновая схема действий; в группе разные сюжетные позы"
+    },
+    "read_schedule": {
+      "frames": [
+        "reads_schedule"
+      ],
+      "fps": 1,
+      "loop": true,
+      "draft": false
+    },
+    "back_view": {
+      "frames": [
+        "back_view"
+      ],
+      "fps": 1,
+      "loop": true,
+      "draft": false
+    }
+  }
+}

@@ -1,0 +1,220 @@
+{
+  "format": 1,
+  "id": "cat_chef",
+  "display_name": "Кот-повар",
+  "source": {
+    "archive": "cat_chef_sprite_assets.zip",
+    "id": "cat_chef",
+    "manifest": "art/characters/cat_chef/original/cat_chef.json"
+  },
+  "frame_size": [
+    64,
+    64
+  ],
+  "atlas": {
+    "file": "cat_chef_atlas_64px.png",
+    "columns": 4,
+    "rows": 4
+  },
+  "frames": [
+    {
+      "id": "idle_grumpy",
+      "index": 0,
+      "file": "frames/00_idle_grumpy.png",
+      "description": "Стоит со скрещёнными лапами и слегка грозным взглядом",
+      "source_file": "frames/00_idle_grumpy.png"
+    },
+    {
+      "id": "happy_sushi_tray",
+      "index": 1,
+      "file": "frames/01_happy_sushi_tray.png",
+      "description": "Довольно показывает поднос с суши",
+      "source_file": "frames/01_happy_sushi_tray.png"
+    },
+    {
+      "id": "stern_arms_crossed",
+      "index": 2,
+      "file": "frames/02_stern_arms_crossed.png",
+      "description": "Складывает лапы, недовольно смотрит",
+      "source_file": "frames/02_stern_arms_crossed.png"
+    },
+    {
+      "id": "playful_greeting",
+      "index": 3,
+      "file": "frames/03_playful_greeting.png",
+      "description": "Подмигивает и приветствует лапой",
+      "source_file": "frames/03_playful_greeting.png"
+    },
+    {
+      "id": "slice_salmon_1",
+      "index": 4,
+      "file": "frames/04_slice_salmon_1.png",
+      "description": "Начинает нарезать лосося",
+      "source_file": "frames/04_slice_salmon_1.png"
+    },
+    {
+      "id": "slice_salmon_2",
+      "index": 5,
+      "file": "frames/05_slice_salmon_2.png",
+      "description": "Режет лосося на доске",
+      "source_file": "frames/05_slice_salmon_2.png"
+    },
+    {
+      "id": "arrange_sushi",
+      "index": 6,
+      "file": "frames/06_arrange_sushi.png",
+      "description": "Раскладывает суши на подносе",
+      "source_file": "frames/06_arrange_sushi.png"
+    },
+    {
+      "id": "present_sushi",
+      "index": 7,
+      "file": "frames/07_present_sushi.png",
+      "description": "Гордо подаёт готовые суши",
+      "source_file": "frames/07_present_sushi.png"
+    },
+    {
+      "id": "angry_shout",
+      "index": 8,
+      "file": "frames/08_angry_shout.png",
+      "description": "Возмущённо кричит",
+      "source_file": "frames/08_angry_shout.png"
+    },
+    {
+      "id": "taste_sushi",
+      "index": 9,
+      "file": "frames/09_taste_sushi.png",
+      "description": "Пробует кусочек суши",
+      "source_file": "frames/09_taste_sushi.png"
+    },
+    {
+      "id": "sit_resting",
+      "index": 10,
+      "file": "frames/10_sit_resting.png",
+      "description": "Сидит и отдыхает",
+      "source_file": "frames/10_sit_resting.png"
+    },
+    {
+      "id": "stern_side_pose",
+      "index": 11,
+      "file": "frames/11_stern_side_pose.png",
+      "description": "Сдержанно смотрит в сторону",
+      "source_file": "frames/11_stern_side_pose.png"
+    },
+    {
+      "id": "walk_right_tray_1",
+      "index": 12,
+      "file": "frames/12_walk_right_tray_1.png",
+      "description": "Движется вправо с подносом",
+      "source_file": "frames/12_walk_right_tray_1.png"
+    },
+    {
+      "id": "walk_right_angled",
+      "index": 13,
+      "file": "frames/13_walk_right_angled.png",
+      "description": "Движется в три четверти со спины",
+      "source_file": "frames/13_walk_right_angled.png"
+    },
+    {
+      "id": "back_view",
+      "index": 14,
+      "file": "frames/14_back_view.png",
+      "description": "Вид со спины",
+      "source_file": "frames/14_back_view.png"
+    },
+    {
+      "id": "walk_right_tray_2",
+      "index": 15,
+      "file": "frames/15_walk_right_tray_2.png",
+      "description": "Движется вправо с подносом, другая поза",
+      "source_file": "frames/15_walk_right_tray_2.png"
+    }
+  ],
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle_grumpy",
+        "stern_arms_crossed"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "Предварительная группа из разных сюжетных поз (по README), а не фазы одного цикла"
+    },
+    "greet": {
+      "frames": [
+        "playful_greeting",
+        "happy_sushi_tray"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": true,
+      "draft_reason": "Предварительная группа из разных сюжетных поз (по README), а не фазы одного цикла"
+    },
+    "prepare_sushi": {
+      "frames": [
+        "slice_salmon_1",
+        "slice_salmon_2",
+        "arrange_sushi"
+      ],
+      "fps": 4,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "Предварительная группа (README): цикл приготовления суши не проверен в игре"
+    },
+    "serve_sushi": {
+      "frames": [
+        "happy_sushi_tray",
+        "present_sushi"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": true,
+      "draft_reason": "Предварительная группа из разных сюжетных поз (по README), а не фазы одного цикла"
+    },
+    "eat": {
+      "frames": [
+        "taste_sushi"
+      ],
+      "fps": 1,
+      "loop": false,
+      "draft": false
+    },
+    "react_angry": {
+      "frames": [
+        "angry_shout",
+        "sit_resting"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": true,
+      "draft_reason": "Предварительная группа из разных сюжетных поз (по README), а не фазы одного цикла"
+    },
+    "move_with_tray": {
+      "frames": [
+        "walk_right_tray_1",
+        "walk_right_angled",
+        "walk_right_tray_2"
+      ],
+      "fps": 3,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "README: черновой набор движения, нужно просмотреть в Pygame"
+    },
+    "back_view": {
+      "frames": [
+        "back_view"
+      ],
+      "fps": 1,
+      "loop": true,
+      "draft": false
+    }
+  },
+  "notes": [
+    "Один персонаж на отдельном спрайт-листе.",
+    "Шахматный фон был удалён; итоговый атлас — RGBA с альфа-прозрачностью.",
+    "Все кадры приведены к 64×64 и выровнены по нижней точке.",
+    "Большинство кадров — сюжетные позы, не все группы являются полноценными плавными циклами.",
+    "Перед подключением проверьте читаемость суши и силуэта на масштабе 64×64."
+  ]
+}

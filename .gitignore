@@ -33,3 +33,7 @@ htmlcov/
 *.bak
 build/
 dist/
+
+# Тяжёлые исходные генерации персонажей (2–3 МБ): лежат в art/ только локально
+art/characters/*/*_source_sheet.png
+art/characters/*/*_with_checkerboard.png

@@ -1,0 +1,146 @@
+{
+  "name": "leo",
+  "display_name": "Лео",
+  "format": "PNG RGBA",
+  "frame_size": [
+    64,
+    64
+  ],
+  "grid": {
+    "columns": 4,
+    "rows": 4,
+    "order": "left-to-right, top-to-bottom"
+  },
+  "frame_count": 16,
+  "note": "Набор сюжетных поз и реакций для младенца, а не 16 последовательных кадров одной анимации. Лист собран выделением основных силуэтов из генерации и нормализацией в общие ячейки 64×64.",
+  "poses": [
+    {
+      "index": 0,
+      "file": "frames/frame_00.png",
+      "id": "sit_idle",
+      "description": "Спокойно сидит",
+      "row": 0,
+      "column": 0
+    },
+    {
+      "index": 1,
+      "file": "frames/frame_01.png",
+      "id": "laugh",
+      "description": "Смеётся",
+      "row": 0,
+      "column": 1
+    },
+    {
+      "index": 2,
+      "file": "frames/frame_02.png",
+      "id": "cuddle_teddy",
+      "description": "Обнимает мишку",
+      "row": 0,
+      "column": 2
+    },
+    {
+      "index": 3,
+      "file": "frames/frame_03.png",
+      "id": "arms_up",
+      "description": "Радостно тянет руки вверх",
+      "row": 0,
+      "column": 3
+    },
+    {
+      "index": 4,
+      "file": "frames/frame_04.png",
+      "id": "tummy_time",
+      "description": "Лежит на животе и смотрит вперёд",
+      "row": 1,
+      "column": 0
+    },
+    {
+      "index": 5,
+      "file": "frames/frame_05.png",
+      "id": "crawl_try",
+      "description": "Пробует ползти",
+      "row": 1,
+      "column": 1
+    },
+    {
+      "index": 6,
+      "file": "frames/frame_06.png",
+      "id": "reach",
+      "description": "Тянется к чему-то",
+      "row": 1,
+      "column": 2
+    },
+    {
+      "index": 7,
+      "file": "frames/frame_07.png",
+      "id": "nap_pillow",
+      "description": "Дремлет на подушке",
+      "row": 1,
+      "column": 3
+    },
+    {
+      "index": 8,
+      "file": "frames/frame_08.png",
+      "id": "cry",
+      "description": "Плачет",
+      "row": 2,
+      "column": 0
+    },
+    {
+      "index": 9,
+      "file": "frames/frame_09.png",
+      "id": "wipe_tears",
+      "description": "Трёт глаза и плачет",
+      "row": 2,
+      "column": 1
+    },
+    {
+      "index": 10,
+      "file": "frames/frame_10.png",
+      "id": "frown",
+      "description": "Сердится",
+      "row": 2,
+      "column": 2
+    },
+    {
+      "index": 11,
+      "file": "frames/frame_11.png",
+      "id": "surprised",
+      "description": "Удивлён",
+      "row": 2,
+      "column": 3
+    },
+    {
+      "index": 12,
+      "file": "frames/frame_12.png",
+      "id": "sleep_blanket",
+      "description": "Спит под одеялом",
+      "row": 3,
+      "column": 0
+    },
+    {
+      "index": 13,
+      "file": "frames/frame_13.png",
+      "id": "sleep_teddy",
+      "description": "Спит с мишкой",
+      "row": 3,
+      "column": 1
+    },
+    {
+      "index": 14,
+      "file": "frames/frame_14.png",
+      "id": "play_rattle",
+      "description": "Играет с погремушкой",
+      "row": 3,
+      "column": 2
+    },
+    {
+      "index": 15,
+      "file": "frames/frame_15.png",
+      "id": "drink_bottle",
+      "description": "Пьёт из бутылочки",
+      "row": 3,
+      "column": 3
+    }
+  ]
+}

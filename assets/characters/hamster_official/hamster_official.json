@@ -1,0 +1,251 @@
+{
+  "format": 1,
+  "id": "hamster_official",
+  "display_name": "Хомяк-чиновник",
+  "source": {
+    "archive": "hamster_clerk_sprite_assets.zip",
+    "id": "hamster_clerk",
+    "manifest": "art/characters/hamster_official/original/hamster_clerk.json"
+  },
+  "frame_size": [
+    64,
+    64
+  ],
+  "atlas": {
+    "file": "hamster_official_atlas_64px.png",
+    "columns": 4,
+    "rows": 4
+  },
+  "frames": [
+    {
+      "id": "idle",
+      "index": 0,
+      "file": "frames/00_idle.png",
+      "description": "Нейтральная поза с папками",
+      "source_file": "frames/00_idle.png"
+    },
+    {
+      "id": "happy",
+      "index": 1,
+      "file": "frames/01_happy.png",
+      "description": "Довольная улыбка",
+      "source_file": "frames/01_happy.png"
+    },
+    {
+      "id": "review_clipboard",
+      "index": 2,
+      "file": "frames/02_review_clipboard.png",
+      "description": "Проверяет документы на планшете",
+      "source_file": "frames/02_review_clipboard.png"
+    },
+    {
+      "id": "shocked_document",
+      "index": 3,
+      "file": "frames/03_shocked_document.png",
+      "description": "Удивлён документом",
+      "source_file": "frames/03_shocked_document.png"
+    },
+    {
+      "id": "thinking",
+      "index": 4,
+      "file": "frames/04_thinking.png",
+      "description": "Задумался над правилом",
+      "source_file": "frames/04_thinking.png"
+    },
+    {
+      "id": "carry_papers",
+      "index": 5,
+      "file": "frames/05_carry_papers.png",
+      "description": "Несёт стопку бумаг",
+      "source_file": "frames/05_carry_papers.png"
+    },
+    {
+      "id": "stamp_documents",
+      "index": 6,
+      "file": "frames/06_stamp_documents.png",
+      "description": "Ставит печать на документы",
+      "source_file": "frames/06_stamp_documents.png"
+    },
+    {
+      "id": "inspect_magnifier",
+      "index": 7,
+      "file": "frames/07_inspect_magnifier.png",
+      "description": "Изучает документ с лупой",
+      "source_file": "frames/07_inspect_magnifier.png"
+    },
+    {
+      "id": "exhausted_at_desk",
+      "index": 8,
+      "file": "frames/08_exhausted_at_desk.png",
+      "description": "Заснул среди бумаг",
+      "source_file": "frames/08_exhausted_at_desk.png"
+    },
+    {
+      "id": "approve_document",
+      "index": 9,
+      "file": "frames/09_approve_document.png",
+      "description": "Одобряет документ с печатью",
+      "source_file": "frames/09_approve_document.png"
+    },
+    {
+      "id": "angry",
+      "index": 10,
+      "file": "frames/10_angry.png",
+      "description": "Недовольный, руки скрещены",
+      "source_file": "frames/10_angry.png"
+    },
+    {
+      "id": "pointing",
+      "index": 11,
+      "file": "frames/11_pointing.png",
+      "description": "Указывает на правило",
+      "source_file": "frames/11_pointing.png"
+    },
+    {
+      "id": "holding_paper_stack",
+      "index": 12,
+      "file": "frames/12_holding_paper_stack.png",
+      "description": "Держит большую стопку бумаг",
+      "source_file": "frames/12_holding_paper_stack.png"
+    },
+    {
+      "id": "walk_side_papers_a",
+      "index": 13,
+      "file": "frames/13_walk_side_papers_a.png",
+      "description": "Боковая поза с бумагами, шаг",
+      "source_file": "frames/13_walk_side_papers_a.png"
+    },
+    {
+      "id": "back_view",
+      "index": 14,
+      "file": "frames/14_back_view.png",
+      "description": "Вид со спины",
+      "source_file": "frames/14_back_view.png"
+    },
+    {
+      "id": "walk_side_papers_b",
+      "index": 15,
+      "file": "frames/15_walk_side_papers_b.png",
+      "description": "Боковая поза с бумагами, второй шаг",
+      "source_file": "frames/15_walk_side_papers_b.png"
+    }
+  ],
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "happy": {
+      "frames": [
+        "happy"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": false
+    },
+    "review": {
+      "frames": [
+        "review_clipboard",
+        "inspect_magnifier"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": true,
+      "draft_reason": "Предварительная группа из разных сюжетных поз (по README), а не фазы одного цикла"
+    },
+    "surprised": {
+      "frames": [
+        "shocked_document"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": false
+    },
+    "think": {
+      "frames": [
+        "thinking"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": false
+    },
+    "carry_papers": {
+      "frames": [
+        "carry_papers",
+        "holding_paper_stack"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": true,
+      "draft_reason": "Предварительная группа из разных сюжетных поз (по README), а не фазы одного цикла"
+    },
+    "stamp": {
+      "frames": [
+        "stamp_documents"
+      ],
+      "fps": 4,
+      "loop": false,
+      "draft": false
+    },
+    "sleep": {
+      "frames": [
+        "exhausted_at_desk"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "approve": {
+      "frames": [
+        "approve_document"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": false
+    },
+    "angry": {
+      "frames": [
+        "angry"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": false
+    },
+    "point": {
+      "frames": [
+        "pointing"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": false
+    },
+    "walk_side_papers": {
+      "frames": [
+        "walk_side_papers_a",
+        "walk_side_papers_b"
+      ],
+      "fps": 4,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "README: черновая пара боковых поз, проверить в движении"
+    },
+    "back_view": {
+      "frames": [
+        "back_view"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    }
+  },
+  "notes": [
+    "Атлас технически нормализован до ячеек 64×64 px.",
+    "Исходная генерация содержала 5×4 композицию; 16 выбранных поз перенесены в 4×4 атлас.",
+    "Наборы кадров являются преимущественно сюжетными позами, а не полноценными длинными циклами.",
+    "Группа walk_side_papers — предварительная пара боковых поз; проверить визуально в Pygame."
+  ]
+}

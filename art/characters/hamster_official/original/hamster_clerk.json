@@ -1,0 +1,199 @@
+{
+  "character": "hamster_clerk",
+  "display_name": "Хомяк-чиновник",
+  "frame_size": [
+    64,
+    64
+  ],
+  "atlas": "hamster_clerk_atlas_64px.png",
+  "grid": {
+    "columns": 4,
+    "rows": 4,
+    "frames": 16,
+    "order": "слева направо, сверху вниз"
+  },
+  "frames": [
+    {
+      "index": 0,
+      "file": "frames/00_idle.png",
+      "description": "Нейтральная поза с папками"
+    },
+    {
+      "index": 1,
+      "file": "frames/01_happy.png",
+      "description": "Довольная улыбка"
+    },
+    {
+      "index": 2,
+      "file": "frames/02_review_clipboard.png",
+      "description": "Проверяет документы на планшете"
+    },
+    {
+      "index": 3,
+      "file": "frames/03_shocked_document.png",
+      "description": "Удивлён документом"
+    },
+    {
+      "index": 4,
+      "file": "frames/04_thinking.png",
+      "description": "Задумался над правилом"
+    },
+    {
+      "index": 5,
+      "file": "frames/05_carry_papers.png",
+      "description": "Несёт стопку бумаг"
+    },
+    {
+      "index": 6,
+      "file": "frames/06_stamp_documents.png",
+      "description": "Ставит печать на документы"
+    },
+    {
+      "index": 7,
+      "file": "frames/07_inspect_magnifier.png",
+      "description": "Изучает документ с лупой"
+    },
+    {
+      "index": 8,
+      "file": "frames/08_exhausted_at_desk.png",
+      "description": "Заснул среди бумаг"
+    },
+    {
+      "index": 9,
+      "file": "frames/09_approve_document.png",
+      "description": "Одобряет документ с печатью"
+    },
+    {
+      "index": 10,
+      "file": "frames/10_angry.png",
+      "description": "Недовольный, руки скрещены"
+    },
+    {
+      "index": 11,
+      "file": "frames/11_pointing.png",
+      "description": "Указывает на правило"
+    },
+    {
+      "index": 12,
+      "file": "frames/12_holding_paper_stack.png",
+      "description": "Держит большую стопку бумаг"
+    },
+    {
+      "index": 13,
+      "file": "frames/13_walk_side_papers_a.png",
+      "description": "Боковая поза с бумагами, шаг"
+    },
+    {
+      "index": 14,
+      "file": "frames/14_back_view.png",
+      "description": "Вид со спины"
+    },
+    {
+      "index": 15,
+      "file": "frames/15_walk_side_papers_b.png",
+      "description": "Боковая поза с бумагами, второй шаг"
+    }
+  ],
+  "animations": {
+    "idle": {
+      "frames": [
+        0
+      ],
+      "fps": 2,
+      "loop": true
+    },
+    "happy": {
+      "frames": [
+        1
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "review": {
+      "frames": [
+        2,
+        7
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "surprised": {
+      "frames": [
+        3
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "think": {
+      "frames": [
+        4
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "carry_papers": {
+      "frames": [
+        5,
+        12
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "stamp": {
+      "frames": [
+        6
+      ],
+      "fps": 4,
+      "loop": false
+    },
+    "sleep": {
+      "frames": [
+        8
+      ],
+      "fps": 2,
+      "loop": true
+    },
+    "approve": {
+      "frames": [
+        9
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "angry": {
+      "frames": [
+        10
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "point": {
+      "frames": [
+        11
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "walk_side_papers": {
+      "frames": [
+        13,
+        15
+      ],
+      "fps": 4,
+      "loop": true
+    },
+    "back_view": {
+      "frames": [
+        14
+      ],
+      "fps": 2,
+      "loop": true
+    }
+  },
+  "notes": [
+    "Атлас технически нормализован до ячеек 64×64 px.",
+    "Исходная генерация содержала 5×4 композицию; 16 выбранных поз перенесены в 4×4 атлас.",
+    "Наборы кадров являются преимущественно сюжетными позами, а не полноценными длинными циклами.",
+    "Группа walk_side_papers — предварительная пара боковых поз; проверить визуально в Pygame."
+  ]
+}

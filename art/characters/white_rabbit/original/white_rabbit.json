@@ -1,0 +1,211 @@
+{
+  "name": "white_rabbit",
+  "frame_size": [
+    64,
+    64
+  ],
+  "grid": [
+    4,
+    4
+  ],
+  "source_size": [
+    1536,
+    1024
+  ],
+  "animations": {
+    "idle": {
+      "frames": [
+        0
+      ],
+      "fps": 2,
+      "loop": true
+    },
+    "check_watch": {
+      "frames": [
+        1,
+        3,
+        4
+      ],
+      "fps": 3,
+      "loop": true
+    },
+    "talk_or_point": {
+      "frames": [
+        2,
+        14
+      ],
+      "fps": 3,
+      "loop": true
+    },
+    "panic": {
+      "frames": [
+        5,
+        10
+      ],
+      "fps": 5,
+      "loop": false
+    },
+    "run_right": {
+      "frames": [
+        6,
+        7,
+        8,
+        9
+      ],
+      "fps": 10,
+      "loop": true
+    },
+    "rest": {
+      "frames": [
+        11,
+        12
+      ],
+      "fps": 2,
+      "loop": true
+    },
+    "read_schedule": {
+      "frames": [
+        13
+      ],
+      "fps": 1,
+      "loop": true
+    },
+    "back_view": {
+      "frames": [
+        15
+      ],
+      "fps": 1,
+      "loop": true
+    }
+  },
+  "frames": [
+    {
+      "index": 0,
+      "file": "frames/00_idle_front.png",
+      "name": "idle_front",
+      "description": "Белый Кролик стоит с карманными часами",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "index": 1,
+      "file": "frames/01_checks_watch_happy.png",
+      "name": "checks_watch_happy",
+      "description": "Смотрит на часы и улыбается",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "index": 2,
+      "file": "frames/02_hurries_pointing.png",
+      "name": "hurries_pointing",
+      "description": "Торопливо указывает вперёд",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "index": 3,
+      "file": "frames/03_confused_watch.png",
+      "name": "confused_watch",
+      "description": "Растерянно смотрит на часы",
+      "row": 0,
+      "col": 3
+    },
+    {
+      "index": 4,
+      "file": "frames/04_annoyed_watch.png",
+      "name": "annoyed_watch",
+      "description": "Сердится из-за опоздания",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "index": 5,
+      "file": "frames/05_panics_watch.png",
+      "name": "panics_watch",
+      "description": "Паникует, глядя на часы",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "index": 6,
+      "file": "frames/06_run_right_1.png",
+      "name": "run_right_1",
+      "description": "Бег вправо — кадр 1",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "index": 7,
+      "file": "frames/07_run_right_2.png",
+      "name": "run_right_2",
+      "description": "Бег вправо — кадр 2",
+      "row": 1,
+      "col": 3
+    },
+    {
+      "index": 8,
+      "file": "frames/08_run_right_3.png",
+      "name": "run_right_3",
+      "description": "Бег вправо — кадр 3",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "index": 9,
+      "file": "frames/09_run_right_4.png",
+      "name": "run_right_4",
+      "description": "Бег вправо — кадр 4",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "index": 10,
+      "file": "frames/10_panic_gasp.png",
+      "name": "panic_gasp",
+      "description": "Вскрикивает от паники",
+      "row": 2,
+      "col": 2
+    },
+    {
+      "index": 11,
+      "file": "frames/11_exhausted_rest.png",
+      "name": "exhausted_rest",
+      "description": "Остановился перевести дух",
+      "row": 2,
+      "col": 3
+    },
+    {
+      "index": 12,
+      "file": "frames/12_idle_seated.png",
+      "name": "idle_seated",
+      "description": "Сидит с часами",
+      "row": 3,
+      "col": 0
+    },
+    {
+      "index": 13,
+      "file": "frames/13_reads_schedule.png",
+      "name": "reads_schedule",
+      "description": "Проверяет свиток или расписание",
+      "row": 3,
+      "col": 1
+    },
+    {
+      "index": 14,
+      "file": "frames/14_confident_point.png",
+      "name": "confident_point",
+      "description": "Самоуверенно указывает направление",
+      "row": 3,
+      "col": 2
+    },
+    {
+      "index": 15,
+      "file": "frames/15_back_view.png",
+      "name": "back_view",
+      "description": "Вид со спины с сумкой",
+      "row": 3,
+      "col": 3
+    }
+  ]
+}

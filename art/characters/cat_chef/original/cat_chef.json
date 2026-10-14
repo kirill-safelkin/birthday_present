@@ -1,0 +1,495 @@
+{
+  "name": "cat_chef",
+  "display_name": "Кот-повар",
+  "frame_size": [
+    64,
+    64
+  ],
+  "grid": [
+    4,
+    4
+  ],
+  "atlas": "cat_chef_atlas_64px.png",
+  "source_sheet": "cat_chef_source_sheet.png",
+  "generated_original": "cat_chef_generated_with_checkerboard.png",
+  "source_size": [
+    1254,
+    1254
+  ],
+  "frame_count": 16,
+  "animations": {
+    "idle": {
+      "frames": [
+        0,
+        2
+      ],
+      "fps": 2,
+      "loop": true
+    },
+    "greet": {
+      "frames": [
+        3,
+        1
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "prepare_sushi": {
+      "frames": [
+        4,
+        5,
+        6
+      ],
+      "fps": 4,
+      "loop": true
+    },
+    "serve_sushi": {
+      "frames": [
+        1,
+        7
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "eat": {
+      "frames": [
+        9
+      ],
+      "fps": 1,
+      "loop": false
+    },
+    "react_angry": {
+      "frames": [
+        8,
+        10
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "move_with_tray": {
+      "frames": [
+        12,
+        13,
+        15
+      ],
+      "fps": 3,
+      "loop": true
+    },
+    "back_view": {
+      "frames": [
+        14
+      ],
+      "fps": 1,
+      "loop": true
+    }
+  },
+  "frames": [
+    {
+      "index": 0,
+      "name": "idle_grumpy",
+      "file": "frames/00_idle_grumpy.png",
+      "description": "Стоит со скрещёнными лапами и слегка грозным взглядом",
+      "category": "idle",
+      "row": 0,
+      "col": 0,
+      "source_cell": [
+        0,
+        0,
+        314,
+        314
+      ],
+      "source_foreground_bbox": [
+        26,
+        16,
+        259,
+        293
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 1,
+      "name": "happy_sushi_tray",
+      "file": "frames/01_happy_sushi_tray.png",
+      "description": "Довольно показывает поднос с суши",
+      "category": "serve",
+      "row": 0,
+      "col": 1,
+      "source_cell": [
+        314,
+        0,
+        313,
+        314
+      ],
+      "source_foreground_bbox": [
+        37,
+        16,
+        268,
+        293
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 2,
+      "name": "stern_arms_crossed",
+      "file": "frames/02_stern_arms_crossed.png",
+      "description": "Складывает лапы, недовольно смотрит",
+      "category": "idle",
+      "row": 0,
+      "col": 2,
+      "source_cell": [
+        627,
+        0,
+        313,
+        314
+      ],
+      "source_foreground_bbox": [
+        35,
+        15,
+        209,
+        293
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 3,
+      "name": "playful_greeting",
+      "file": "frames/03_playful_greeting.png",
+      "description": "Подмигивает и приветствует лапой",
+      "category": "greet",
+      "row": 0,
+      "col": 3,
+      "source_cell": [
+        940,
+        0,
+        314,
+        314
+      ],
+      "source_foreground_bbox": [
+        17,
+        15,
+        250,
+        294
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 4,
+      "name": "slice_salmon_1",
+      "file": "frames/04_slice_salmon_1.png",
+      "description": "Начинает нарезать лосося",
+      "category": "prepare_sushi",
+      "row": 1,
+      "col": 0,
+      "source_cell": [
+        0,
+        314,
+        314,
+        313
+      ],
+      "source_foreground_bbox": [
+        21,
+        15,
+        287,
+        291
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 5,
+      "name": "slice_salmon_2",
+      "file": "frames/05_slice_salmon_2.png",
+      "description": "Режет лосося на доске",
+      "category": "prepare_sushi",
+      "row": 1,
+      "col": 1,
+      "source_cell": [
+        314,
+        314,
+        313,
+        313
+      ],
+      "source_foreground_bbox": [
+        11,
+        14,
+        278,
+        292
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 6,
+      "name": "arrange_sushi",
+      "file": "frames/06_arrange_sushi.png",
+      "description": "Раскладывает суши на подносе",
+      "category": "prepare_sushi",
+      "row": 1,
+      "col": 2,
+      "source_cell": [
+        627,
+        314,
+        313,
+        313
+      ],
+      "source_foreground_bbox": [
+        3,
+        10,
+        297,
+        297
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 7,
+      "name": "present_sushi",
+      "file": "frames/07_present_sushi.png",
+      "description": "Гордо подаёт готовые суши",
+      "category": "serve",
+      "row": 1,
+      "col": 3,
+      "source_cell": [
+        940,
+        314,
+        314,
+        313
+      ],
+      "source_foreground_bbox": [
+        16,
+        7,
+        286,
+        294
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 8,
+      "name": "angry_shout",
+      "file": "frames/08_angry_shout.png",
+      "description": "Возмущённо кричит",
+      "category": "react",
+      "row": 2,
+      "col": 0,
+      "source_cell": [
+        0,
+        627,
+        314,
+        313
+      ],
+      "source_foreground_bbox": [
+        24,
+        6,
+        286,
+        292
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 9,
+      "name": "taste_sushi",
+      "file": "frames/09_taste_sushi.png",
+      "description": "Пробует кусочек суши",
+      "category": "eat",
+      "row": 2,
+      "col": 1,
+      "source_cell": [
+        314,
+        627,
+        313,
+        313
+      ],
+      "source_foreground_bbox": [
+        24,
+        20,
+        275,
+        278
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 10,
+      "name": "sit_resting",
+      "file": "frames/10_sit_resting.png",
+      "description": "Сидит и отдыхает",
+      "category": "rest",
+      "row": 2,
+      "col": 2,
+      "source_cell": [
+        627,
+        627,
+        313,
+        313
+      ],
+      "source_foreground_bbox": [
+        23,
+        23,
+        255,
+        275
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 11,
+      "name": "stern_side_pose",
+      "file": "frames/11_stern_side_pose.png",
+      "description": "Сдержанно смотрит в сторону",
+      "category": "react",
+      "row": 2,
+      "col": 3,
+      "source_cell": [
+        940,
+        627,
+        314,
+        313
+      ],
+      "source_foreground_bbox": [
+        32,
+        13,
+        230,
+        289
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 12,
+      "name": "walk_right_tray_1",
+      "file": "frames/12_walk_right_tray_1.png",
+      "description": "Движется вправо с подносом",
+      "category": "move_with_tray",
+      "row": 3,
+      "col": 0,
+      "source_cell": [
+        0,
+        940,
+        314,
+        314
+      ],
+      "source_foreground_bbox": [
+        21,
+        0,
+        293,
+        285
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 13,
+      "name": "walk_right_angled",
+      "file": "frames/13_walk_right_angled.png",
+      "description": "Движется в три четверти со спины",
+      "category": "move_with_tray",
+      "row": 3,
+      "col": 1,
+      "source_cell": [
+        314,
+        940,
+        313,
+        314
+      ],
+      "source_foreground_bbox": [
+        40,
+        0,
+        273,
+        284
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 14,
+      "name": "back_view",
+      "file": "frames/14_back_view.png",
+      "description": "Вид со спины",
+      "category": "back_view",
+      "row": 3,
+      "col": 2,
+      "source_cell": [
+        627,
+        940,
+        313,
+        314
+      ],
+      "source_foreground_bbox": [
+        61,
+        4,
+        208,
+        289
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    },
+    {
+      "index": 15,
+      "name": "walk_right_tray_2",
+      "file": "frames/15_walk_right_tray_2.png",
+      "description": "Движется вправо с подносом, другая поза",
+      "category": "move_with_tray",
+      "row": 3,
+      "col": 3,
+      "source_cell": [
+        940,
+        940,
+        314,
+        314
+      ],
+      "source_foreground_bbox": [
+        16,
+        0,
+        284,
+        289
+      ],
+      "frame_size": [
+        64,
+        64
+      ]
+    }
+  ],
+  "notes": [
+    "Один персонаж на отдельном спрайт-листе.",
+    "Шахматный фон был удалён; итоговый атлас — RGBA с альфа-прозрачностью.",
+    "Все кадры приведены к 64×64 и выровнены по нижней точке.",
+    "Большинство кадров — сюжетные позы, не все группы являются полноценными плавными циклами.",
+    "Перед подключением проверьте читаемость суши и силуэта на масштабе 64×64."
+  ]
+}

@@ -1,0 +1,181 @@
+{
+  "format": 1,
+  "id": "chuchmek",
+  "display_name": "Чучмек",
+  "source": {
+    "archive": "chuchmek_sprite_assets.zip",
+    "id": "chuchmek",
+    "manifest": "art/characters/chuchmek/original/chuchmek.json"
+  },
+  "frame_size": [
+    64,
+    64
+  ],
+  "atlas": {
+    "file": "chuchmek_atlas_64px.png",
+    "columns": 4,
+    "rows": 4
+  },
+  "frames": [
+    {
+      "id": "idle",
+      "index": 0,
+      "file": "frames/00_idle.png",
+      "description": "Спокойная поза",
+      "source_file": "frames/idle.png"
+    },
+    {
+      "id": "wink",
+      "index": 1,
+      "file": "frames/01_wink.png",
+      "description": "Подмигивание",
+      "source_file": "frames/wink.png"
+    },
+    {
+      "id": "curious_glance",
+      "index": 2,
+      "file": "frames/02_curious_glance.png",
+      "description": "Любопытный взгляд",
+      "source_file": "frames/curious_glance.png"
+    },
+    {
+      "id": "clipboard_confident",
+      "index": 3,
+      "file": "frames/03_clipboard_confident.png",
+      "description": "Уверенность с планшетом",
+      "source_file": "frames/clipboard_confident.png"
+    },
+    {
+      "id": "talk_01",
+      "index": 4,
+      "file": "frames/04_talk_01.png",
+      "description": "Разговор, поза 1",
+      "source_file": "frames/talk_01.png"
+    },
+    {
+      "id": "talk_02",
+      "index": 5,
+      "file": "frames/05_talk_02.png",
+      "description": "Разговор, поза 2",
+      "source_file": "frames/talk_02.png"
+    },
+    {
+      "id": "talk_gesture",
+      "index": 6,
+      "file": "frames/06_talk_gesture.png",
+      "description": "Разговор с жестом",
+      "source_file": "frames/talk_gesture.png"
+    },
+    {
+      "id": "talk_excited",
+      "index": 7,
+      "file": "frames/07_talk_excited.png",
+      "description": "Оживлённый разговор",
+      "source_file": "frames/talk_excited.png"
+    },
+    {
+      "id": "confused",
+      "index": 8,
+      "file": "frames/08_confused.png",
+      "description": "Растерянность",
+      "source_file": "frames/confused.png"
+    },
+    {
+      "id": "panicked",
+      "index": 9,
+      "file": "frames/09_panicked.png",
+      "description": "Паника",
+      "source_file": "frames/panicked.png"
+    },
+    {
+      "id": "arms_up_panic",
+      "index": 10,
+      "file": "frames/10_arms_up_panic.png",
+      "description": "Паника, руки вверх",
+      "source_file": "frames/arms_up_panic.png"
+    },
+    {
+      "id": "smug_wink",
+      "index": 11,
+      "file": "frames/11_smug_wink.png",
+      "description": "Самодовольное подмигивание",
+      "source_file": "frames/smug_wink.png"
+    },
+    {
+      "id": "run_right_01",
+      "index": 12,
+      "file": "frames/12_run_right_01.png",
+      "description": "Бег вправо, поза 1",
+      "source_file": "frames/run_right_01.png"
+    },
+    {
+      "id": "run_right_02",
+      "index": 13,
+      "file": "frames/13_run_right_02.png",
+      "description": "Бег вправо, поза 2",
+      "source_file": "frames/run_right_02.png"
+    },
+    {
+      "id": "run_right_03",
+      "index": 14,
+      "file": "frames/14_run_right_03.png",
+      "description": "Бег вправо, поза 3",
+      "source_file": "frames/run_right_03.png"
+    },
+    {
+      "id": "run_right_04",
+      "index": 15,
+      "file": "frames/15_run_right_04.png",
+      "description": "Бег вправо, поза 4",
+      "source_file": "frames/run_right_04.png"
+    }
+  ],
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle"
+      ],
+      "fps": 1,
+      "loop": true,
+      "draft": false
+    },
+    "talk": {
+      "frames": [
+        "talk_01",
+        "talk_02",
+        "talk_gesture",
+        "talk_excited"
+      ],
+      "fps": 5,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "README: последовательность нужно проверить в игре — позы могут быть вариантами, а не промежуточными кадрами"
+    },
+    "run_right": {
+      "frames": [
+        "run_right_01",
+        "run_right_02",
+        "run_right_03",
+        "run_right_04"
+      ],
+      "fps": 8,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "README: последовательность нужно проверить в игре — позы могут быть вариантами, а не промежуточными кадрами"
+    }
+  },
+  "poses": {
+    "wink": "wink",
+    "curious": "curious_glance",
+    "confident": "clipboard_confident",
+    "confused": "confused",
+    "panic": "panicked",
+    "panic_arms_up": "arms_up_panic",
+    "smug": "smug_wink"
+  },
+  "notes": [
+    "Frames have been extracted from the generated 4x4 reference sheet and normalized to 64x64.",
+    "Disconnected decorative specks/effects outside the main character silhouette were removed when possible.",
+    "Review the talk and run sequences before using them as continuous loops; some generated frames are pose variants rather than true animation in-betweens."
+  ]
+}

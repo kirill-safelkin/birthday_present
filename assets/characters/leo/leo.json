@@ -1,0 +1,137 @@
+{
+  "format": 1,
+  "id": "leo",
+  "display_name": "Лео",
+  "source": {
+    "archive": "leo_sprite_assets.zip",
+    "id": "leo",
+    "manifest": "art/characters/leo/original/leo.json"
+  },
+  "frame_size": [
+    64,
+    64
+  ],
+  "atlas": {
+    "file": "leo_atlas_64px.png",
+    "columns": 4,
+    "rows": 4
+  },
+  "frames": [
+    {
+      "id": "sit_idle",
+      "index": 0,
+      "file": "frames/00_sit_idle.png",
+      "description": "Спокойно сидит",
+      "source_file": "frames/frame_00.png"
+    },
+    {
+      "id": "laugh",
+      "index": 1,
+      "file": "frames/01_laugh.png",
+      "description": "Смеётся",
+      "source_file": "frames/frame_01.png"
+    },
+    {
+      "id": "cuddle_teddy",
+      "index": 2,
+      "file": "frames/02_cuddle_teddy.png",
+      "description": "Обнимает мишку",
+      "source_file": "frames/frame_02.png"
+    },
+    {
+      "id": "arms_up",
+      "index": 3,
+      "file": "frames/03_arms_up.png",
+      "description": "Радостно тянет руки вверх",
+      "source_file": "frames/frame_03.png"
+    },
+    {
+      "id": "tummy_time",
+      "index": 4,
+      "file": "frames/04_tummy_time.png",
+      "description": "Лежит на животе и смотрит вперёд",
+      "source_file": "frames/frame_04.png"
+    },
+    {
+      "id": "crawl_try",
+      "index": 5,
+      "file": "frames/05_crawl_try.png",
+      "description": "Пробует ползти",
+      "source_file": "frames/frame_05.png"
+    },
+    {
+      "id": "reach",
+      "index": 6,
+      "file": "frames/06_reach.png",
+      "description": "Тянется к чему-то",
+      "source_file": "frames/frame_06.png"
+    },
+    {
+      "id": "nap_pillow",
+      "index": 7,
+      "file": "frames/07_nap_pillow.png",
+      "description": "Дремлет на подушке",
+      "source_file": "frames/frame_07.png"
+    },
+    {
+      "id": "cry",
+      "index": 8,
+      "file": "frames/08_cry.png",
+      "description": "Плачет",
+      "source_file": "frames/frame_08.png"
+    },
+    {
+      "id": "wipe_tears",
+      "index": 9,
+      "file": "frames/09_wipe_tears.png",
+      "description": "Трёт глаза и плачет",
+      "source_file": "frames/frame_09.png"
+    },
+    {
+      "id": "frown",
+      "index": 10,
+      "file": "frames/10_frown.png",
+      "description": "Сердится",
+      "source_file": "frames/frame_10.png"
+    },
+    {
+      "id": "surprised",
+      "index": 11,
+      "file": "frames/11_surprised.png",
+      "description": "Удивлён",
+      "source_file": "frames/frame_11.png"
+    },
+    {
+      "id": "sleep_blanket",
+      "index": 12,
+      "file": "frames/12_sleep_blanket.png",
+      "description": "Спит под одеялом",
+      "source_file": "frames/frame_12.png"
+    },
+    {
+      "id": "sleep_teddy",
+      "index": 13,
+      "file": "frames/13_sleep_teddy.png",
+      "description": "Спит с мишкой",
+      "source_file": "frames/frame_13.png"
+    },
+    {
+      "id": "play_rattle",
+      "index": 14,
+      "file": "frames/14_play_rattle.png",
+      "description": "Играет с погремушкой",
+      "source_file": "frames/frame_14.png"
+    },
+    {
+      "id": "drink_bottle",
+      "index": 15,
+      "file": "frames/15_drink_bottle.png",
+      "description": "Пьёт из бутылочки",
+      "source_file": "frames/frame_15.png"
+    }
+  ],
+  "animations": {},
+  "notes": [
+    "Набор сюжетных поз и реакций для младенца, а не 16 последовательных кадров одной анимации. Лист собран выделением основных силуэтов из генерации и нормализацией в общие ячейки 64×64."
+  ]
+}
