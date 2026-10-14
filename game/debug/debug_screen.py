@@ -1,6 +1,6 @@
 """Временный экран проверки: технический фундамент и вход в тестовые экраны.
 
-Тестовые экраны (диалог, анимация, галерея спрайтов) открываются через менеджер сцен
+Тестовые экраны (диалог, анимация, галерея спрайтов, вступление) открываются через менеджер сцен
 поверх этого экрана и возвращают к нему по Backspace. Экран заменит первая игровая сцена.
 """
 
@@ -18,6 +18,7 @@ from game.debug.sprite_gallery import SpriteGallery
 from game.dialogue.box import DialogueBox
 from game.dialogue.model import DialogueChoice, DialogueController
 from game.graphics.fonts import load_font, render_text
+from game.story.intro_scene import IntroScene
 
 # Как часто обновлять число FPS (в секундах): каждый кадр цифры бы мелькали.
 FPS_REFRESH_INTERVAL = 0.5
@@ -26,22 +27,24 @@ HINTS = (
     ("D", "тестовый диалог"),
     ("A", "тест анимации"),
     ("P", "галерея спрайтов"),
+    ("I", "вступление"),
     ("ESC", "выход"),
 )
 # Отладочные сочетания: код клавиши и скан-код (буквы работают в русской и немецкой раскладках).
 DIALOGUE_KEY = (pygame.K_d, pygame.KSCAN_D)
 ANIMATION_KEY = (pygame.K_a, pygame.KSCAN_A)
 GALLERY_KEY = (pygame.K_p, pygame.KSCAN_P)
+INTRO_KEY = (pygame.K_i, pygame.KSCAN_I)
 # Вертикальная раскладка: центры заголовка, подзаголовка и итога диалога, верх подсказок.
-TITLE_Y = 44
-SUBTITLE_Y = 62
-RESULT_Y = 82
-HINTS_TOP = 108
+TITLE_Y = 34
+SUBTITLE_Y = 52
+RESULT_Y = 71
+HINTS_TOP = 98
 LINE_STEP = 13
 
 
 class DebugScreen(Scene):
-    """Тёмный фон, название игры, подсказки, счётчик FPS и итог последнего тестового диалога."""
+    """Тёмный фон, название игры, подсказки, счётчик FPS и итог последнего тестового прохода."""
 
     def __init__(self, clock: pygame.time.Clock) -> None:
         self._clock = clock
@@ -75,6 +78,8 @@ class DebugScreen(Scene):
         self._dialogue_box.check_fits(DEMO_SCRIPT)
         # Ответ на вопрос из последнего завершённого прохода демонстрации.
         self.last_answer: DialogueChoice | None = None
+        # Выбор Алисы в последнем полностью просмотренном вступлении.
+        self.intro_choice: DialogueChoice | None = None
 
     # Что сейчас открыто поверх экрана проверки. Только для чтения: переходы делает менеджер.
 
@@ -91,9 +96,18 @@ class DebugScreen(Scene):
     def sprite_gallery(self) -> SpriteGallery | None:
         return self._open_scene(SpriteGallery)
 
+    @property
+    def intro(self) -> IntroScene | None:
+        return self._open_scene(IntroScene)
+
     def _open_scene(self, kind: type[Scene]) -> Scene | None:
         current = self.manager.current if self.manager is not None else None
         return current if isinstance(current, kind) else None
+
+    def enter(self) -> None:
+        # Пока экран был закрыт другой сценой, он не обновлялся: счётчик FPS устарел.
+        self._fps_timer = 0.0
+        self._fps_label = self._render_fps()
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type != pygame.KEYDOWN or self.manager is None:
@@ -105,6 +119,9 @@ class DebugScreen(Scene):
             self.manager.push(AnimationDemo())
         elif matches_key(event, *GALLERY_KEY):
             self.manager.push(SpriteGallery())
+        elif matches_key(event, *INTRO_KEY):
+            # Центральной локации пока нет: после вступления — назад сюда с сообщением.
+            self.manager.push(IntroScene(on_complete=self._finish_intro))
 
     def update(self, dt: float) -> None:
         self._fps_timer += dt
@@ -124,6 +141,14 @@ class DebugScreen(Scene):
         lines = ["Диалог завершён. D — запустить снова"]
         if self.last_answer is not None:
             lines.append(f"Ваш ответ: «{self.last_answer.text}»")
+        self._show_result(lines)
+
+    def _finish_intro(self, intro: IntroScene) -> None:
+        """Тестовое вступление досмотрено до конца."""
+        self.intro_choice = intro.choice
+        self._show_result(["Тестовое вступление завершено.", "I — посмотреть снова"])
+
+    def _show_result(self, lines: list[str]) -> None:
         self._result_labels = []
         for index, text in enumerate(lines):
             image = render_text(self._text_font, text, config.TEXT_COLOR)
