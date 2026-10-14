@@ -69,6 +69,13 @@ class SceneManager:
         self.input = input_state if input_state is not None else ActionInput()
         self._stack: list[Scene] = []
         self._factories: dict[str, SceneFactory] = {}
+        # Сцена попросила закончить игру (например, финальный экран «выйти в реальный мир»).
+        # Приложение видит флаг и штатно завершает свой цикл — без своего цикла в сцене.
+        self.quit_requested = False
+
+    def request_quit(self) -> None:
+        """Просьба сцены завершить игру. Сам менеджер ничего не закрывает — это делает приложение."""
+        self.quit_requested = True
 
     @property
     def current(self) -> Scene | None:

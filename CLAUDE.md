@@ -63,6 +63,7 @@
 - Игровая логика использует логические действия (`Action`, `actions_for()`, `ActionInput`
   в `game/core/input.py`), а не конкретные клавиши. Экраны — сцены `game/core/scenes.py`;
   переходы только через `SceneManager` (`push`/`pop`/`replace`), а не прямыми вызовами.
+  Закончить игру из сцены — `manager.request_quit()`, а не свой цикл или `pygame.QUIT`.
 - Повторный KEYDOWN без KEYUP игра считает автоповтором и пропускает. В тестах одно
   нажатие — это KEYDOWN и KEYUP (`press()` в `tests/test_app.py`).
 

@@ -8,6 +8,10 @@
 зарегистрирована; иначе Чучмек объясняет, что портал не готов. Фрагменты выдают сами
 испытания через общий GameProgress, площадь их только показывает и, вернувшись из
 испытания, сообщает итог.
+
+Мозаика в центре площади собирает фрагменты: у каждого пройденного испытания — свой
+символ в ней. Когда собраны все три, мозаика светится, и E рядом с ней открывает финал
+(FINALE_SCENE). Сам по себе третий фрагмент финал не запускает — только игрок.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ from game.world.collision import CollisionMap
 from game.world.progress import TRIAL_NAMES, TRIALS, GameProgress
 
 HUB_SCENE = "hub"  # имя площади в SceneManager
+FINALE_SCENE = "finale"  # последняя страница сказки: её открывает мозаика при всех фрагментах
 # Имена будущих сцен испытаний. Пока они не зарегистрированы, порталы закрыты.
 TRIAL_SCENES = {trial_id: f"trial_{trial_id}" for trial_id in TRIALS}
 
@@ -46,6 +51,10 @@ WALK_BOUNDS = pygame.Rect(10, 44, WIDTH - 20, STATUS_TOP - 4 - 44)
 SPAWN = (160, 158)  # точка появления Алисы — внизу площади
 TOAST_SECONDS = 3.0
 TOAST_PRIORITY_SECONDS = 2.0  # столько свежее сообщение (например, итог испытания) важнее подсказки у цели
+MOSAIC_CENTER = (160, 106)  # мозаика в центре площади
+MOSAIC_RADIUS = 12  # на таком расстоянии от центра (по ногам Алисы) с ней можно взаимодействовать
+# Гнёзда фрагментов в мозаике: каждый — со стороны своего портала.
+MOSAIC_SLOTS = {"sushi": (150, 108), "forms": (160, 98), "cakes": (170, 108)}
 
 
 @dataclass(frozen=True)
@@ -103,8 +112,8 @@ MARK_COLOR = (255, 236, 140)
 class Interaction:
     """С чем Алиса может взаимодействовать сейчас: портал испытания или Чучмек."""
 
-    kind: str  # "portal" или "chuchmek"
-    target: str  # идентификатор испытания или "chuchmek"
+    kind: str  # "portal", "chuchmek" или "mosaic"
+    target: str  # идентификатор испытания, "chuchmek" или "finale"
     prompt: str
 
 
@@ -153,6 +162,7 @@ class HubScene(Scene):
         self._background = _render_background()
         self._trial_in_progress: str | None = None  # испытание, в которое Алиса только что ушла
         self._trial_scene: Scene | None = None
+        self._finale_scene: Scene | None = None  # открытый финал (не больше одного)
         self._fragments_before = self.progress.fragments
 
     # --- Состояние ---
@@ -170,6 +180,13 @@ class HubScene(Scene):
         distance = math.dist((x, y), self._chuchmek_point())
         if distance <= CHUCHMEK_RADIUS:
             candidates.append((distance, Interaction("chuchmek", "chuchmek", "Чучмек   E — поговорить")))
+        distance = math.dist((x, y), MOSAIC_CENTER)
+        if distance <= MOSAIC_RADIUS:
+            if self.progress.has_all_fragments:
+                prompt = "Мозаика   E — восстановить последнюю страницу"
+            else:
+                prompt = f"Мозаика   нужны все фрагменты: {self.progress.fragments}/{self.progress.total}"
+            candidates.append((distance, Interaction("mosaic", "finale", prompt)))
         return min(candidates, key=lambda item: item[0])[1] if candidates else None
 
     def fragments_text(self) -> str:
@@ -222,6 +239,8 @@ class HubScene(Scene):
             self._face(self._chuchmek_point())
             self._open_dialogue(CHUCHMEK_TALK)
             return True
+        if target.kind == "mosaic":
+            return self._use_mosaic()
         portal = next(portal for portal in PORTALS if portal.id == target.target)
         self._face(portal.point)
         self.active_trial = portal.id
@@ -235,6 +254,21 @@ class HubScene(Scene):
             # Испытание ещё не сделано: переходить некуда, фрагмент не выдаётся.
             self._open_dialogue(PORTAL_NOT_READY[portal.id])
             self._show_toast(f"Испытание «{portal.name}»: портал пока не готов")
+        return True
+
+    def _use_mosaic(self) -> bool:
+        """E у мозаики: финал — только при всех фрагментах и только один."""
+        progress = self.progress
+        if not progress.has_all_fragments:
+            self._show_toast(f"Мозаике не хватает фрагментов: {progress.fragments}/{progress.total}")
+            return True
+        if self._finale_scene is not None and self._finale_scene.manager is not None:
+            return False  # финал уже открыт — второй не нужен
+        manager = self.manager
+        if manager is None or not manager.is_registered(FINALE_SCENE):
+            self._show_toast("Последняя страница пока не готова")
+            return True
+        self._finale_scene = manager.push(FINALE_SCENE)
         return True
 
     def _face(self, point: tuple[int, int]) -> None:
@@ -258,6 +292,9 @@ class HubScene(Scene):
 
     def enter(self) -> None:
         """Возврат на площадь (в том числе из испытания): сообщить, чем оно закончилось."""
+        finale, self._finale_scene = self._finale_scene, None
+        if finale is not None and not getattr(finale, "completed", False):
+            self._show_toast("Последняя страница подождёт: E у мозаики")
         trial_id, self._trial_in_progress = self._trial_in_progress, None
         trial, self._trial_scene = self._trial_scene, None
         if trial_id is None:
@@ -266,7 +303,10 @@ class HubScene(Scene):
         if not getattr(trial, "completed", False):  # сцена испытания сама знает, досмотрена ли она
             self._show_toast(f"Испытание «{name}» прервано — фрагмент не получен")
         elif self.progress.fragments > self._fragments_before:
-            self._show_toast(f"Получен фрагмент праздника! Теперь {self.progress.fragments}/{self.progress.total}")
+            message = f"Получен фрагмент праздника! Теперь {self.progress.fragments}/{self.progress.total}"
+            if self.progress.has_all_fragments:
+                message += ". Мозаика засветилась"
+            self._show_toast(message)
         else:
             self._show_toast(f"Испытание «{name}» уже пройдено — фрагмент тот же")
 
@@ -286,6 +326,7 @@ class HubScene(Scene):
     def draw(self, surface: pygame.Surface) -> None:
         surface.blit(self._background, (0, 0))
         target = self.nearby() if self.dialogue is None else None
+        self._draw_mosaic(surface, target)
         # Всё, что стоит на площади, рисуется по высоте ног: ближние к игроку — поверх дальних.
         drawables = [(portal.rect.bottom, lambda p=portal: self._draw_portal(surface, p, target)) for portal in PORTALS]
         drawables += [(y, lambda t=(x, y): _draw_tree(surface, t)) for x, y in TREES]
@@ -334,6 +375,22 @@ class HubScene(Scene):
             pygame.draw.polygon(surface, HUD_ACCENT_COLOR, [(x, y - 3), (x + 1, y - 1), (x + 3, y), (x + 1, y + 1),
                                                             (x, y + 3), (x - 1, y + 1), (x - 3, y), (x - 1, y - 1)])
 
+    def _draw_mosaic(self, surface: pygame.Surface, target: Interaction | None) -> None:
+        """Символы собранных фрагментов в мозаике; при всех трёх — пульсирующее свечение."""
+        for trial_id, center in MOSAIC_SLOTS.items():
+            if self.progress.is_completed(trial_id):
+                _draw_fragment(surface, trial_id, center)
+        if self.progress.has_all_fragments:
+            x, y = MOSAIC_CENTER
+            pulse = abs(math.sin(self.time * 3))
+            pygame.draw.circle(surface, MARK_COLOR, (x, y), 15 + round(pulse * 2), 1)
+            pygame.draw.circle(surface, HUD_ACCENT_COLOR, (x, y), 12, 1)
+            for k in range(4):  # искры бегут по кругу
+                angle = self.time * 1.5 + k * math.pi / 2
+                surface.set_at((x + round(math.cos(angle) * 20), y + round(math.sin(angle) * 20)), MARK_COLOR)
+        if target is not None and target.kind == "mosaic":
+            pygame.draw.circle(surface, MARK_COLOR, MOSAIC_CENTER, 22, 1)
+
     def _draw_chuchmek(self, surface: pygame.Surface, target: Interaction | None) -> None:
         self.chuchmek.draw(surface)
         if target is not None and target.kind == "chuchmek":
@@ -370,6 +427,20 @@ def _draw_trial_icon(surface: pygame.Surface, trial_id: str, center: tuple[int, 
         pygame.draw.rect(surface, (248, 214, 228), (x - 7, y, 14, 6))
         pygame.draw.rect(surface, (252, 238, 214), (x - 5, y - 5, 10, 5))
         pygame.draw.circle(surface, (210, 40, 60), (x, y - 7), 2)
+
+
+def _draw_fragment(surface: pygame.Surface, trial_id: str, center: tuple[int, int]) -> None:
+    """Маленький символ фрагмента в мозаике: ролл, документ с печатью, торт."""
+    x, y = center
+    if trial_id == "sushi":
+        pygame.draw.circle(surface, (40, 60, 48), (x, y), 3)
+        pygame.draw.circle(surface, (236, 120, 96), (x, y), 1)
+    elif trial_id == "forms":
+        pygame.draw.rect(surface, (244, 244, 236), (x - 2, y - 3, 5, 6))
+        surface.set_at((x + 1, y + 1), (196, 52, 60))
+    else:
+        pygame.draw.rect(surface, (248, 214, 228), (x - 3, y - 1, 7, 3))
+        surface.set_at((x, y - 2), (210, 40, 60))
 
 
 def _draw_tree(surface: pygame.Surface, base: tuple[int, int]) -> None:

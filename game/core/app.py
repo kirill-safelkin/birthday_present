@@ -11,10 +11,11 @@ from game.core.display import Display
 from game.core.input import ActionInput
 from game.core.scenes import SceneManager
 from game.debug.debug_screen import DebugScreen
+from game.story.final_scene import FinalScene
 from game.trials.cakes_scene import CAKES_SCENE, CakesTrialScene
 from game.trials.forms_scene import FORMS_SCENE, FormsTrialScene
 from game.trials.sushi_scene import SUSHI_SCENE, SushiTrialScene
-from game.world.hub import HUB_SCENE, HubScene
+from game.world.hub import FINALE_SCENE, HUB_SCENE, HubScene
 from game.world.progress import GameProgress
 
 
@@ -33,6 +34,8 @@ class App:
         self.scenes.register(SUSHI_SCENE, lambda: SushiTrialScene(self.progress))
         self.scenes.register(FORMS_SCENE, lambda: FormsTrialScene(self.progress))
         self.scenes.register(CAKES_SCENE, lambda: CakesTrialScene(self.progress))
+        # Финал открывает мозаика площади, когда собраны все три фрагмента.
+        self.scenes.register(FINALE_SCENE, lambda: FinalScene(self.progress))
         # Стартовая сцена — временный экран проверки. Его заменит первая игровая сцена.
         self.screen = DebugScreen(self._clock)
         self.scenes.push(self.screen)
@@ -63,10 +66,14 @@ class App:
             else:
                 # Остальные события получает только верхняя сцена.
                 self.scenes.handle_event(event)
+            if self.scenes.quit_requested:  # сцена сама попросила закончить игру (финальный экран)
+                self.running = False
 
     def _update(self, dt: float) -> None:
         """Обновление состояния игры; dt — длительность кадра в секундах."""
         self.scenes.update(dt)
+        if self.scenes.quit_requested:
+            self.running = False
 
     def _draw(self) -> None:
         """Отрисовка: сцена рисует на холсте 320×180, затем холст выводится в окно."""
