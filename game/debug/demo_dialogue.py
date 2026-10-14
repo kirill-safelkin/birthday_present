@@ -1,6 +1,6 @@
 """Демонстрационный диалог для проверки системы диалогов. Это не часть сюжета игры."""
 
-from game.dialogue import DialogueChoice, DialogueNode, DialogueScript
+from game.dialogue.model import DialogueChoice, DialogueNode, DialogueScript
 
 CHUCHMEK = "Чучмек"
 # Реплика с вопросом: по ней экран проверки показывает, какой ответ выбран.

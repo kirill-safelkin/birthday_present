@@ -13,16 +13,16 @@ import unittest  # noqa: E402
 import pygame  # noqa: E402
 
 import config  # noqa: E402
-from game.demo_dialogue import DEMO_SCRIPT, QUESTION_ID  # noqa: E402
-from game.dialogue import (  # noqa: E402
+from game.debug.demo_dialogue import DEMO_SCRIPT, QUESTION_ID  # noqa: E402
+from game.dialogue.model import (  # noqa: E402
     DialogueChoice,
     DialogueController,
     DialogueError,
     DialogueNode,
     DialogueScript,
 )
-from game.dialogue_box import DialogueBox, wrap_spans, wrap_text  # noqa: E402
-from game.fonts import load_font  # noqa: E402
+from game.dialogue.box import DialogueBox, wrap_spans, wrap_text  # noqa: E402
+from game.graphics.fonts import load_font  # noqa: E402
 
 LONG_RUSSIAN_TEXT = (
     "Когда Алиса наконец открыла старый сундук, оттуда выпорхнула стая бумажных "

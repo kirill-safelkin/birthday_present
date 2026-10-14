@@ -12,9 +12,9 @@ import unittest  # noqa: E402
 
 import pygame  # noqa: E402
 
-from game.animation import IDLE, REACT, TALK, WALK, Animation, AnimationSet, Direction  # noqa: E402
-from game.character import Character  # noqa: E402
-from game.placeholder_sprite import placeholder_animations  # noqa: E402
+from game.graphics.animation import IDLE, REACT, TALK, WALK, Animation, AnimationSet, Direction  # noqa: E402
+from game.world.character import Character  # noqa: E402
+from game.graphics.placeholder import placeholder_animations  # noqa: E402
 
 ARROWS = {
     pygame.K_UP: Direction.UP,

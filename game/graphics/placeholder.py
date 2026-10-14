@@ -10,7 +10,7 @@ from __future__ import annotations
 import pygame
 
 import config
-from game.animation import IDLE, REACT, TALK, WALK, Animation, AnimationSet, Direction
+from game.graphics.animation import IDLE, REACT, TALK, WALK, Animation, AnimationSet, Direction
 
 FRAME_SIZE: config.Size = (16, 26)
 

@@ -15,7 +15,7 @@ from pathlib import Path  # noqa: E402
 import pygame  # noqa: E402
 
 import config  # noqa: E402
-from game.animation import (  # noqa: E402
+from game.graphics.animation import (  # noqa: E402
     IDLE,
     REACT,
     WALK,

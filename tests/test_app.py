@@ -15,7 +15,7 @@ from pathlib import Path  # noqa: E402
 
 import pygame  # noqa: E402
 
-from game.app import App  # noqa: E402
+from game.core.app import App  # noqa: E402
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 

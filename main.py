@@ -34,7 +34,7 @@ def main() -> int:
         )
         return 1
 
-    from game.app import run
+    from game.core.app import run
 
     try:
         run()

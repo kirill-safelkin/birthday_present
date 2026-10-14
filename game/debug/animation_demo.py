@@ -8,10 +8,10 @@ from __future__ import annotations
 import pygame
 
 import config
-from game.animation import TALK, Direction
-from game.character import Character
-from game.fonts import load_font, render_text
-from game.keys import matches_key
+from game.graphics.animation import TALK, Direction
+from game.world.character import Character
+from game.graphics.fonts import load_font, render_text
+from game.core.input import matches_key
 
 SCREEN_WIDTH, SCREEN_HEIGHT = config.LOGICAL_SIZE
 # Пол — шахматка из клеток 16×16: на ней видно движение и размер игрового пикселя.

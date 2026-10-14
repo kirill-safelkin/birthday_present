@@ -12,8 +12,8 @@ import unittest  # noqa: E402
 import pygame  # noqa: E402
 
 import config  # noqa: E402
-from game.animation import IDLE, REACT, TALK, WALK  # noqa: E402
-from game.animation_demo import FLOOR_RECT, AnimationDemo  # noqa: E402
+from game.graphics.animation import IDLE, REACT, TALK, WALK  # noqa: E402
+from game.debug.animation_demo import FLOOR_RECT, AnimationDemo  # noqa: E402
 
 
 def key_event(event_type: int, key: int, scancode: int = 0) -> pygame.event.Event:

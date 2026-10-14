@@ -7,8 +7,8 @@ import os
 import pygame
 
 import config
-from game.debug_screen import DebugScreen
-from game.display import Display
+from game.debug.debug_screen import DebugScreen
+from game.core.display import Display
 
 
 class App:

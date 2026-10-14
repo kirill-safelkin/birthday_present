@@ -8,12 +8,12 @@ from __future__ import annotations
 import pygame
 
 import config
-from game.animation_demo import AnimationDemo
-from game.demo_dialogue import DEMO_SCRIPT, QUESTION_ID
-from game.dialogue import DialogueChoice, DialogueController
-from game.dialogue_box import DialogueBox
-from game.fonts import load_font, render_text
-from game.keys import matches_key
+from game.debug.animation_demo import AnimationDemo
+from game.debug.demo_dialogue import DEMO_SCRIPT, QUESTION_ID
+from game.dialogue.model import DialogueChoice, DialogueController
+from game.dialogue.box import DialogueBox
+from game.graphics.fonts import load_font, render_text
+from game.core.input import matches_key
 
 # Как часто обновлять число FPS (в секундах): каждый кадр цифры бы мелькали.
 FPS_REFRESH_INTERVAL = 0.5

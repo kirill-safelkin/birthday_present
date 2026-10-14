@@ -12,7 +12,7 @@ import unittest  # noqa: E402
 import pygame  # noqa: E402
 
 import config  # noqa: E402
-from game.display import Display, fit_viewport  # noqa: E402
+from game.core.display import Display, fit_viewport  # noqa: E402
 
 LOGICAL = (320, 180)
 

@@ -69,19 +69,20 @@ python3 -m venv .venv
 ```text
 main.py               точка входа, проверка окружения и понятные ошибки запуска
 config.py             разрешения, FPS, цвета, шрифты
-game/app.py           игровой цикл: события → обновление → отрисовка
-game/display.py       окно, полноэкранный режим, масштабирование холста
-game/fonts.py         выбор системного шрифта с кириллицей, вывод текста без сглаживания
-game/dialogue.py      диалоги: сценарий, проверка сценария, контроллер (без отрисовки)
-game/dialogue_box.py  окно диалога: перенос строк, имя, текст, варианты ответа
-game/demo_dialogue.py демонстрационный диалог для проверки системы
-game/keys.py          проверка клавиш с учётом раскладки
-game/animation.py     анимации: кадры, проигрывание, наборы анимаций, листы спрайтов
-game/character.py     персонаж: позиция, движение, направление, состояние анимации
-game/placeholder_sprite.py  временный персонаж-манекен, нарисованный программно
-game/animation_demo.py      тестовый экран анимации
-game/debug_screen.py  временный экран проверки (заменится первой сценой)
-tests/                автоматические проверки
+game/core/app.py             игровой цикл: события → обновление → отрисовка
+game/core/display.py         окно, полноэкранный режим, масштабирование холста
+game/core/input.py           проверка клавиш с учётом раскладки
+game/graphics/animation.py   анимации: кадры, проигрывание, наборы анимаций, листы спрайтов
+game/graphics/fonts.py       выбор системного шрифта с кириллицей, вывод текста без сглаживания
+game/graphics/placeholder.py временный персонаж-манекен, нарисованный программно
+game/dialogue/model.py       диалоги: сценарий, проверка сценария, контроллер (без отрисовки)
+game/dialogue/box.py         окно диалога: перенос строк, имя, текст, варианты ответа
+game/world/character.py      персонаж: позиция, движение, направление, состояние анимации
+game/debug/                  временные экраны: проверка (debug_screen), тест анимации
+                             (animation_demo), демонстрационный диалог (demo_dialogue)
+assets/                      ресурсы, которые загружает игра (см. assets/README.md)
+art/                         исходники и концепты, игра их не читает
+tests/                       автоматические проверки, по файлу на область
 ```
 
 ## Диалоги
@@ -91,7 +92,7 @@ tests/                автоматические проверки
 завершает диалог:
 
 ```python
-from game.dialogue import DialogueChoice, DialogueNode, DialogueScript
+from game.dialogue.model import DialogueChoice, DialogueNode, DialogueScript
 
 SCRIPT = DialogueScript(
     start_id="hello",
@@ -144,8 +145,8 @@ SCRIPT = DialogueScript(
 считаются от папки проекта, а не от текущего каталога терминала:
 
 ```python
-from game.animation import IDLE, WALK, Animation, AnimationSet, Direction, load_sprite_sheet
-from game.character import Character
+from game.graphics.animation import IDLE, WALK, Animation, AnimationSet, Direction, load_sprite_sheet
+from game.world.character import Character
 
 # path — путь к листу спрайтов: 4 строки по 4 кадра 16×32.
 rows = load_sprite_sheet(path, (16, 32), columns=4, rows=4)
@@ -175,7 +176,7 @@ alice = Character("Алиса", animations, position=(160, 120))
 
 ## Известные особенности
 
-- Игра не использует OpenGL: в `game/app.py` задана переменная окружения
+- Игра не использует OpenGL: в `game/core/app.py` задана переменная окружения
   `SDL_FRAMEBUFFER_ACCELERATION=0`. Без неё SDL при создании окна проверяет OpenGL,
   и со сломанным драйвером видеокарты процесс падает с ошибкой `X Error … GLX`.
 - Масштабирование программное, поэтому в полноэкранном режиме нагрузка на процессор

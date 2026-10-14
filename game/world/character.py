@@ -13,9 +13,9 @@ from dataclasses import dataclass
 import pygame
 
 import config
-from game.animation import IDLE, REACT, TALK, WALK, AnimationPlayer, AnimationSet, Direction
-from game.keys import matches_key
-from game.placeholder_sprite import placeholder_animations
+from game.graphics.animation import IDLE, REACT, TALK, WALK, AnimationPlayer, AnimationSet, Direction
+from game.core.input import matches_key
+from game.graphics.placeholder import placeholder_animations
 
 
 @dataclass(frozen=True)

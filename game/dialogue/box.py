@@ -8,8 +8,8 @@ from dataclasses import dataclass
 import pygame
 
 import config
-from game.dialogue import DialogueController, DialogueError, DialogueNode, DialogueScript
-from game.fonts import load_font, render_text
+from game.dialogue.model import DialogueController, DialogueError, DialogueNode, DialogueScript
+from game.graphics.fonts import load_font, render_text
 
 SCREEN_WIDTH, SCREEN_HEIGHT = config.LOGICAL_SIZE
 FONT_SIZE = 10
