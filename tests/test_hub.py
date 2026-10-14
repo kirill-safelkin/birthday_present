@@ -511,7 +511,7 @@ class AppIntegrationTest(unittest.TestCase):
     def test_held_e_opens_portal_message_once(self) -> None:
         self.press(pygame.K_h, pygame.KSCAN_H)
         hub = self.app.scenes.current
-        walk_to_portal(hub, "forms")  # портал суши теперь открывает испытание; формуляры ещё закрыты
+        walk_to_portal(hub, "cakes")  # порталы суши и формуляров открывают испытания; торты ещё закрыты
         self.send(key(pygame.K_e, pygame.KSCAN_E), key(pygame.K_e, pygame.KSCAN_E), key(pygame.K_e, pygame.KSCAN_E))
         self.assertIsNotNone(hub.dialogue)
         self.assertTrue(hub.dialogue.is_typing)  # автоповтор не пролистал реплику

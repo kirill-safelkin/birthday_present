@@ -388,10 +388,10 @@ class AppIntegrationTest(unittest.TestCase):
         hub.alice.set_position(*portal.point)
         return hub
 
-    def test_only_sushi_trial_is_registered(self) -> None:
+    def test_sushi_trial_is_registered_and_cakes_still_closed(self) -> None:
         self.assertEqual(SUSHI_SCENE, TRIAL_SCENES["sushi"])
         self.assertTrue(self.app.scenes.is_registered("trial_sushi"))
-        self.assertFalse(self.app.scenes.is_registered(TRIAL_SCENES["forms"]))
+        self.assertTrue(self.app.scenes.is_registered(TRIAL_SCENES["forms"]))  # формуляры — следующее испытание
         self.assertFalse(self.app.scenes.is_registered(TRIAL_SCENES["cakes"]))
 
     def test_portal_opens_trial_and_success_returns_to_the_same_hub(self) -> None:
@@ -438,11 +438,11 @@ class AppIntegrationTest(unittest.TestCase):
         self.assertEqual(self.app.progress.fragments, 0)
         self.assertIn("прервано", hub.toast)
 
-    def test_other_portals_still_closed(self) -> None:
+    def test_unfinished_portals_still_closed(self) -> None:
         self.press(pygame.K_h, pygame.KSCAN_H)
         hub = self.app.scenes.current
         for portal in PORTALS:
-            if portal.id == "sushi":
+            if portal.id in ("sushi", "forms"):  # у этих испытаний уже есть сцены
                 continue
             hub.alice.set_position(*portal.point)
             self.press(pygame.K_e, pygame.KSCAN_E)
