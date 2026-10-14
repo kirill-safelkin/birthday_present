@@ -14,6 +14,7 @@ from pathlib import Path  # noqa: E402
 
 import pygame  # noqa: E402
 
+from game.graphics.animation import Direction  # noqa: E402
 from game.graphics.sprite_manifest import ManifestError, character_dirs, load_character_sprites  # noqa: E402
 
 FRAME = 8
@@ -255,6 +256,50 @@ class GroupErrorsTest(ManifestTestCase):
 
     def test_pose_with_unknown_frame(self) -> None:
         self.assert_error(lambda m, f: m.update(poses={"hello": "nobody"}), "poses")
+
+
+class AnimationSetTest(ManifestTestCase):
+    """Набор анимаций для Character из групп манифеста."""
+
+    def directional(self, manifest, folder):
+        manifest["animations"] = {
+            "idle_down": {"frames": ["f0"], "fps": 2, "loop": True, "draft": False},
+            "idle_left": {"frames": ["f1"], "fps": 2, "loop": True, "draft": False},
+            "walk_left": {"frames": ["f1", "f2"], "fps": 8, "loop": True, "draft": False},
+            "walk_up": {"frames": ["f3", "f2"], "fps": 8, "loop": True, "draft": True, "draft_reason": "тонкая"},
+            "back_view": {"frames": ["f3"], "fps": 1, "loop": True, "draft": False},
+        }
+
+    def test_groups_become_states_and_directions(self) -> None:
+        sprites = load_character_sprites(build_character(self.root, self.directional))
+        animations = sprites.animation_set()
+        walk_left = animations.get("walk", Direction.LEFT)
+        self.assertEqual([frame for frame in walk_left.frames], [sprites.frame("f1").image, sprites.frame("f2").image])
+        self.assertTrue(animations.has("idle", Direction.LEFT))
+        self.assertTrue(animations.has("back_view"))  # без направления — общая для всех
+        self.assertIs(animations.default, animations.get("idle", Direction.DOWN))
+
+    def test_draft_groups_are_skipped_unless_asked(self) -> None:
+        sprites = load_character_sprites(build_character(self.root, self.directional))
+        animations = sprites.animation_set()
+        self.assertFalse(animations.has("walk", Direction.UP))
+        self.assertIs(animations.get("walk", Direction.UP), animations.default)  # замена, а не исключение
+        self.assertTrue(sprites.animation_set(include_draft=True).has("walk", Direction.UP))
+
+    def test_frames_are_scaled_by_nearest_neighbour_into_new_surfaces(self) -> None:
+        sprites = load_character_sprites(build_character(self.root, self.directional))
+        source = sprites.frame("f1").image
+        before = pygame.image.tobytes(source, "RGBA")
+        frame = sprites.animation_set(size=16).get("idle", Direction.LEFT).frames[0]
+        self.assertEqual(frame.get_size(), (16, 16))
+        expected = pygame.transform.scale(source, (16, 16))
+        self.assertEqual(pygame.image.tobytes(frame, "RGBA"), pygame.image.tobytes(expected, "RGBA"))
+        self.assertEqual(pygame.image.tobytes(source, "RGBA"), before)
+
+    def test_character_without_idle_gets_first_frame_as_default(self) -> None:
+        sprites = load_character_sprites(build_character(self.root, lambda m, f: m.update(animations={})))
+        animations = sprites.animation_set()
+        self.assertEqual(animations.default.frames, (sprites.frames[0].image,))
 
 
 if __name__ == "__main__":

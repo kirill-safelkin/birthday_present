@@ -1,0 +1,385 @@
+"""Центральная площадь: первая управляемая локация, откуда Алиса заходит в три испытания.
+
+Оформление временное — геометрия, дорожки и подписи; настоящий дизайн появится позже.
+Используются существующие системы: Character (движение и анимации), CollisionMap
+(границы и препятствия), DialogueController/DialogueBox (реплики), SceneManager (переходы).
+
+Порталы испытаний пока ведут в никуда: если сцена испытания (TRIAL_SCENES) не
+зарегистрирована в менеджере, Чучмек объясняет, что портал не готов. Фрагменты здесь
+не выдаются — только показываются (GameProgress).
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from pathlib import Path
+
+import pygame
+
+import config
+from game.core.input import Action, actions_for
+from game.core.scenes import Scene
+from game.dialogue.box import DialogueBox
+from game.dialogue.model import DialogueController, DialogueScript
+from game.graphics.animation import Direction
+from game.graphics.fonts import load_font, render_text
+from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, ManifestError, load_character_sprites
+from game.story.hub_dialogue import CHUCHMEK_TALK, PORTAL_NOT_READY, all_scripts
+from game.world.character import Character
+from game.world.collision import CollisionMap
+from game.world.progress import TRIAL_NAMES, TRIALS, GameProgress
+
+HUB_SCENE = "hub"  # имя площади в SceneManager
+# Имена будущих сцен испытаний. Пока они не зарегистрированы, порталы закрыты.
+TRIAL_SCENES = {trial_id: f"trial_{trial_id}" for trial_id in TRIALS}
+
+WIDTH, HEIGHT = config.LOGICAL_SIZE
+SPRITE_SIZE = 32  # кадры 64×64 уменьшаются ровно вдвое ближайшим соседом
+WALK_SPEED = 64  # логических пикселей в секунду
+HUD_HEIGHT = 12  # верхняя полоса: название площади и фрагменты
+STATUS_TOP = 168  # нижняя полоса: подсказки; персонажи до неё не доходят
+# Где могут стоять ноги персонажа: между полосами интерфейса, и так, чтобы кадр шириной
+# SPRITE_SIZE не вылезал за края экрана (ноги уже кадра на SPRITE_SIZE/2 − 6 с каждой стороны).
+WALK_BOUNDS = pygame.Rect(10, 44, WIDTH - 20, STATUS_TOP - 4 - 44)
+SPAWN = (160, 158)  # точка появления Алисы — внизу площади
+TOAST_SECONDS = 3.0
+
+
+@dataclass(frozen=True)
+class Portal:
+    """Вход в испытание: сам портал (препятствие), точка, у которой с ним можно взаимодействовать,
+    и табличка с названием."""
+
+    id: str
+    rect: pygame.Rect
+    point: tuple[int, int]
+    radius: int
+    sign_center: tuple[int, int]
+    color: config.Color
+    glow: config.Color
+
+    @property
+    def name(self) -> str:
+        return TRIAL_NAMES[self.id]
+
+
+PORTALS = (
+    Portal("sushi", pygame.Rect(8, 70, 30, 30), (48, 92), 16, (23, 62), (196, 72, 66), (250, 170, 150)),
+    Portal("forms", pygame.Rect(144, 14, 32, 30), (160, 54), 18, (114, 22), (88, 110, 160), (176, 196, 236)),
+    Portal("cakes", pygame.Rect(282, 70, 30, 30), (272, 92), 16, (297, 62), (214, 120, 170), (252, 196, 226)),
+)
+CHUCHMEK_POSITION = (214, 80)  # недалеко от центра, выше дорожки к тортам
+CHUCHMEK_RADIUS = 24
+CHUCHMEK_OBSTACLE = pygame.Rect(206, 74, 16, 7)
+# Декорации: стволы деревьев и клумбы — препятствия в стороне от дорожек.
+TREES = ((62, 58), (258, 58))
+FLOWER_BEDS = (pygame.Rect(54, 138, 34, 12), pygame.Rect(232, 138, 34, 12))
+
+GRASS_COLOR = (150, 186, 120)
+GRASS_DARK_COLOR = (136, 172, 108)
+PATH_COLOR = (222, 202, 160)
+PATH_EDGE_COLOR = (196, 172, 128)
+PLAZA_COLOR = (232, 216, 180)
+MOSAIC_COLOR = (206, 178, 134)
+SPAWN_COLOR = (246, 232, 196)
+BED_COLOR = (124, 92, 66)
+FLOWER_COLORS = ((232, 120, 140), (250, 214, 110), (180, 150, 230))
+TREE_TRUNK_COLOR = (120, 88, 62)
+TREE_LEAF_COLOR = (92, 140, 84)
+HUD_COLOR = (44, 38, 58)
+HUD_TEXT_COLOR = (240, 230, 206)
+HUD_ACCENT_COLOR = (250, 206, 108)
+SIGN_COLOR = (150, 110, 74)
+SIGN_EDGE_COLOR = (98, 70, 48)
+SIGN_TEXT_COLOR = (252, 240, 214)
+PORTAL_INNER_COLOR = (54, 46, 72)
+MARK_COLOR = (255, 236, 140)
+
+
+@dataclass(frozen=True)
+class Interaction:
+    """С чем Алиса может взаимодействовать сейчас: портал испытания или Чучмек."""
+
+    kind: str  # "portal" или "chuchmek"
+    target: str  # идентификатор испытания или "chuchmek"
+    prompt: str
+
+
+def _load_sprites(root: Path, char_id: str) -> CharacterSprites | None:
+    try:
+        return load_character_sprites(root / char_id)
+    except (ManifestError, FileNotFoundError, pygame.error):
+        return None
+
+
+class HubScene(Scene):
+    """Площадь: Алиса ходит, разговаривает с Чучмеком и подходит к порталам испытаний.
+
+    Backspace (действие cancel) закрывает открытую реплику, а без реплики — возвращает
+    к предыдущей сцене, если она есть (например, к экрану проверки).
+    """
+
+    def __init__(self, progress: GameProgress | None = None, characters_dir: str | Path = CHARACTERS_DIR) -> None:
+        self.progress = progress if progress is not None else GameProgress()
+        root = Path(characters_dir)
+        obstacles = [portal.rect for portal in PORTALS] + [CHUCHMEK_OBSTACLE] + list(FLOWER_BEDS)
+        obstacles += [pygame.Rect(x - 3, y - 4, 6, 4) for x, y in TREES]
+        self.collision = CollisionMap(WALK_BOUNDS, obstacles)
+
+        alice_sprites = _load_sprites(root, "alice")
+        self.alice = Character(
+            "Алиса",
+            alice_sprites.animation_set(SPRITE_SIZE) if alice_sprites else None,
+            position=SPAWN,
+            speed=WALK_SPEED,
+            direction=Direction.UP,
+        )
+        self.alice.collider = self.collision.move
+        chuchmek_sprites = _load_sprites(root, "chuchmek")
+        # Чучмек стоит на месте лицом к игроку; его кадры никогда не отражаются.
+        self.chuchmek = Character(
+            "Чучмек",
+            chuchmek_sprites.animation_set(SPRITE_SIZE) if chuchmek_sprites else None,
+            position=CHUCHMEK_POSITION,
+            direction=Direction.DOWN,
+        )
+
+        self.box = DialogueBox()
+        for script in all_scripts():
+            self.box.check_fits(script)
+        self.dialogue: DialogueController | None = None
+        self.active_trial: str | None = None  # последний портал, к которому подходила Алиса
+        self.toast = ""  # короткое сообщение в нижней полосе
+        self._toast_time = 0.0
+        self.time = 0.0
+        self._font = load_font(9)
+        self._text_cache: dict[tuple[str, config.Color], pygame.Surface] = {}
+        self._background = _render_background()
+
+    # --- Состояние ---
+
+    def nearby(self) -> Interaction | None:
+        """Ближайшее, с чем можно взаимодействовать из текущей точки Алисы, или None."""
+        candidates: list[tuple[float, Interaction]] = []
+        x, y = self.alice.x, self.alice.y
+        for portal in PORTALS:
+            distance = math.dist((x, y), portal.point)
+            if distance <= portal.radius:
+                candidates.append((distance, Interaction("portal", portal.id, f"{portal.name}   E — войти")))
+        distance = math.dist((x, y), self._chuchmek_point())
+        if distance <= CHUCHMEK_RADIUS:
+            candidates.append((distance, Interaction("chuchmek", "chuchmek", "Чучмек   E — поговорить")))
+        return min(candidates, key=lambda item: item[0])[1] if candidates else None
+
+    def fragments_text(self) -> str:
+        return f"Фрагменты праздника: {self.progress.fragments}/{self.progress.total}"
+
+    def status_text(self) -> str:
+        """Что показывает нижняя полоса: подсказку рядом с целью, недавнее сообщение или управление."""
+        target = self.nearby()
+        if target is not None:
+            return target.prompt
+        if self.toast:
+            return self.toast
+        return "Стрелки/WASD — идти   E — действие"
+
+    @staticmethod
+    def _chuchmek_point() -> tuple[int, int]:
+        return CHUCHMEK_POSITION[0], CHUCHMEK_POSITION[1] + 6
+
+    # --- Управление ---
+
+    def handle_event(self, event: pygame.event.Event) -> None:
+        actions = actions_for(event) if event.type == pygame.KEYDOWN else frozenset()
+        if self.dialogue is not None:
+            if Action.CANCEL in actions:
+                self._close_dialogue()
+                return
+            if Action.INTERACT in actions and Action.CONFIRM not in actions:
+                self.dialogue.confirm()  # «E — поговорить»: той же клавишей и продолжаем разговор
+            else:
+                self.dialogue.handle_event(event)
+            if self.dialogue.is_finished:
+                self._close_dialogue()
+            return
+        if Action.CANCEL in actions:
+            self.finish()
+            return
+        self.alice.handle_event(event)
+        if Action.INTERACT in actions:
+            self.interact()
+
+    def interact(self) -> bool:
+        """Действие «interact» (E или Enter): работает только рядом с целью. True, если что-то произошло."""
+        target = self.nearby()
+        if target is None:
+            return False
+        self.alice.release_controls()
+        if target.kind == "chuchmek":
+            self._face(self._chuchmek_point())
+            self._open_dialogue(CHUCHMEK_TALK)
+            return True
+        portal = next(portal for portal in PORTALS if portal.id == target.target)
+        self._face(portal.point)
+        self.active_trial = portal.id
+        scene_name = TRIAL_SCENES[portal.id]
+        manager = self.manager
+        if manager is not None and manager.is_registered(scene_name):
+            manager.push(scene_name)  # сюда подключатся сцены испытаний
+        else:
+            # Испытание ещё не сделано: переходить некуда, фрагмент не выдаётся.
+            self._open_dialogue(PORTAL_NOT_READY[portal.id])
+            self._show_toast(f"Испытание «{portal.name}»: портал пока не готов")
+        return True
+
+    def _face(self, point: tuple[int, int]) -> None:
+        dx, dy = point[0] - self.alice.x, point[1] - self.alice.y
+        if abs(dx) >= abs(dy):
+            self.alice.face(Direction.RIGHT if dx > 0 else Direction.LEFT)
+        else:
+            self.alice.face(Direction.DOWN if dy > 0 else Direction.UP)
+
+    def _open_dialogue(self, script: DialogueScript) -> None:
+        self.dialogue = DialogueController(script)
+
+    def _close_dialogue(self) -> None:
+        """Реплика закрыта — управление снова у Алисы."""
+        self.dialogue = None
+        self.alice.release_controls()
+
+    def _show_toast(self, text: str) -> None:
+        self.toast = text
+        self._toast_time = TOAST_SECONDS
+
+    def update(self, dt: float) -> None:
+        self.time += dt
+        if self.dialogue is not None:
+            self.dialogue.update(dt)
+        self.alice.update(dt)
+        self.chuchmek.update(dt)
+        if self._toast_time > 0 and self.dialogue is None:
+            self._toast_time -= dt
+            if self._toast_time <= 0:
+                self.toast = ""
+
+    # --- Отрисовка ---
+
+    def draw(self, surface: pygame.Surface) -> None:
+        surface.blit(self._background, (0, 0))
+        target = self.nearby() if self.dialogue is None else None
+        # Всё, что стоит на площади, рисуется по высоте ног: ближние к игроку — поверх дальних.
+        drawables = [(portal.rect.bottom, lambda p=portal: self._draw_portal(surface, p, target)) for portal in PORTALS]
+        drawables += [(y, lambda t=(x, y): _draw_tree(surface, t)) for x, y in TREES]
+        drawables.append((self.chuchmek.y, lambda: self._draw_chuchmek(surface, target)))
+        drawables.append((self.alice.y + 0.1, lambda: self.alice.draw(surface)))
+        for _, draw in sorted(drawables, key=lambda item: item[0]):
+            draw()
+        self._draw_hud(surface)
+        if self.dialogue is not None and not self.dialogue.is_finished:
+            self.box.draw(surface, self.dialogue)
+        else:
+            self._draw_status(surface)
+
+    def _text(self, text: str, color: config.Color) -> pygame.Surface:
+        key = (text, color)
+        image = self._text_cache.get(key)
+        if image is None:
+            image = self._text_cache[key] = render_text(self._font, text, color)
+        return image
+
+    def _draw_portal(self, surface: pygame.Surface, portal: Portal, target: Interaction | None) -> None:
+        rect = portal.rect
+        near = target is not None and target.target == portal.id
+        pygame.draw.rect(surface, portal.color, rect, border_radius=6)
+        inner = rect.inflate(-8, -8)
+        pygame.draw.rect(surface, PORTAL_INNER_COLOR, inner, border_radius=4)
+        # Мерцание внутри портала: две полосы, бегущие сверху вниз.
+        for k in range(2):
+            y = inner.top + int((self.time * 10 + k * inner.height / 2) % inner.height)
+            pygame.draw.line(surface, portal.glow, (inner.left + 2, y), (inner.right - 3, y))
+        _draw_trial_icon(surface, portal.id, inner.center)
+        if near:
+            pulse = 1 + round(abs(math.sin(self.time * 5)))
+            pygame.draw.rect(surface, MARK_COLOR, rect.inflate(2 + pulse * 2, 2 + pulse * 2), 1, border_radius=7)
+        # Табличка с названием.
+        label = self._text(portal.name, SIGN_TEXT_COLOR)
+        plaque = label.get_rect(center=portal.sign_center).inflate(6, 2)
+        pygame.draw.rect(surface, SIGN_COLOR, plaque)
+        pygame.draw.rect(surface, SIGN_EDGE_COLOR, plaque, 1)
+        surface.blit(label, label.get_rect(center=plaque.center))
+
+    def _draw_chuchmek(self, surface: pygame.Surface, target: Interaction | None) -> None:
+        self.chuchmek.draw(surface)
+        if target is not None and target.kind == "chuchmek":
+            # Ромбик над шляпкой: с Чучмеком можно поговорить.
+            x, y = self.chuchmek.rect.centerx, self.chuchmek.rect.top - 4 - round(abs(math.sin(self.time * 4)) * 2)
+            pygame.draw.polygon(surface, MARK_COLOR, [(x, y - 3), (x + 3, y), (x, y + 3), (x - 3, y)])
+
+    def _draw_hud(self, surface: pygame.Surface) -> None:
+        surface.fill(HUD_COLOR, (0, 0, WIDTH, HUD_HEIGHT))
+        surface.blit(self._text("Центральная площадь", HUD_TEXT_COLOR), (4, 1))
+        fragments = self._text(self.fragments_text(), HUD_ACCENT_COLOR)
+        surface.blit(fragments, fragments.get_rect(topright=(WIDTH - 4, 1)))
+
+    def _draw_status(self, surface: pygame.Surface) -> None:
+        surface.fill(HUD_COLOR, (0, STATUS_TOP, WIDTH, HEIGHT - STATUS_TOP))
+        text = self._text(self.status_text(), HUD_TEXT_COLOR)
+        surface.blit(text, text.get_rect(center=(WIDTH // 2, STATUS_TOP + (HEIGHT - STATUS_TOP) // 2)))
+
+
+def _draw_trial_icon(surface: pygame.Surface, trial_id: str, center: tuple[int, int]) -> None:
+    """Простая геометрическая эмблема испытания внутри портала (не картинка и не эмодзи)."""
+    x, y = center
+    if trial_id == "sushi":  # ролл: рис, водоросль, начинка
+        pygame.draw.circle(surface, (250, 248, 240), (x, y), 6)
+        pygame.draw.circle(surface, (40, 60, 48), (x, y), 6, 1)
+        pygame.draw.circle(surface, (236, 120, 96), (x, y), 2)
+    elif trial_id == "forms":  # стопка бумаг со строчками
+        for offset in (2, 0):
+            pygame.draw.rect(surface, (244, 244, 236), (x - 5 + offset, y - 7 + offset, 10, 13))
+            pygame.draw.rect(surface, (120, 130, 150), (x - 5 + offset, y - 7 + offset, 10, 13), 1)
+        for row in range(3):
+            pygame.draw.line(surface, (120, 130, 150), (x - 2, y - 2 + row * 3), (x + 4, y - 2 + row * 3))
+    else:  # торт: два яруса и вишенка
+        pygame.draw.rect(surface, (248, 214, 228), (x - 7, y, 14, 6))
+        pygame.draw.rect(surface, (252, 238, 214), (x - 5, y - 5, 10, 5))
+        pygame.draw.circle(surface, (210, 40, 60), (x, y - 7), 2)
+
+
+def _draw_tree(surface: pygame.Surface, base: tuple[int, int]) -> None:
+    x, y = base
+    pygame.draw.rect(surface, TREE_TRUNK_COLOR, (x - 2, y - 8, 4, 8))
+    pygame.draw.circle(surface, TREE_LEAF_COLOR, (x, y - 14), 9)
+    pygame.draw.circle(surface, GRASS_DARK_COLOR, (x - 3, y - 17), 3)
+
+
+def _render_background() -> pygame.Surface:
+    """Трава, дорожки к трём порталам и к точке появления, мозаика в центре, клумбы."""
+    page = pygame.Surface(config.LOGICAL_SIZE)
+    page.fill(GRASS_COLOR)
+    for x in range(4, WIDTH, 16):  # редкие тёмные травинки, чтобы было видно движение
+        for y in range(18 + (x // 16) % 2 * 8, STATUS_TOP, 16):
+            page.fill(GRASS_DARK_COLOR, (x, y, 2, 1))
+    paths = [
+        pygame.Rect(38, 86, 104, 14),  # к суши
+        pygame.Rect(178, 86, 104, 14),  # к тортам
+        pygame.Rect(152, 44, 16, 50),  # к формулярам
+        pygame.Rect(152, 120, 16, 44),  # к точке появления
+    ]
+    for path in paths:
+        pygame.draw.rect(page, PATH_COLOR, path)
+        pygame.draw.rect(page, PATH_EDGE_COLOR, path, 1)
+    pygame.draw.circle(page, PLAZA_COLOR, (160, 106), 28)
+    pygame.draw.circle(page, PATH_EDGE_COLOR, (160, 106), 28, 1)
+    pygame.draw.circle(page, MOSAIC_COLOR, (160, 106), 10, 2)
+    for angle in range(0, 360, 45):
+        dx, dy = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+        page.fill(MOSAIC_COLOR, (160 + round(dx * 18) - 1, 106 + round(dy * 18) - 1, 3, 3))
+    pygame.draw.ellipse(page, SPAWN_COLOR, (148, 151, 24, 10))
+    pygame.draw.ellipse(page, PATH_EDGE_COLOR, (148, 151, 24, 10), 1)
+    for bed in FLOWER_BEDS:
+        pygame.draw.rect(page, BED_COLOR, bed, border_radius=3)
+        for index, x in enumerate(range(bed.left + 4, bed.right - 2, 6)):
+            page.fill(FLOWER_COLORS[index % 3], (x, bed.top + 3 + index % 2 * 4, 3, 3))
+    return page

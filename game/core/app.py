@@ -11,6 +11,8 @@ from game.core.display import Display
 from game.core.input import ActionInput
 from game.core.scenes import SceneManager
 from game.debug.debug_screen import DebugScreen
+from game.world.hub import HUB_SCENE, HubScene
+from game.world.progress import GameProgress
 
 
 class App:
@@ -21,6 +23,9 @@ class App:
         self._clock = pygame.time.Clock()
         self.input = ActionInput()
         self.scenes = SceneManager(self.input)
+        # Прогресс общий для всей игры: площадь, создаваемая заново, видит те же фрагменты.
+        self.progress = GameProgress()
+        self.scenes.register(HUB_SCENE, lambda: HubScene(self.progress))
         # Стартовая сцена — временный экран проверки. Его заменит первая игровая сцена.
         self.screen = DebugScreen(self._clock)
         self.scenes.push(self.screen)

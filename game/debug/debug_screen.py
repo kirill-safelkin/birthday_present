@@ -19,6 +19,7 @@ from game.dialogue.box import DialogueBox
 from game.dialogue.model import DialogueChoice, DialogueController
 from game.graphics.fonts import load_font, render_text
 from game.story.intro_scene import IntroScene
+from game.world.hub import HUB_SCENE, HubScene
 
 # Как часто обновлять число FPS (в секундах): каждый кадр цифры бы мелькали.
 FPS_REFRESH_INTERVAL = 0.5
@@ -28,6 +29,7 @@ HINTS = (
     ("A", "тест анимации"),
     ("P", "галерея спрайтов"),
     ("I", "вступление"),
+    ("H", "центральная площадь"),
     ("ESC", "выход"),
 )
 # Отладочные сочетания: код клавиши и скан-код (буквы работают в русской и немецкой раскладках).
@@ -35,12 +37,13 @@ DIALOGUE_KEY = (pygame.K_d, pygame.KSCAN_D)
 ANIMATION_KEY = (pygame.K_a, pygame.KSCAN_A)
 GALLERY_KEY = (pygame.K_p, pygame.KSCAN_P)
 INTRO_KEY = (pygame.K_i, pygame.KSCAN_I)
+HUB_KEY = (pygame.K_h, pygame.KSCAN_H)
 # Вертикальная раскладка: центры заголовка, подзаголовка и итога диалога, верх подсказок.
-TITLE_Y = 34
-SUBTITLE_Y = 52
-RESULT_Y = 71
-HINTS_TOP = 98
-LINE_STEP = 13
+TITLE_Y = 26
+SUBTITLE_Y = 42
+RESULT_Y = 59
+HINTS_TOP = 84
+LINE_STEP = 12
 
 
 class DebugScreen(Scene):
@@ -100,6 +103,10 @@ class DebugScreen(Scene):
     def intro(self) -> IntroScene | None:
         return self._open_scene(IntroScene)
 
+    @property
+    def hub(self) -> HubScene | None:
+        return self._open_scene(HubScene)
+
     def _open_scene(self, kind: type[Scene]) -> Scene | None:
         current = self.manager.current if self.manager is not None else None
         return current if isinstance(current, kind) else None
@@ -120,8 +127,10 @@ class DebugScreen(Scene):
         elif matches_key(event, *GALLERY_KEY):
             self.manager.push(SpriteGallery())
         elif matches_key(event, *INTRO_KEY):
-            # Центральной локации пока нет: после вступления — назад сюда с сообщением.
-            self.manager.push(IntroScene(on_complete=self._finish_intro))
+            # После вступления — центральная площадь; Backspace с неё вернёт сюда.
+            self.manager.push(IntroScene(on_complete=self._finish_intro, next_scene=HUB_SCENE))
+        elif matches_key(event, *HUB_KEY) and self.manager.is_registered(HUB_SCENE):
+            self.manager.push(HUB_SCENE)  # площадь напрямую — для проверки без вступления
 
     def update(self, dt: float) -> None:
         self._fps_timer += dt

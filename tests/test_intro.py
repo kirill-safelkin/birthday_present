@@ -54,6 +54,7 @@ from game.story.intro_scene import (  # noqa: E402
     TITLE_BOTTOM,
     IntroScene,
 )
+from game.world.hub import HubScene  # noqa: E402
 
 CHOICES = ("Начинаем с суши. У истории должен быть вкус.", "Сначала объясни, почему гриб разговаривает.")
 TITLE_TRUNCATED = "Алиса в стране чу…"
@@ -788,11 +789,15 @@ class AppIntegrationTest(unittest.TestCase):
         self.assertEqual(intro.dialogue.node.id, "r_hello")
         self.assertFalse(intro.dialogue.is_typing)
 
-    def test_completed_intro_returns_with_message_and_other_keys_still_work(self) -> None:
+    def test_completed_intro_leads_to_hub_then_back_with_message_and_keys_work(self) -> None:
         self.press(pygame.K_i, pygame.KSCAN_I)
         intro = self.app.scenes.current
         play_through(intro, choice_index=1)
         screen = self.app.screen
+        # После вступления — центральная площадь; экран проверки под ней, но неактивен.
+        self.assertIsInstance(self.app.scenes.current, HubScene)
+        self.assertEqual([type(scene) for scene in self.app.scenes.stack], [type(screen), HubScene])
+        self.press(pygame.K_BACKSPACE)
         self.assertIs(self.app.scenes.current, screen)
         self.assertEqual(screen.intro_choice.text, CHOICES[1])
         self.assertEqual(len(screen._result_labels), 2)

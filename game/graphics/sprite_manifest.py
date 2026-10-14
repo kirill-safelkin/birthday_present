@@ -32,7 +32,7 @@ from pathlib import Path, PurePosixPath
 import pygame
 
 import config
-from game.graphics.animation import Animation, resolve_path
+from game.graphics.animation import IDLE, Animation, AnimationSet, Direction, resolve_path
 
 MANIFEST_FORMAT = 1
 CHARACTERS_DIR = config.PROJECT_DIR / "assets" / "characters"
@@ -88,6 +88,49 @@ class CharacterSprites:
         group = self.groups[group_name]
         images = [self.frame(frame_id).image for frame_id in group.frame_ids]
         return Animation(images, group.fps, group.loop if loop is None else loop)
+
+    def animation_set(self, size: int | None = None, include_draft: bool = False) -> AnimationSet:
+        """Набор анимаций для Character: группа «<состояние>_<направление>» (например, walk_left)
+        становится состоянием walk для направления LEFT, группа без направления (idle) — общей.
+
+        size — размер кадра на холсте; кадры масштабируются ближайшим соседом в новые
+        поверхности, исходные не меняются. Черновые группы по умолчанию пропускаются:
+        вместо них AnimationSet подберёт замену (например, ходьба вверх — ожидание вверх).
+        """
+        scaled: dict[str, pygame.Surface] = {}
+
+        def image(frame_id: str) -> pygame.Surface:
+            if frame_id not in scaled:
+                source = self.frame(frame_id).image
+                if size is None:
+                    scaled[frame_id] = source
+                else:
+                    width, height = source.get_size()
+                    scaled[frame_id] = pygame.transform.scale(source, (size, max(1, height * size // width)))
+            return scaled[frame_id]
+
+        entries: list[tuple[str, Animation, Direction | None]] = []
+        for name, group in self.groups.items():
+            if group.draft and not include_draft:
+                continue
+            state, _, suffix = name.rpartition("_")
+            direction = _DIRECTIONS.get(suffix)
+            if direction is None or not state:
+                state, direction = name, None
+            animation = Animation([image(frame_id) for frame_id in group.frame_ids], group.fps, group.loop)
+            entries.append((state, animation, direction))
+
+        # Запасная анимация на крайний случай: ожидание лицом вниз, иначе первый кадр персонажа.
+        default = next((a for s, a, d in entries if s == IDLE and d is Direction.DOWN), None)
+        default = default or next((a for s, a, d in entries if s == IDLE), None)
+        default = default or Animation([image(self.frames[0].id)], 1)
+        animations = AnimationSet(default)
+        for state, animation, direction in entries:
+            animations.add(state, animation, direction)
+        return animations
+
+
+_DIRECTIONS = {"down": Direction.DOWN, "up": Direction.UP, "left": Direction.LEFT, "right": Direction.RIGHT}
 
 
 def character_dirs(root: str | Path = CHARACTERS_DIR) -> list[Path]:

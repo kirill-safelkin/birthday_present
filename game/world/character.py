@@ -1,13 +1,14 @@
 """Игровой персонаж: позиция, движение, направление взгляда и анимация.
 
 Класс общий для всех героев: Алиса, Лео, Чучмек, клубника и остальные отличаются
-только набором анимаций (AnimationSet) и скоростью. Персонаж не знает о локациях
-и столкновениях — это будет задачей сцены.
+только набором анимаций (AnimationSet) и скоростью. Персонаж не знает о локациях:
+столкновения задаёт сцена через необязательный collider (см. game/world/collision.py).
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import pygame
 
@@ -25,6 +26,11 @@ MOVE_DIRECTIONS = {
     Action.MOVE_LEFT: Direction.LEFT,
     Action.MOVE_RIGHT: Direction.RIGHT,
 }
+
+
+# Функция столкновений: (x, y, dx, dy) → куда персонаж реально попадёт.
+Collider = Callable[[float, float, float, float], tuple[float, float]]
+COLLISION_STEP = 1.0  # пикселей за один вызов collider
 
 
 class Character:
@@ -58,6 +64,9 @@ class Character:
         self._heading = pygame.Vector2()  # единичный вектор направления движения; нулевой, когда стоит
         self._controls = ActionInput()  # какие действия движения сейчас зажаты
         self._resume_after_animation = False  # вернуться к ходьбе или idle, когда реакция доиграет
+        # Без collider персонаж ходит свободно (как в тесте анимации); сцена с препятствиями
+        # задаёт его, например CollisionMap.move.
+        self.collider: Collider | None = None
 
     @property
     def velocity(self) -> pygame.Vector2:
@@ -154,8 +163,7 @@ class Character:
         """Действия движения (move_up и т. д.). Возвращает True, если событие относится к движению."""
         if event.type == pygame.WINDOWFOCUSLOST:
             # Отпускание клавиш в неактивном окне может не дойти до игры: считаем их отпущенными.
-            self._controls.release_all()
-            self._follow_controls()
+            self.release_controls()
             return False
         if not self._controls.actions_for(event) & MOVE_ACTIONS:
             self._controls.handle_event(event)  # остальные клавиши тоже помним: так виден их автоповтор
@@ -172,14 +180,28 @@ class Character:
         """Сдвигает персонажа и его анимацию на dt секунд."""
         if not 0 <= dt < math.inf:
             raise ValueError(f"dt должен быть неотрицательным конечным числом, а не {dt!r}")
-        self.x += self._heading.x * self.speed * dt
-        self.y += self._heading.y * self.speed * dt
+        dx = self._heading.x * self.speed * dt
+        dy = self._heading.y * self.speed * dt
+        if self.collider is None:
+            self.x += dx
+            self.y += dy
+        else:
+            # Отрезками не длиннее COLLISION_STEP: путь вдоль стен и вокруг углов почти не зависит
+            # от того, пришёл один большой dt или много маленьких.
+            steps = max(1, math.ceil(math.hypot(dx, dy) / COLLISION_STEP))
+            for _ in range(steps):
+                self.x, self.y = self.collider(self.x, self.y, dx / steps, dy / steps)
         self.player.update(dt)
         if self._resume_after_animation and self.player.is_finished:
             self._follow_controls(always_stop=True)
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.blit(self.player.frame, self.rect)
+
+    def release_controls(self) -> None:
+        """Забывает зажатые клавиши и останавливается, если шёл (например, когда открылся диалог)."""
+        self._controls.release_all()
+        self._follow_controls()
 
     def _follow_controls(self, always_stop: bool = False) -> None:
         """Идёт туда, куда ведут зажатые клавиши. Если они никуда не ведут — останавливается,
