@@ -605,15 +605,16 @@ class AppIntegrationTest(unittest.TestCase):
         self.press(pygame.K_e, pygame.KSCAN_E)
         return self.app.scenes.current
 
-    def test_forms_trial_is_registered_and_cakes_still_closed(self) -> None:
+    def test_forms_trial_is_registered_next_to_the_others(self) -> None:
         self.assertEqual(FORMS_SCENE, "trial_forms")
         self.assertEqual(FORMS_SCENE, TRIAL_SCENES["forms"])
         self.assertTrue(self.app.scenes.is_registered(FORMS_SCENE))
         self.assertTrue(self.app.scenes.is_registered(TRIAL_SCENES["sushi"]))
-        self.assertFalse(self.app.scenes.is_registered(TRIAL_SCENES["cakes"]))
+        self.assertTrue(self.app.scenes.is_registered(TRIAL_SCENES["cakes"]))  # торты — третье испытание
         hub = self.open_hub()
-        self.assertIs(self.enter_portal(hub, "cakes"), hub)
-        self.assertIn("не готов", hub.dialogue.node.text)
+        cakes = self.enter_portal(hub, "cakes")
+        self.assertIsNot(cakes, hub)
+        self.assertNotIsInstance(cakes, FormsTrialScene)  # правый портал ведёт не в архив
 
     def test_upper_portal_opens_forms_and_success_returns_to_the_same_hub(self) -> None:
         hub = self.open_hub()

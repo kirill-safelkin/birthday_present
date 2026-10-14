@@ -388,11 +388,11 @@ class AppIntegrationTest(unittest.TestCase):
         hub.alice.set_position(*portal.point)
         return hub
 
-    def test_sushi_trial_is_registered_and_cakes_still_closed(self) -> None:
+    def test_sushi_trial_is_registered_next_to_the_others(self) -> None:
         self.assertEqual(SUSHI_SCENE, TRIAL_SCENES["sushi"])
         self.assertTrue(self.app.scenes.is_registered("trial_sushi"))
-        self.assertTrue(self.app.scenes.is_registered(TRIAL_SCENES["forms"]))  # формуляры — следующее испытание
-        self.assertFalse(self.app.scenes.is_registered(TRIAL_SCENES["cakes"]))
+        self.assertTrue(self.app.scenes.is_registered(TRIAL_SCENES["forms"]))  # формуляры — второе испытание
+        self.assertTrue(self.app.scenes.is_registered(TRIAL_SCENES["cakes"]))  # торты — третье
 
     def test_portal_opens_trial_and_success_returns_to_the_same_hub(self) -> None:
         hub = self.go_to_sushi_portal()
@@ -438,17 +438,21 @@ class AppIntegrationTest(unittest.TestCase):
         self.assertEqual(self.app.progress.fragments, 0)
         self.assertIn("прервано", hub.toast)
 
-    def test_unfinished_portals_still_closed(self) -> None:
+    def test_other_portals_open_their_own_trials(self) -> None:
+        # Закрытых порталов не осталось: остальные два ведут в свои испытания, а не на кухню.
         self.press(pygame.K_h, pygame.KSCAN_H)
         hub = self.app.scenes.current
         for portal in PORTALS:
-            if portal.id in ("sushi", "forms"):  # у этих испытаний уже есть сцены
+            if portal.id == "sushi":
                 continue
             hub.alice.set_position(*portal.point)
             self.press(pygame.K_e, pygame.KSCAN_E)
-            self.assertIs(self.app.scenes.current, hub)
-            self.assertIn("не готов", hub.dialogue.node.text)
+            trial = self.app.scenes.current
+            self.assertIsNot(trial, hub)
+            self.assertNotIsInstance(trial, SushiTrialScene)
+            self.assertIsNone(hub.dialogue)  # без реплики «портал не готов»
             self.press(pygame.K_BACKSPACE)
+            self.assertIs(self.app.scenes.current, hub)
 
     def test_escape_f11_and_close_inside_trial(self) -> None:
         self.go_to_sushi_portal()

@@ -11,6 +11,7 @@ from game.core.display import Display
 from game.core.input import ActionInput
 from game.core.scenes import SceneManager
 from game.debug.debug_screen import DebugScreen
+from game.trials.cakes_scene import CAKES_SCENE, CakesTrialScene
 from game.trials.forms_scene import FORMS_SCENE, FormsTrialScene
 from game.trials.sushi_scene import SUSHI_SCENE, SushiTrialScene
 from game.world.hub import HUB_SCENE, HubScene
@@ -28,9 +29,10 @@ class App:
         # Прогресс общий для всей игры: площадь, создаваемая заново, видит те же фрагменты.
         self.progress = GameProgress()
         self.scenes.register(HUB_SCENE, lambda: HubScene(self.progress))
-        # Испытания: суши и формуляры. Торты не регистрируются — их портал закрыт.
+        # Испытания: суши, формуляры и торты — по порталу на каждое, с тем же прогрессом.
         self.scenes.register(SUSHI_SCENE, lambda: SushiTrialScene(self.progress))
         self.scenes.register(FORMS_SCENE, lambda: FormsTrialScene(self.progress))
+        self.scenes.register(CAKES_SCENE, lambda: CakesTrialScene(self.progress))
         # Стартовая сцена — временный экран проверки. Его заменит первая игровая сцена.
         self.screen = DebugScreen(self._clock)
         self.scenes.push(self.screen)

@@ -508,13 +508,18 @@ class AppIntegrationTest(unittest.TestCase):
         self.send(pygame.event.Event(pygame.QUIT))
         self.assertFalse(self.app.running)
 
-    def test_held_e_opens_portal_message_once(self) -> None:
+    def test_held_e_opens_portal_once(self) -> None:
+        # Все порталы теперь ведут в испытания: зажатая E открывает одно испытание, и автоповтор
+        # не пролистывает его первую реплику и не открывает портал повторно.
         self.press(pygame.K_h, pygame.KSCAN_H)
         hub = self.app.scenes.current
-        walk_to_portal(hub, "cakes")  # порталы суши и формуляров открывают испытания; торты ещё закрыты
+        walk_to_portal(hub, "cakes")
+        depth = len(self.app.scenes.stack)
         self.send(key(pygame.K_e, pygame.KSCAN_E), key(pygame.K_e, pygame.KSCAN_E), key(pygame.K_e, pygame.KSCAN_E))
-        self.assertIsNotNone(hub.dialogue)
-        self.assertTrue(hub.dialogue.is_typing)  # автоповтор не пролистал реплику
+        self.assertEqual(len(self.app.scenes.stack), depth + 1)
+        trial = self.app.scenes.current
+        self.assertIsNotNone(trial.dialogue)
+        self.assertTrue(trial.dialogue.is_typing)  # автоповтор не пролистал реплику
 
 
 if __name__ == "__main__":
