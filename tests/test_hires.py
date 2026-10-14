@@ -12,7 +12,9 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import hashlib  # noqa: E402
+import tempfile  # noqa: E402
 import unittest  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 import pygame  # noqa: E402
 
@@ -110,7 +112,8 @@ class ViewTransformTest(unittest.TestCase):
         self.assertEqual(ultrawide.point((WIDTH, HEIGHT)), (2240, 1080))
         small = transform_for((700, 420))  # окно, растянутое вручную: ×2 с полями
         self.assertEqual(small.scale, 2)
-        self.assertEqual(small.rect(pygame.Rect(10, 10, 4, 4)), pygame.Rect(small.viewport.x + 20, small.viewport.y + 20, 8, 8))
+        expected = pygame.Rect(small.viewport.x + 20, small.viewport.y + 20, 8, 8)
+        self.assertEqual(small.rect(pygame.Rect(10, 10, 4, 4)), expected)
 
     def test_logical_pixels_map_to_the_same_blocks_as_the_scaled_canvas(self) -> None:
         # Пиксель холста, увеличенный Display.present(), и прямоугольник трансформации совпадают.
@@ -280,7 +283,8 @@ class HiResLayerTest(PygameTestCase):
         self.assertEqual(clipped.get_bounding_rects()[0].bottom, 90)  # ниже линии y=30 холста не видно
         rotated = pygame.mask.from_threshold(screen.subsurface((540, 0, 300, 250)), (200, 40, 90), (1, 1, 1, 255))
         self.assertGreater(rotated.get_bounding_rects()[0].width, 96)  # повёрнутый квадрат шире
-        self.assertEqual(tuple(screen.get_at((transform.x(200) + 2, transform.y(10) + 2)))[:3], (0, 0, 0))  # углы прозрачны
+        corner = (transform.x(200) + 2, transform.y(10) + 2)
+        self.assertEqual(tuple(screen.get_at(corner))[:3], (0, 0, 0))  # углы повёрнутого кадра прозрачны
 
     def test_logical_drawing_goes_to_canvas_until_something_overlaps(self) -> None:
         canvas = pygame.Surface(config.LOGICAL_SIZE)
@@ -423,7 +427,8 @@ class DialogueLayoutTest(PygameTestCase):
                                 self.assertLessEqual(font.size(node.text[start:end])[0], inner * scale)
                             bold = fonts.font(TEXT_STYLE.size, scale, bold=True)
                             if layout.name_tab is not None:
-                                self.assertLessEqual(bold.size(node.speaker)[0], (layout.name_tab.width - NAME_PADDING_X) * scale)
+                                tab_width = layout.name_tab.width - NAME_PADDING_X
+                                self.assertLessEqual(bold.size(node.speaker)[0], tab_width * scale)
                             self.assertGreaterEqual(layout.box.top, 0)
                             self.assertLessEqual(layout.box.bottom, HEIGHT)
                             rows = len(layout.text_spans) * layout.line_height
@@ -510,7 +515,8 @@ class HubHiResTest(PygameTestCase):
         layer, _ = self.draw(hub)
         commands = layer.commands
         alice = next(i for i, c in enumerate(commands) if isinstance(c, SpriteCommand) and c.rect == hub.alice.rect)
-        tree_patches = [i for i, c in enumerate(commands) if isinstance(c, PatchCommand) and c.rect.collidepoint(x, y - 14)]
+        crown = (x, y - 14)
+        tree_patches = [i for i, c in enumerate(commands) if isinstance(c, PatchCommand) and c.rect.collidepoint(crown)]
         self.assertTrue(tree_patches and tree_patches[0] > alice)
         hub.alice.set_position(x, y + 14)  # перед деревом: дерево на холсте, под ней
         layer, _ = self.draw(hub)
@@ -692,6 +698,37 @@ class IntroHiResTest(PygameTestCase):
         self.assertLess(ERROR_H, HEIGHT)
 
 
+class PlaceholderHiResTest(PygameTestCase):
+    def test_scenes_without_sprites_draw_placeholders_through_the_layer(self) -> None:
+        transform = transform_for(WINDOWED)
+        screen = pygame.Surface(WINDOWED)
+        canvas = pygame.Surface(config.LOGICAL_SIZE)
+        layer = HiResLayer(strict=True)
+        with tempfile.TemporaryDirectory() as empty:
+            hub = HubScene(characters_dir=Path(empty))
+            hub.update(0.1)
+            hub.draw(canvas, layer)
+            sprites = [c for c in layer.commands if isinstance(c, SpriteCommand)]
+            # Временные манекены — на тех же местах и того же размера, что и на холсте.
+            expected = sorted([tuple(hub.alice.rect), tuple(hub.chuchmek.rect)])
+            self.assertEqual(sorted(tuple(c.rect) for c in sprites), expected)
+            layer.render(screen, transform)
+            scene = IntroScene(characters_dir=Path(empty))
+            for _ in range(20000):
+                if scene.completed:
+                    break
+                layer.clear()
+                scene.draw(canvas, layer)
+                layer.render(screen, transform)
+                dialogue = scene.dialogue
+                if dialogue is not None and not dialogue.is_typing:
+                    dialogue.confirm()
+                    scene._sync_dialogue()
+                else:
+                    scene.update(1 / 30)
+            self.assertTrue(scene.completed)
+
+
 class AppHiResTest(unittest.TestCase):
     def setUp(self) -> None:
         pygame.display.init()
@@ -732,7 +769,8 @@ class AppHiResTest(unittest.TestCase):
                         self.assertLessEqual(abs(screen.get_at(point)[channel] - blended), 2, (size, point))
                     checked += 1
             self.assertGreater(checked, 50)
-            places[size] = (rect.x - transform.viewport.x) / transform.scale, (rect.y - transform.viewport.y) / transform.scale
+            viewport = transform.viewport
+            places[size] = (rect.x - viewport.x) / transform.scale, (rect.y - viewport.y) / transform.scale
             self.assertEqual(self.app.display.hires.commands, [])  # слой очищен после вывода
         self.assertEqual(places[WINDOWED], places[FULLSCREEN])
         self.assertEqual((hub.alice.x, hub.alice.y), (100, 120))
