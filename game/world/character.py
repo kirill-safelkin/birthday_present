@@ -15,6 +15,7 @@ import pygame
 import config
 from game.core.input import MOVE_ACTIONS, Action, ActionInput
 from game.graphics.animation import IDLE, REACT, TALK, WALK, AnimationPlayer, AnimationSet, Direction
+from game.graphics.hires import HiResLayer
 from game.graphics.placeholder import placeholder_animations
 
 
@@ -195,8 +196,13 @@ class Character:
         if self._resume_after_animation and self.player.is_finished:
             self._follow_controls(always_stop=True)
 
-    def draw(self, surface: pygame.Surface) -> None:
-        surface.blit(self.player.frame, self.rect)
+    def draw(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Рисует текущий кадр на холсте или — если сцена дала слой высокого разрешения —
+        исходный кадр того же размера и на том же месте холста, но в разрешении окна."""
+        if hires is not None:
+            hires.sprite(self.player.source, self.rect)
+        else:
+            surface.blit(self.player.frame, self.rect)
 
     def release_controls(self) -> None:
         """Забывает зажатые клавиши и останавливается, если шёл (например, когда открылся диалог)."""

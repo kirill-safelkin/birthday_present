@@ -57,3 +57,12 @@ FONT_CANDIDATES: tuple[str, ...] = (
     "ubuntumono",
     "freemono",
 )
+# Текст высокого разрешения (персонажи и надписи в разрешении окна, game/graphics/hires.py):
+# системные шрифты без засечек с кириллицей в порядке предпочтения. DejaVu Sans — шрифт
+# интерфейса Linux Mint по умолчанию. Если не найден ни один — встроенный шрифт Pygame.
+TEXT_FONT_CANDIDATES: tuple[str, ...] = (
+    "dejavusans",
+    "notosans",
+    "liberationsans",
+    "freesans",
+)

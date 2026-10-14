@@ -94,8 +94,10 @@ class CharacterSprites:
         становится состоянием walk для направления LEFT, группа без направления (idle) — общей.
 
         size — размер кадра на холсте; кадры масштабируются ближайшим соседом в новые
-        поверхности, исходные не меняются. Черновые группы по умолчанию пропускаются:
-        вместо них AnimationSet подберёт замену (например, ходьба вверх — ожидание вверх).
+        поверхности, исходные не меняются и остаются в анимации как sources: по ним слой
+        высокого разрешения рисует персонажа в окне без потери деталей. Черновые группы
+        по умолчанию пропускаются: вместо них AnimationSet подберёт замену (например,
+        ходьба вверх — ожидание вверх).
         """
         scaled: dict[str, pygame.Surface] = {}
 
@@ -117,13 +119,19 @@ class CharacterSprites:
             direction = _DIRECTIONS.get(suffix)
             if direction is None or not state:
                 state, direction = name, None
-            animation = Animation([image(frame_id) for frame_id in group.frame_ids], group.fps, group.loop)
+            animation = Animation(
+                [image(frame_id) for frame_id in group.frame_ids],
+                group.fps,
+                group.loop,
+                sources=[self.frame(frame_id).image for frame_id in group.frame_ids] if size is not None else None,
+            )
             entries.append((state, animation, direction))
 
         # Запасная анимация на крайний случай: ожидание лицом вниз, иначе первый кадр персонажа.
         default = next((a for s, a, d in entries if s == IDLE and d is Direction.DOWN), None)
         default = default or next((a for s, a, d in entries if s == IDLE), None)
-        default = default or Animation([image(self.frames[0].id)], 1)
+        first = self.frames[0]
+        default = default or Animation([image(first.id)], 1, sources=[first.image] if size is not None else None)
         animations = AnimationSet(default)
         for state, animation, direction in entries:
             animations.add(state, animation, direction)

@@ -18,6 +18,7 @@ import pygame
 
 import config
 from game.core.input import ActionInput
+from game.graphics.hires import HiResLayer
 
 
 class SceneError(RuntimeError):
@@ -35,6 +36,9 @@ class Scene:
     manager: SceneManager | None = None
     is_finished = False  # сцена завершилась и закрыта (или будет закрыта, если стека нет)
     is_overlay = False
+    # Сцена умеет рисовать персонажей и текст в разрешении окна: тогда менеджер вызывает
+    # draw(surface, hires) со слоем высокого разрешения (game/graphics/hires.py).
+    supports_hires = False
 
     def enter(self) -> None:
         pass
@@ -143,16 +147,26 @@ class SceneManager:
         if self.current is not None:
             self.current.update(dt)
 
-    def draw(self, surface: pygame.Surface) -> None:
-        """Рисует верхнюю сцену, а под прозрачной — и сцены ниже (они при этом не обновляются)."""
+    def draw(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Рисует верхнюю сцену, а под прозрачной — и сцены ниже (они при этом не обновляются).
+
+        hires — слой высокого разрешения кадра. Его получают только сцены, которые умеют
+        с ним работать (supports_hires), и только если таковы и все сцены над ними: слой
+        выводится поверх всего холста, и персонажи нижней сцены не должны оказаться поверх
+        верхней, которая рисует только на холсте.
+        """
         if not self._stack:
             surface.fill(config.BACKGROUND_COLOR)
             return
         bottom = len(self._stack) - 1
         while bottom > 0 and self._stack[bottom].is_overlay:
             bottom -= 1
-        for scene in self._stack[bottom:]:
-            scene.draw(surface)
+        scenes = self._stack[bottom:]
+        for index, scene in enumerate(scenes):
+            if hires is not None and all(above.supports_hires for above in scenes[index:]):
+                scene.draw(surface, hires)
+            else:
+                scene.draw(surface)
 
     def _resolve(self, scene: Scene | str) -> Scene:
         if isinstance(scene, str):

@@ -8,6 +8,11 @@
 
 Оформление временное: страница и эффекты нарисованы программно, настоящие локации
 появятся отдельно.
+
+Со слоем высокого разрешения (game/graphics/hires.py) персонажи рисуются из исходных кадров
+64×64, а заголовок, реплики, сообщение об ошибке и табличка финала — шрифтом размера окна.
+При сбое «подвисший» кадр записывается вместе с командами слоя и рвётся полосами уже
+в разрешении окна (HiResLayer.torn): персонажи и заголовок рвутся вместе со страницей.
 """
 
 from __future__ import annotations
@@ -24,7 +29,8 @@ from game.core.scenes import Scene
 from game.dialogue.box import DialogueBox
 from game.dialogue.model import DialogueChoice, DialogueController
 from game.graphics.animation import AnimationPlayer
-from game.graphics.fonts import load_font, render_text
+from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
+from game.graphics.hires import HiResLayer, logical_target
 from game.graphics.placeholder import placeholder_animations
 from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, try_load_character_sprites
 from game.story.intro_dialogue import (
@@ -112,6 +118,14 @@ FLASH_COLOR = (255, 250, 236)
 DIM_COLOR = (52, 38, 74)
 FINALE_TEXT = "…и сказка пошла совсем не по плану"
 
+# Текст в разрешении окна (слой высокого разрешения); размеры — в логических пикселях.
+TITLE_STYLE = TextStyle(15, TITLE_COLOR, bold=True, shadow=TITLE_SHADOW_COLOR)
+TITLE_FINAL_STYLE = TextStyle(15, TITLE_FINAL_COLOR, bold=True, shadow=TITLE_FINAL_SHADOW_COLOR)
+ERROR_TITLE_STYLE = TextStyle(9, CREAM_COLOR, bold=True)
+ERROR_LINE_STYLE = TextStyle(8, INK_COLOR)
+ERROR_LINE_STEP = 13  # строки сообщения об ошибке — через столько пикселей
+FINALE_STYLE = TextStyle(9, INK_COLOR)
+
 
 def _ease(t: float) -> float:
     """Плавный разгон и торможение: 0 → 1."""
@@ -173,8 +187,12 @@ class StageActor:
         if self.player is not None:
             self.player.update(dt)
 
+    def source_image(self) -> pygame.Surface:
+        """Текущий кадр без масштабирования: 64×64 из манифеста или временный манекен."""
+        return self.player.frame if self.player is not None else self._pose_image()
+
     def image(self) -> pygame.Surface:
-        source = self.player.frame if self.player is not None else self._pose_image()
+        source = self.source_image()
         if source.get_size() != (64, 64):
             return source  # временный манекен уже нужного размера
         scaled = self._scaled.get(id(source))
@@ -209,9 +227,22 @@ class StageActor:
         """Прямоугольник, который персонаж занимает на холсте сейчас."""
         return self._placed_image(ground)[1]
 
-    def draw(self, surface: pygame.Surface, ground: int, clip_bottom: int | None = None) -> None:
-        """Рисует персонажа; clip_bottom — линия, ниже которой его не видно (вход в нору)."""
+    def draw(
+        self, surface: pygame.Surface, ground: int, clip_bottom: int | None = None, hires: HiResLayer | None = None
+    ) -> None:
+        """Рисует персонажа; clip_bottom — линия, ниже которой его не видно (вход в нору).
+
+        Со слоем hires — исходный кадр на том же месте холста и того же размера (с приседанием,
+        наклоном и прозрачностью), но в разрешении окна.
+        """
         if not self.visible or self.alpha <= 0:
+            return
+        if hires is not None:
+            width, height = self.image().get_size()
+            rect = pygame.Rect(0, 0, width, max(1, round(height * self.squash)) if self.squash != 1.0 else height)
+            rect.midbottom = (round(self.x + self.dx), ground - round(self.lift))
+            clip = pygame.Rect(0, 0, WIDTH, clip_bottom) if clip_bottom is not None else None
+            hires.sprite(self.source_image(), rect, alpha=self.alpha, angle=self.tilt, clip=clip)
             return
         image, rect = self._placed_image(ground)
         if self.alpha < 255:
@@ -241,6 +272,8 @@ class IntroScene(Scene):
     если задана зарегистрированная сцена next_scene (будущая центральная локация) —
     переход на неё, иначе возврат к предыдущей сцене. Backspace прерывает вступление."""
 
+    supports_hires = True
+
     def __init__(
         self,
         on_complete: Callable[[IntroScene], None] | None = None,
@@ -259,8 +292,10 @@ class IntroScene(Scene):
         self.box = DialogueBox()
         for script in all_scripts():
             self.box.check_fits(script)
-        # Персонажи стоят выше самого высокого окна диалога: текст их не закрывает.
-        self.ground = min(self._box_top(node) for script in all_scripts() for node in script.nodes.values()) - 3
+        # Персонажи стоят выше самого высокого окна диалога (при любом способе вывода текста):
+        # текст их не закрывает.
+        nodes = [node for script in all_scripts() for node in script.nodes.values()]
+        self.ground = min(self._box_top(node, hires) for node in nodes for hires in (False, True)) - 3
 
         self.beat_index = 0
         self.beat_time = 0.0
@@ -294,9 +329,15 @@ class IntroScene(Scene):
         self._font = load_font(9)
         self._font10 = load_font(10)
         self._text_cache: dict[tuple, pygame.Surface] = {}
+        self._fonts = TextFonts()
+        self.finale_metrics = self._fonts.metrics(FINALE_STYLE)
         self._pages = {"fairy": _render_fairy_page(), "absurd": _render_absurd_page()}
         self._buffer = pygame.Surface(config.LOGICAL_SIZE)
         self._lag_buffer = pygame.Surface(config.LOGICAL_SIZE)
+        # «Подвисший» кадр сбоя для слоя высокого разрешения: страница и команды персонажей и заголовка.
+        self._lag_page = pygame.Surface(config.LOGICAL_SIZE)
+        self._lag_commands: tuple = ()
+        self._lag_hires_slot = -1
         self._flash_surface = pygame.Surface(config.LOGICAL_SIZE)
         self._flash_surface.fill(FLASH_COLOR)
         self._dim_surface = pygame.Surface(config.LOGICAL_SIZE)
@@ -335,8 +376,8 @@ class IntroScene(Scene):
         """Ответ Алисы в части E, если он уже выбран."""
         return self.answers.get(CHOICE_ID)
 
-    def _box_top(self, node) -> int:
-        layout = self.box.layout(node)
+    def _box_top(self, node, hires: bool = False) -> int:
+        layout = self.box.layout(node, hires)
         return (layout.name_tab or layout.box).top
 
     def _set_title(self, text: str) -> None:
@@ -540,7 +581,7 @@ class IntroScene(Scene):
     # B. Сбой сказки
 
     def _begin_glitch(self) -> None:
-        self._lag_slot = -1
+        self._lag_slot = self._lag_hires_slot = -1
         self.hidden = set()
         self._alice.squash = 1.0
         self.title_shake = 2
@@ -695,23 +736,29 @@ class IntroScene(Scene):
 
     # --- Отрисовка ---
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Рисует вступление на холсте; со слоем hires персонажи и текст уходят в него
+        (см. описание модуля), а порядок слоёв остаётся тем же."""
         name = self.cue_name
         if name == "glitch":
-            self._draw_glitch(surface)
+            self._draw_glitch(surface, hires)
         elif name == "error_message":
-            self._draw_error(surface)
+            self._draw_error(surface, hires)
         else:
-            self._compose(surface)
+            self._compose(surface, hires)
             if name == "finale":
-                self._draw_finale_plaque(surface)
+                self._draw_finale_plaque(surface, hires)
         if self.flash > 0:
-            self._flash_surface.set_alpha(round(255 * min(1.0, self.flash)))
-            surface.blit(self._flash_surface, (0, 0))
+            alpha = round(255 * min(1.0, self.flash))
+            if hires is not None:
+                hires.fill(FLASH_COLOR, alpha=alpha)  # вспышка закрывает и персонажей, и заголовок
+            else:
+                self._flash_surface.set_alpha(alpha)
+                surface.blit(self._flash_surface, (0, 0))
         if self.dialogue is not None and not self.dialogue.is_finished:
-            self.box.draw(surface, self.dialogue)
+            self.box.draw(surface, self.dialogue, hires)
 
-    def _compose(self, surface: pygame.Surface) -> None:
+    def _compose(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
         """Страница, нора, персонажи и заголовок. Персонажи не заходят на заголовок и окно диалога."""
         surface.blit(self._pages["fairy"], (0, 0))
         if self.page_blend > 0:
@@ -725,12 +772,18 @@ class IntroScene(Scene):
             if char_id in self.hidden:
                 continue
             clip = self.ground + 1 if char_id == "chuchmek" and self.chuchmek_clipped else None
-            self.actors[char_id].draw(surface, self.ground, clip)
+            self.actors[char_id].draw(surface, self.ground, clip, hires)
+        # Передний край норы и часы Кролика — поверх персонажей.
         if show_burrow:
-            _draw_burrow_front(surface, self.burrow_open, self.ground)
+            area = pygame.Rect(0, 0, 52, 26)
+            area.center = (BURROW_X, self.ground)
+            with logical_target(surface, hires, area) as front:
+                _draw_burrow_front(front, self.burrow_open, self.ground)
         if self.watch_reversed and "white_rabbit" not in self.hidden:
-            self._draw_reversed_watch(surface)
-        self._draw_title(surface)
+            cx, cy = self._watch_center()
+            with logical_target(surface, hires, pygame.Rect(cx - 6, cy - 6, 13, 13)) as front:
+                self._draw_reversed_watch(front)
+        self._draw_title(surface, hires)
 
     def _text(self, font: pygame.font.Font, text: str, color: config.Color) -> pygame.Surface:
         key = (id(font), text, color)
@@ -752,20 +805,27 @@ class IntroScene(Scene):
             self._text_cache[key] = image
         return image
 
-    def _draw_title(self, surface: pygame.Surface) -> None:
+    def _draw_title(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
         if not self.title or not self.title_visible or "title" in self.hidden:
             return
-        image = self._title_image(self.title)
         slot = int(self.time * 24)
         dx = ((slot * 5) % 3 - 1) * self.title_shake
+        if hires is not None:
+            style = TITLE_FINAL_STYLE if self.title == TITLE_FINAL else TITLE_STYLE
+            hires.text(self.title, style, (WIDTH // 2 + dx, 9 - self.title_dy), anchor="midtop", alpha=self.title_alpha)
+            return
+        image = self._title_image(self.title)
         if self.title_alpha < 255:
             image = image.copy()
             image.set_alpha(self.title_alpha)
         surface.blit(image, image.get_rect(midtop=(WIDTH // 2 + dx, 9 - self.title_dy)))
 
+    def _watch_center(self) -> tuple[int, int]:
+        return round(self._rabbit.x + 22), self.ground - 46
+
     def _draw_reversed_watch(self, surface: pygame.Surface) -> None:
         """Крошечные часы над Кроликом: стрелки идут против часовой. Заметит только внимательный."""
-        cx, cy = round(self._rabbit.x + 22), self.ground - 46
+        cx, cy = self._watch_center()
         pygame.draw.circle(surface, CREAM_COLOR, (cx, cy), 5)
         pygame.draw.circle(surface, INK_COLOR, (cx, cy), 5, 1)
         angle = -self.time * 3.0
@@ -773,44 +833,67 @@ class IntroScene(Scene):
             a = angle * speed
             pygame.draw.line(surface, INK_COLOR, (cx, cy), (cx + math.sin(a) * length, cy - math.cos(a) * length))
 
-    def _draw_finale_plaque(self, surface: pygame.Surface) -> None:
+    def finale_plaque_rect(self, hires: bool = False) -> pygame.Rect:
+        """Табличка «…и сказка пошла совсем не по плану» — по размеру надписи выбранным шрифтом."""
+        if hires:
+            width, height = self.finale_metrics.size(FINALE_TEXT)
+            rect = pygame.Rect(0, 0, math.ceil(width), math.ceil(height))
+        else:
+            rect = self._text(self._font10, FINALE_TEXT, INK_COLOR).get_rect()
+        rect.center = (WIDTH // 2, 44)
+        return rect.inflate(10, 6)
+
+    def _draw_finale_plaque(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
         beat = self.beat
+        alpha = round(255 * _ease(self.beat_time / (beat.seconds * 0.4)))
+        plaque = self.finale_plaque_rect(hires is not None)
+        with logical_target(canvas, hires, plaque) as surface:
+            pygame.draw.rect(surface, PAGE_COLOR, plaque)
+            pygame.draw.rect(surface, PAGE_EDGE_COLOR, plaque, 1)
+        if hires is not None:
+            hires.text(FINALE_TEXT, FINALE_STYLE, plaque.center, anchor="center", alpha=alpha)
+            return
         image = self._text(self._font10, FINALE_TEXT, INK_COLOR).copy()
-        image.set_alpha(round(255 * _ease(self.beat_time / (beat.seconds * 0.4))))
-        rect = image.get_rect(center=(WIDTH // 2, 44))
-        pygame.draw.rect(surface, PAGE_COLOR, rect.inflate(10, 6))
-        pygame.draw.rect(surface, PAGE_EDGE_COLOR, rect.inflate(10, 6), 1)
-        surface.blit(image, rect)
+        image.set_alpha(alpha)
+        canvas.blit(image, image.get_rect(center=plaque.center))
 
     # --- Сбой ---
 
-    def _draw_glitch(self, surface: pygame.Surface) -> None:
+    def _draw_glitch(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
         """Содержимое подвисает (пропущенные кадры), а изображение рвётся горизонтальными полосами."""
         lag_slot = int(self.beat_time / GLITCH_LAG)
         if lag_slot != self._lag_slot:
             self._compose(self._lag_buffer)
             self._lag_slot = lag_slot
         p = self.beat_time / self.beats[self.beat_index].seconds
-        self._tear(surface, self._lag_buffer, self.glitch_slot, 2 + int(8 * p))
+        amplitude = 2 + int(8 * p)
+        self._tear(surface, self._lag_buffer, self.glitch_slot, amplitude)
+        if hires is not None:
+            # Тот же подвисший кадр, но персонажи и заголовок — в разрешении окна; рвётся так же.
+            if lag_slot != self._lag_hires_slot:
+                recorder = HiResLayer(self._fonts)
+                self._compose(self._lag_page, recorder)
+                self._lag_commands = tuple(recorder.commands)
+                self._lag_hires_slot = lag_slot
+            hires.torn(self._lag_page, self._lag_commands, _tear_bands(self.glitch_slot, amplitude))
         for k, color in enumerate(GLITCH_LINE_COLORS):
             y = (self.glitch_slot * 37 + k * 61) % HEIGHT
-            pygame.draw.line(surface, color, (0, y), (WIDTH, y))
+            with logical_target(surface, hires, pygame.Rect(0, y, WIDTH, 1)) as front:
+                pygame.draw.line(front, color, (0, y), (WIDTH, y))
 
     def _tear(self, surface: pygame.Surface, source: pygame.Surface, slot: int, amplitude: int) -> None:
         """Рисует source, сдвигая отдельные горизонтальные полосы (с заворотом за край)."""
         surface.blit(source, (0, 0))
-        for index, y in enumerate(range(0, HEIGHT, TEAR_BAND)):
-            if (slot + index) % 3:
-                continue
-            offset = ((slot * 7 + index * 13) % (2 * amplitude + 1)) - amplitude
-            if not offset:
-                continue
-            area = pygame.Rect(0, y, WIDTH, min(TEAR_BAND, HEIGHT - y))
+        for y, height, offset in _tear_bands(slot, amplitude):
+            area = pygame.Rect(0, y, WIDTH, height)
             surface.blit(source, (offset, y), area)
             surface.blit(source, (offset - WIDTH if offset > 0 else offset + WIDTH, y), area)
 
-    def _draw_error(self, surface: pygame.Surface) -> None:
-        """Страница притихла, а поверх неё — сообщение в виде страницы книги, которое потом разваливается."""
+    def _draw_error(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Страница притихла, а поверх неё — сообщение в виде страницы книги, которое потом разваливается.
+
+        Со слоем hires надписи сообщения рисуются шрифтом окна: каждая половина разломанной
+        страницы уносит свою часть текста (по своей области отсечения)."""
         t = self.beat_time
         self._compose(self._buffer)
         self._buffer.blit(self._dim_surface, (0, 0))
@@ -821,43 +904,69 @@ class IntroScene(Scene):
         else:
             top = self._error_top()
         left = (WIDTH - ERROR_W) // 2
-        box = self._render_error_box(t)
+        box = self._render_error_box(t, with_text=hires is None)
         if t < ERROR_BREAK_AT:
             surface.blit(box, (left, top))
+            self._error_texts(hires, t, (left, top), pygame.Rect(left, top, ERROR_W, ERROR_H))
             return
         e = _ease((t - ERROR_BREAK_AT) / 0.8)
         half = ERROR_H // 2
         flicker = t > ERROR_BREAK_AT + 0.6 and int(t * 20) % 3 == 0
         if t >= self.beats[self.beat_index].seconds - 0.2 or flicker:
             return  # обломки мигают и пропадают
-        lower = box.subsurface((0, half, ERROR_W, ERROR_H - half))
-        surface.blit(box.subsurface((0, 0, ERROR_W, half)), (left - round(e * 24), top - round(e * 8)))
-        surface.blit(lower, (left + round(e * 24), top + half + round(e * 14)))
-        # Рваный край на месте разлома.
+        upper_pos = (left - round(e * 24), top - round(e * 8))
+        lower_pos = (left + round(e * 24), top + half + round(e * 14))
+        surface.blit(box.subsurface((0, 0, ERROR_W, half)), upper_pos)
+        surface.blit(box.subsurface((0, half, ERROR_W, ERROR_H - half)), lower_pos)
+        self._error_texts(hires, t, upper_pos, pygame.Rect(upper_pos, (ERROR_W, half)))
+        lower_origin = (lower_pos[0], lower_pos[1] - half)  # где был бы верх сообщения для нижней половины
+        self._error_texts(hires, t, lower_origin, pygame.Rect(lower_pos, (ERROR_W, ERROR_H - half)))
+        # Рваный край на месте разлома — поверх надписей.
         y = top + half
         points = [(left + x, y + (3 if (x // 8) % 2 else -3) * (1 - e)) for x in range(0, ERROR_W + 1, 8)]
-        pygame.draw.lines(surface, PLUM_COLOR, False, points, 1)
+        with logical_target(surface, hires, pygame.Rect(left - 1, y - 4, ERROR_W + 3, 9)) as front:
+            pygame.draw.lines(front, PLUM_COLOR, False, points, 1)
+
+    def _error_texts(self, hires: HiResLayer | None, t: float, origin: tuple[int, int], clip: pygame.Rect) -> None:
+        """Надписи сообщения об ошибке в разрешении окна: origin — где левый верхний угол сообщения,
+        clip — видимая часть (целое сообщение или одна из половин)."""
+        if hires is None:
+            return
+        x, y = origin
+        band = self._error_band()
+        hires.text(ERROR_TITLE, ERROR_TITLE_STYLE, (x + band.centerx, y + band.centery), anchor="center", clip=clip)
+        for row, (line, start) in enumerate(zip(ERROR_LINES, ERROR_LINE_TIMES)):
+            if t >= start:
+                middle = y + band.bottom + 8 + row * ERROR_LINE_STEP + ERROR_LINE_STEP / 2
+                hires.text(line, ERROR_LINE_STYLE, (x + 12, middle), anchor="midleft", clip=clip)
+
+    @staticmethod
+    def _error_band() -> pygame.Rect:
+        """Полоса заголовка сообщения об ошибке (в координатах сообщения)."""
+        return pygame.Rect(4, 4, ERROR_W - 8, 17)
 
     @staticmethod
     def _error_top() -> int:
         return (HEIGHT - ERROR_H) // 2 - 4
 
-    def _render_error_box(self, t: float) -> pygame.Surface:
+    def _render_error_box(self, t: float, with_text: bool = True) -> pygame.Surface:
+        """Сообщение об ошибке на логическом холсте; with_text=False — без надписей (их рисует слой окна)."""
         box = pygame.Surface((ERROR_W, ERROR_H))
         box.fill(PARCHMENT_COLOR)
         pygame.draw.rect(box, PLUM_COLOR, box.get_rect(), 2)
         pygame.draw.rect(box, GOLD_COLOR, box.get_rect().inflate(-6, -6), 1)
-        band = pygame.Rect(4, 4, ERROR_W - 8, 17)
+        band = self._error_band()
         pygame.draw.rect(box, PLUM_COLOR, band)
-        title = self._text(self._font10, ERROR_TITLE, CREAM_COLOR)
-        box.blit(title, title.get_rect(center=band.center))
+        if with_text:
+            title = self._text(self._font10, ERROR_TITLE, CREAM_COLOR)
+            box.blit(title, title.get_rect(center=band.center))
         _draw_star(box, band.left + 9, band.centery, GOLD_COLOR)
         _draw_star(box, band.right - 10, band.centery, GOLD_COLOR)
         y = band.bottom + 8
         for line, start in zip(ERROR_LINES, ERROR_LINE_TIMES):
-            if t >= start:
+            if t >= start and with_text:
                 box.blit(self._text(self._font, line, INK_COLOR), (12, y))
-            y += 13
+            y += ERROR_LINE_STEP
         # Полоска «восстановления» из страничек: доходит до трети и застревает.
         progress = 0.35 * min(1.0, max(0.0, (t - ERROR_LINE_TIMES[1]) / 1.2))
         filled = int(progress * ERROR_SEGMENTS)
@@ -865,6 +974,18 @@ class IntroScene(Scene):
             color = GOLD_COLOR if index < filled else (232, 218, 188)
             box.fill(color, (14 + index * 12, ERROR_H - 18, 10, 6))
         return box
+
+
+def _tear_bands(slot: int, amplitude: int) -> list[tuple[int, int, int]]:
+    """Какие горизонтальные полосы сдвинуть при сбое: (y, высота, сдвиг) в пикселях холста."""
+    bands = []
+    for index, y in enumerate(range(0, HEIGHT, TEAR_BAND)):
+        if (slot + index) % 3:
+            continue
+        offset = ((slot * 7 + index * 13) % (2 * amplitude + 1)) - amplitude
+        if offset:
+            bands.append((y, min(TEAR_BAND, HEIGHT - y), offset))
+    return bands
 
 
 def _draw_star(surface: pygame.Surface, x: int, y: int, color: config.Color) -> None:

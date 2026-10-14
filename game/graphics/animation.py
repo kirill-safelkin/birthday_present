@@ -52,11 +52,15 @@ class Animation:
 
     loop=True — анимация повторяется по кругу (ходьба, ожидание). loop=False —
     проигрывается один раз и останавливается на последнем кадре (реакция).
+    sources — исходные кадры высокого разрешения, по одному на каждый кадр frames
+    (например, 64×64 для кадров, уменьшенных до 32×32 для холста). Их рисует слой
+    высокого разрешения (game/graphics/hires.py); None — исходники и есть frames.
     """
 
     frames: Sequence[pygame.Surface]
     fps: float
     loop: bool = True
+    sources: Sequence[pygame.Surface] | None = None
 
     def __post_init__(self) -> None:
         # Кортеж вместо списка: анимация неизменяема, её можно безопасно делить между персонажами.
@@ -66,6 +70,15 @@ class Animation:
         for index, frame in enumerate(self.frames):
             if not isinstance(frame, pygame.Surface):
                 raise AnimationError(f"кадр {index} — не pygame.Surface, а {type(frame).__name__}")
+        if self.sources is not None:
+            object.__setattr__(self, "sources", tuple(self.sources))
+            if len(self.sources) != len(self.frames):
+                raise AnimationError(
+                    f"исходных кадров {len(self.sources)}, а кадров анимации {len(self.frames)}: нужно поровну"
+                )
+            for index, source in enumerate(self.sources):
+                if not isinstance(source, pygame.Surface):
+                    raise AnimationError(f"исходный кадр {index} — не pygame.Surface, а {type(source).__name__}")
         if isinstance(self.fps, bool) or not isinstance(self.fps, (int, float)) or not 0 < self.fps < math.inf:
             raise AnimationError(
                 f"скорость анимации должна быть положительным числом кадров в секунду, а не {self.fps!r}"
@@ -81,9 +94,17 @@ class Animation:
         """Длительность одного прохода анимации в секундах."""
         return len(self.frames) / self.fps
 
+    def source(self, index: int) -> pygame.Surface:
+        """Исходный кадр высокого разрешения для кадра index (или сам кадр, если исходников нет)."""
+        return self.sources[index] if self.sources is not None else self.frames[index]
+
     def flipped(self) -> Animation:
         """Та же анимация, отражённая по горизонтали: например, ходьба влево из ходьбы вправо."""
-        return Animation([pygame.transform.flip(frame, True, False) for frame in self.frames], self.fps, self.loop)
+        def flip(frames: Sequence[pygame.Surface]) -> list[pygame.Surface]:
+            return [pygame.transform.flip(frame, True, False) for frame in frames]
+
+        sources = flip(self.sources) if self.sources is not None else None
+        return Animation(flip(self.frames), self.fps, self.loop, sources)
 
 
 class AnimationPlayer:
@@ -104,6 +125,11 @@ class AnimationPlayer:
     def frame(self) -> pygame.Surface:
         """Кадр, который нужно нарисовать сейчас."""
         return self.animation.frames[self.frame_index]
+
+    @property
+    def source(self) -> pygame.Surface:
+        """Исходный кадр высокого разрешения для текущего кадра (см. Animation.sources)."""
+        return self.animation.source(self.frame_index)
 
     def play(self, animation: Animation, restart: bool = False) -> None:
         """Переключает на другую анимацию и начинает её с первого кадра.

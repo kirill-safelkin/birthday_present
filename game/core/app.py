@@ -89,8 +89,9 @@ class App:
             self.running = False
 
     def _draw(self) -> None:
-        """Отрисовка: сцена рисует на холсте 320×180, затем холст выводится в окно."""
-        self.scenes.draw(self.display.canvas)
+        """Отрисовка: сцена рисует на холсте 320×180 (а персонажей и текст, если умеет, — в слое
+        высокого разрешения), затем холст выводится в окно, а слой — поверх него."""
+        self.scenes.draw(self.display.canvas, self.display.hires)
         self.display.present()
 
 

@@ -28,7 +28,8 @@ from game.core.scenes import Scene
 from game.dialogue.box import DialogueBox
 from game.dialogue.model import DialogueController, DialogueScript
 from game.graphics.animation import Direction
-from game.graphics.fonts import load_font, render_text
+from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
+from game.graphics.hires import HiResLayer, logical_target
 from game.graphics.sprite_manifest import CHARACTERS_DIR, try_load_character_sprites
 from game.story.hub_dialogue import CHUCHMEK_TALK, PORTAL_NOT_READY, all_scripts
 from game.world.character import Character
@@ -108,6 +109,12 @@ SIGN_TEXT_COLOR = (252, 240, 214)
 PORTAL_INNER_COLOR = (54, 46, 72)
 MARK_COLOR = (255, 236, 140)
 
+# Надписи в разрешении окна (слой высокого разрешения); размер — в логических пикселях.
+TEXT_SIZE = 8
+HUD_STYLE = TextStyle(TEXT_SIZE, HUD_TEXT_COLOR)
+FRAGMENTS_STYLE = TextStyle(TEXT_SIZE, HUD_ACCENT_COLOR)
+SIGN_STYLE = TextStyle(TEXT_SIZE, SIGN_TEXT_COLOR)
+
 
 @dataclass(frozen=True)
 class Interaction:
@@ -123,7 +130,12 @@ class HubScene(Scene):
 
     Backspace (действие cancel) закрывает открытую реплику, а без реплики — возвращает
     к предыдущей сцене, если она есть (например, к экрану проверки).
+
+    Со слоем высокого разрешения Алиса и Чучмек рисуются из исходных кадров 64×64, а надписи —
+    шрифтом размера окна; площадь, порталы и деревья остаются пиксельными на холсте.
     """
+
+    supports_hires = True
 
     def __init__(self, progress: GameProgress | None = None, characters_dir: str | Path = CHARACTERS_DIR) -> None:
         self.progress = progress if progress is not None else GameProgress()
@@ -160,6 +172,8 @@ class HubScene(Scene):
         self.time = 0.0
         self._font = load_font(9)
         self._text_cache: dict[tuple[str, config.Color], pygame.Surface] = {}
+        self._fonts = TextFonts()
+        self.text_metrics = self._fonts.metrics(HUD_STYLE)  # все надписи площади одного размера
         self._background = _render_background()
         self._trial_in_progress: str | None = None  # испытание, в которое Алиса только что ушла
         self._trial_scene: Scene | None = None
@@ -328,22 +342,26 @@ class HubScene(Scene):
 
     # --- Отрисовка ---
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Рисует площадь на холсте; со слоем hires персонажи и надписи уходят в него
+        (см. game/graphics/hires.py), а порядок слоёв остаётся тем же."""
         surface.blit(self._background, (0, 0))
         target = self.nearby() if self.dialogue is None else None
         self._draw_mosaic(surface, target)
         # Всё, что стоит на площади, рисуется по высоте ног: ближние к игроку — поверх дальних.
-        drawables = [(portal.rect.bottom, lambda p=portal: self._draw_portal(surface, p, target)) for portal in PORTALS]
-        drawables += [(y, lambda t=(x, y): _draw_tree(surface, t)) for x, y in TREES]
-        drawables.append((self.chuchmek.y, lambda: self._draw_chuchmek(surface, target)))
-        drawables.append((self.alice.y + 0.1, lambda: self.alice.draw(surface)))
+        drawables = [
+            (portal.rect.bottom, lambda p=portal: self._draw_portal(surface, p, target, hires)) for portal in PORTALS
+        ]
+        drawables += [(y, lambda t=(x, y): self._draw_tree(surface, t, hires)) for x, y in TREES]
+        drawables.append((self.chuchmek.y, lambda: self._draw_chuchmek(surface, target, hires)))
+        drawables.append((self.alice.y + 0.1, lambda: self.alice.draw(surface, hires)))
         for _, draw in sorted(drawables, key=lambda item: item[0]):
             draw()
-        self._draw_hud(surface)
+        self._draw_hud(surface, hires)
         if self.dialogue is not None and not self.dialogue.is_finished:
-            self.box.draw(surface, self.dialogue)
+            self.box.draw(surface, self.dialogue, hires)
         else:
-            self._draw_status(surface)
+            self._draw_status(surface, hires)
 
     def _text(self, text: str, color: config.Color) -> pygame.Surface:
         key = (text, color)
@@ -352,33 +370,57 @@ class HubScene(Scene):
             image = self._text_cache[key] = render_text(self._font, text, color)
         return image
 
-    def _draw_portal(self, surface: pygame.Surface, portal: Portal, target: Interaction | None) -> None:
-        rect = portal.rect
-        near = target is not None and target.target == portal.id
-        pygame.draw.rect(surface, portal.color, rect, border_radius=6)
-        inner = rect.inflate(-8, -8)
-        pygame.draw.rect(surface, PORTAL_INNER_COLOR, inner, border_radius=4)
-        # Мерцание внутри портала: две полосы, бегущие сверху вниз.
-        for k in range(2):
-            y = inner.top + int((self.time * 10 + k * inner.height / 2) % inner.height)
-            pygame.draw.line(surface, portal.glow, (inner.left + 2, y), (inner.right - 3, y))
-        _draw_trial_icon(surface, portal.id, inner.center)
-        if near:
-            pulse = 1 + round(abs(math.sin(self.time * 5)))
-            pygame.draw.rect(surface, MARK_COLOR, rect.inflate(2 + pulse * 2, 2 + pulse * 2), 1, border_radius=7)
-        # Табличка с названием.
-        label = self._text(portal.name, SIGN_TEXT_COLOR)
-        plaque = label.get_rect(center=portal.sign_center).inflate(6, 2)
-        pygame.draw.rect(surface, SIGN_COLOR, plaque)
-        pygame.draw.rect(surface, SIGN_EDGE_COLOR, plaque, 1)
-        surface.blit(label, label.get_rect(center=plaque.center))
-        if self.progress.is_completed(portal.id):
-            # Испытание пройдено: золотая звёздочка у таблички.
-            x, y = plaque.right + 1, plaque.top
-            if x + 3 > WIDTH:
-                x = plaque.left - 1
-            pygame.draw.polygon(surface, HUD_ACCENT_COLOR, [(x, y - 3), (x + 1, y - 1), (x + 3, y), (x + 1, y + 1),
-                                                            (x, y + 3), (x - 1, y + 1), (x - 3, y), (x - 1, y - 1)])
+    def plaque_rect(self, portal: Portal, hires: bool = False) -> pygame.Rect:
+        """Табличка с названием портала: по размеру надписи пиксельным шрифтом или шрифтом окна."""
+        if hires:
+            width, height = self.text_metrics.size(portal.name)
+            label = pygame.Rect(0, 0, math.ceil(width), math.ceil(height))
+        else:
+            label = self._text(portal.name, SIGN_TEXT_COLOR).get_rect()
+        label.center = portal.sign_center
+        return label.inflate(6, 2)
+
+    def _draw_portal(
+        self, canvas: pygame.Surface, portal: Portal, target: Interaction | None, hires: HiResLayer | None
+    ) -> None:
+        plaque = self.plaque_rect(portal, hires is not None)
+        # Портал с подсветкой, табличка и звёздочка у неё — вся графика портала.
+        area = portal.rect.inflate(8, 8).union(plaque.inflate(10, 10))
+        with logical_target(canvas, hires, area) as surface:
+            rect = portal.rect
+            near = target is not None and target.target == portal.id
+            pygame.draw.rect(surface, portal.color, rect, border_radius=6)
+            inner = rect.inflate(-8, -8)
+            pygame.draw.rect(surface, PORTAL_INNER_COLOR, inner, border_radius=4)
+            # Мерцание внутри портала: две полосы, бегущие сверху вниз.
+            for k in range(2):
+                y = inner.top + int((self.time * 10 + k * inner.height / 2) % inner.height)
+                pygame.draw.line(surface, portal.glow, (inner.left + 2, y), (inner.right - 3, y))
+            _draw_trial_icon(surface, portal.id, inner.center)
+            if near:
+                pulse = 1 + round(abs(math.sin(self.time * 5)))
+                pygame.draw.rect(surface, MARK_COLOR, rect.inflate(2 + pulse * 2, 2 + pulse * 2), 1, border_radius=7)
+            # Табличка с названием.
+            pygame.draw.rect(surface, SIGN_COLOR, plaque)
+            pygame.draw.rect(surface, SIGN_EDGE_COLOR, plaque, 1)
+            if hires is None:
+                label = self._text(portal.name, SIGN_TEXT_COLOR)
+                surface.blit(label, label.get_rect(center=plaque.center))
+            if self.progress.is_completed(portal.id):
+                # Испытание пройдено: золотая звёздочка у таблички.
+                x, y = plaque.right + 1, plaque.top
+                if x + 3 > WIDTH:
+                    x = plaque.left - 1
+                pygame.draw.polygon(surface, HUD_ACCENT_COLOR, [(x, y - 3), (x + 1, y - 1), (x + 3, y), (x + 1, y + 1),
+                                                                (x, y + 3), (x - 1, y + 1), (x - 3, y), (x - 1, y - 1)])
+        if hires is not None:
+            hires.text(portal.name, SIGN_STYLE, plaque.center, anchor="center")
+
+    @staticmethod
+    def _draw_tree(canvas: pygame.Surface, base: tuple[int, int], hires: HiResLayer | None) -> None:
+        x, y = base
+        with logical_target(canvas, hires, pygame.Rect(x - 10, y - 24, 21, 25)) as surface:
+            _draw_tree(surface, base)
 
     def _draw_mosaic(self, surface: pygame.Surface, target: Interaction | None) -> None:
         """Символы собранных фрагментов в мозаике; при всех трёх — пульсирующее свечение."""
@@ -396,23 +438,37 @@ class HubScene(Scene):
         if target is not None and target.kind == "mosaic":
             pygame.draw.circle(surface, MARK_COLOR, MOSAIC_CENTER, 22, 1)
 
-    def _draw_chuchmek(self, surface: pygame.Surface, target: Interaction | None) -> None:
-        self.chuchmek.draw(surface)
+    def _draw_chuchmek(self, canvas: pygame.Surface, target: Interaction | None, hires: HiResLayer | None) -> None:
+        self.chuchmek.draw(canvas, hires)
         if target is not None and target.kind == "chuchmek":
             # Ромбик над шляпкой: с Чучмеком можно поговорить.
             x, y = self.chuchmek.rect.centerx, self.chuchmek.rect.top - 4 - round(abs(math.sin(self.time * 4)) * 2)
-            pygame.draw.polygon(surface, MARK_COLOR, [(x, y - 3), (x + 3, y), (x, y + 3), (x - 3, y)])
+            with logical_target(canvas, hires, pygame.Rect(x - 4, y - 4, 9, 9)) as surface:
+                pygame.draw.polygon(surface, MARK_COLOR, [(x, y - 3), (x + 3, y), (x, y + 3), (x - 3, y)])
 
-    def _draw_hud(self, surface: pygame.Surface) -> None:
-        surface.fill(HUD_COLOR, (0, 0, WIDTH, HUD_HEIGHT))
-        surface.blit(self._text("Центральная площадь", HUD_TEXT_COLOR), (4, 1))
-        fragments = self._text(self.fragments_text(), HUD_ACCENT_COLOR)
-        surface.blit(fragments, fragments.get_rect(topright=(WIDTH - 4, 1)))
+    def _draw_hud(self, canvas: pygame.Surface, hires: HiResLayer | None) -> None:
+        middle = HUD_HEIGHT / 2
+        bar = pygame.Rect(0, 0, WIDTH, HUD_HEIGHT)
+        with logical_target(canvas, hires, bar) as surface:
+            surface.fill(HUD_COLOR, bar)
+            if hires is None:
+                surface.blit(self._text("Центральная площадь", HUD_TEXT_COLOR), (4, 1))
+                fragments = self._text(self.fragments_text(), HUD_ACCENT_COLOR)
+                surface.blit(fragments, fragments.get_rect(topright=(WIDTH - 4, 1)))
+        if hires is not None:
+            hires.text("Центральная площадь", HUD_STYLE, (4, middle), anchor="midleft")
+            hires.text(self.fragments_text(), FRAGMENTS_STYLE, (WIDTH - 4, middle), anchor="midright")
 
-    def _draw_status(self, surface: pygame.Surface) -> None:
-        surface.fill(HUD_COLOR, (0, STATUS_TOP, WIDTH, HEIGHT - STATUS_TOP))
-        text = self._text(self.status_text(), HUD_TEXT_COLOR)
-        surface.blit(text, text.get_rect(center=(WIDTH // 2, STATUS_TOP + (HEIGHT - STATUS_TOP) // 2)))
+    def _draw_status(self, canvas: pygame.Surface, hires: HiResLayer | None) -> None:
+        center = (WIDTH // 2, STATUS_TOP + (HEIGHT - STATUS_TOP) // 2)
+        bar = pygame.Rect(0, STATUS_TOP, WIDTH, HEIGHT - STATUS_TOP)
+        with logical_target(canvas, hires, bar) as surface:
+            surface.fill(HUD_COLOR, bar)
+            if hires is None:
+                text = self._text(self.status_text(), HUD_TEXT_COLOR)
+                surface.blit(text, text.get_rect(center=center))
+        if hires is not None:
+            hires.text(self.status_text(), HUD_STYLE, center, anchor="center")
 
 
 def _draw_trial_icon(surface: pygame.Surface, trial_id: str, center: tuple[int, int]) -> None:
