@@ -8,7 +8,8 @@
 Все команды выполняются из этой папки:
 
 ```bash
-./.venv/bin/python main.py                                    # запуск игры
+./.venv/bin/python main.py                                    # запуск игры (сразу вступление)
+./.venv/bin/python main.py --dev                              # режим разработчика: экран проверки
 ./.venv/bin/python -m compileall -q main.py config.py game tests   # проверка синтаксиса
 ./.venv/bin/python -m unittest discover -s tests -v           # все тесты
 ```

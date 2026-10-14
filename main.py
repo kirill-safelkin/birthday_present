@@ -1,12 +1,30 @@
-"""Точка входа в игру «Алиса и Чучмек»: python main.py"""
+"""Точка входа в игру «Алиса и Чучмек».
 
+    python main.py         — обычный запуск: сказка начинается со вступления
+    python main.py --dev   — режим разработчика: экран проверки и тестовые экраны
+"""
+
+from __future__ import annotations  # аннотации не мешают проверке версии на старом Python
+
+import argparse
 import os
 import sys
 
 MIN_PYTHON = (3, 10)
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Алиса и Чучмек — сказка-игра.")
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="режим разработчика: экран проверки с тестовыми экранами (D, A, P, I, H)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     if sys.version_info < MIN_PYTHON:
         print(
             f"Нужен Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} или новее, "
@@ -37,7 +55,7 @@ def main() -> int:
     from game.core.app import run
 
     try:
-        run()
+        run(dev_mode=args.dev)
     except pygame.error as exc:
         print(
             f"Не удалось запустить игру, ошибка Pygame/SDL: {exc}\n"

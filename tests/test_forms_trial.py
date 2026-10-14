@@ -583,7 +583,7 @@ class AppIntegrationTest(unittest.TestCase):
     def setUp(self) -> None:
         pygame.display.init()
         pygame.font.init()
-        self.app = App()
+        self.app = App(dev_mode=True)  # экран проверки и его клавиши
 
     def tearDown(self) -> None:
         pygame.quit()

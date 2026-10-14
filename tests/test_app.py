@@ -51,7 +51,7 @@ class AppEventsTest(unittest.TestCase):
     def setUp(self) -> None:
         pygame.display.init()
         pygame.font.init()
-        self.app = App()
+        self.app = App(dev_mode=True)  # экран проверки и его клавиши
         # Если цикл не остановится, процесс упадёт с трассировкой, а не зависнет.
         faulthandler.dump_traceback_later(10, exit=True)
 

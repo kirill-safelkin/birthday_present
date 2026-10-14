@@ -1,4 +1,9 @@
-"""Главный игровой цикл: события → обновление → отрисовка."""
+"""Главный игровой цикл: события → обновление → отрисовка.
+
+Обычный запуск сразу начинает сказку: вступление, затем центральная площадь. Режим
+разработчика (dev_mode, в main.py — флаг --dev) открывает экран проверки с тестовыми
+экранами и быстрыми переходами (D, A, P, I, H).
+"""
 
 from __future__ import annotations
 
@@ -12,6 +17,7 @@ from game.core.input import ActionInput
 from game.core.scenes import SceneManager
 from game.debug.debug_screen import DebugScreen
 from game.story.final_scene import FinalScene
+from game.story.intro_scene import IntroScene
 from game.trials.cakes_scene import CAKES_SCENE, CakesTrialScene
 from game.trials.forms_scene import FORMS_SCENE, FormsTrialScene
 from game.trials.sushi_scene import SUSHI_SCENE, SushiTrialScene
@@ -22,7 +28,8 @@ from game.world.progress import GameProgress
 class App:
     """Владеет окном, часами, общим вводом и менеджером сцен и крутит игровой цикл."""
 
-    def __init__(self) -> None:
+    def __init__(self, dev_mode: bool = False) -> None:
+        self.dev_mode = dev_mode
         self.display = Display()
         self._clock = pygame.time.Clock()
         self.input = ActionInput()
@@ -36,9 +43,15 @@ class App:
         self.scenes.register(CAKES_SCENE, lambda: CakesTrialScene(self.progress))
         # Финал открывает мозаика площади, когда собраны все три фрагмента.
         self.scenes.register(FINALE_SCENE, lambda: FinalScene(self.progress))
-        # Стартовая сцена — временный экран проверки. Его заменит первая игровая сцена.
-        self.screen = DebugScreen(self._clock)
-        self.scenes.push(self.screen)
+        if dev_mode:
+            # Экран проверки — только для автора игры: с него открываются тестовые экраны.
+            self.screen: DebugScreen | None = DebugScreen(self._clock)
+            self.scenes.push(self.screen)
+        else:
+            # Обычный запуск: сказка с первой страницы. Досмотренное вступление само
+            # заменяется центральной площадью (с тем же общим прогрессом).
+            self.screen = None
+            self.scenes.push(IntroScene(next_scene=HUB_SCENE))
         self.running = False
 
     def run(self) -> None:
@@ -97,10 +110,10 @@ def _init_pygame() -> None:
     pygame.font.init()
 
 
-def run() -> None:
+def run(dev_mode: bool = False) -> None:
     """Запускает игру и при любом исходе освобождает ресурсы Pygame."""
     try:
         _init_pygame()
-        App().run()
+        App(dev_mode).run()
     finally:
         pygame.quit()
