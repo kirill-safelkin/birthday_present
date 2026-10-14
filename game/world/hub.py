@@ -4,9 +4,10 @@
 Используются существующие системы: Character (движение и анимации), CollisionMap
 (границы и препятствия), DialogueController/DialogueBox (реплики), SceneManager (переходы).
 
-Порталы испытаний пока ведут в никуда: если сцена испытания (TRIAL_SCENES) не
-зарегистрирована в менеджере, Чучмек объясняет, что портал не готов. Фрагменты здесь
-не выдаются — только показываются (GameProgress).
+Портал открывает сцену испытания (TRIAL_SCENES) через менеджер, если она
+зарегистрирована; иначе Чучмек объясняет, что портал не готов. Фрагменты выдают сами
+испытания через общий GameProgress, площадь их только показывает и, вернувшись из
+испытания, сообщает итог.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from game.dialogue.box import DialogueBox
 from game.dialogue.model import DialogueController, DialogueScript
 from game.graphics.animation import Direction
 from game.graphics.fonts import load_font, render_text
-from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, ManifestError, load_character_sprites
+from game.graphics.sprite_manifest import CHARACTERS_DIR, try_load_character_sprites
 from game.story.hub_dialogue import CHUCHMEK_TALK, PORTAL_NOT_READY, all_scripts
 from game.world.character import Character
 from game.world.collision import CollisionMap
@@ -44,6 +45,7 @@ STATUS_TOP = 168  # нижняя полоса: подсказки; персон�
 WALK_BOUNDS = pygame.Rect(10, 44, WIDTH - 20, STATUS_TOP - 4 - 44)
 SPAWN = (160, 158)  # точка появления Алисы — внизу площади
 TOAST_SECONDS = 3.0
+TOAST_PRIORITY_SECONDS = 2.0  # столько свежее сообщение (например, итог испытания) важнее подсказки у цели
 
 
 @dataclass(frozen=True)
@@ -106,13 +108,6 @@ class Interaction:
     prompt: str
 
 
-def _load_sprites(root: Path, char_id: str) -> CharacterSprites | None:
-    try:
-        return load_character_sprites(root / char_id)
-    except (ManifestError, FileNotFoundError, pygame.error):
-        return None
-
-
 class HubScene(Scene):
     """Площадь: Алиса ходит, разговаривает с Чучмеком и подходит к порталам испытаний.
 
@@ -127,7 +122,7 @@ class HubScene(Scene):
         obstacles += [pygame.Rect(x - 3, y - 4, 6, 4) for x, y in TREES]
         self.collision = CollisionMap(WALK_BOUNDS, obstacles)
 
-        alice_sprites = _load_sprites(root, "alice")
+        alice_sprites = try_load_character_sprites(root / "alice")
         self.alice = Character(
             "Алиса",
             alice_sprites.animation_set(SPRITE_SIZE) if alice_sprites else None,
@@ -136,7 +131,7 @@ class HubScene(Scene):
             direction=Direction.UP,
         )
         self.alice.collider = self.collision.move
-        chuchmek_sprites = _load_sprites(root, "chuchmek")
+        chuchmek_sprites = try_load_character_sprites(root / "chuchmek")
         # Чучмек стоит на месте лицом к игроку; его кадры никогда не отражаются.
         self.chuchmek = Character(
             "Чучмек",
@@ -156,6 +151,9 @@ class HubScene(Scene):
         self._font = load_font(9)
         self._text_cache: dict[tuple[str, config.Color], pygame.Surface] = {}
         self._background = _render_background()
+        self._trial_in_progress: str | None = None  # испытание, в которое Алиса только что ушла
+        self._trial_scene: Scene | None = None
+        self._fragments_before = self.progress.fragments
 
     # --- Состояние ---
 
@@ -166,7 +164,9 @@ class HubScene(Scene):
         for portal in PORTALS:
             distance = math.dist((x, y), portal.point)
             if distance <= portal.radius:
-                candidates.append((distance, Interaction("portal", portal.id, f"{portal.name}   E — войти")))
+                done = " (пройдено)" if self.progress.is_completed(portal.id) else ""
+                prompt = f"{portal.name}{done}   E — войти"
+                candidates.append((distance, Interaction("portal", portal.id, prompt)))
         distance = math.dist((x, y), self._chuchmek_point())
         if distance <= CHUCHMEK_RADIUS:
             candidates.append((distance, Interaction("chuchmek", "chuchmek", "Чучмек   E — поговорить")))
@@ -177,6 +177,8 @@ class HubScene(Scene):
 
     def status_text(self) -> str:
         """Что показывает нижняя полоса: подсказку рядом с целью, недавнее сообщение или управление."""
+        if self.toast and TOAST_SECONDS - self._toast_time < TOAST_PRIORITY_SECONDS:
+            return self.toast
         target = self.nearby()
         if target is not None:
             return target.prompt
@@ -226,7 +228,9 @@ class HubScene(Scene):
         scene_name = TRIAL_SCENES[portal.id]
         manager = self.manager
         if manager is not None and manager.is_registered(scene_name):
-            manager.push(scene_name)  # сюда подключатся сцены испытаний
+            self._trial_in_progress = portal.id
+            self._fragments_before = self.progress.fragments
+            self._trial_scene = manager.push(scene_name)  # испытание вернёт сюда же, на эту площадь
         else:
             # Испытание ещё не сделано: переходить некуда, фрагмент не выдаётся.
             self._open_dialogue(PORTAL_NOT_READY[portal.id])
@@ -251,6 +255,20 @@ class HubScene(Scene):
     def _show_toast(self, text: str) -> None:
         self.toast = text
         self._toast_time = TOAST_SECONDS
+
+    def enter(self) -> None:
+        """Возврат на площадь (в том числе из испытания): сообщить, чем оно закончилось."""
+        trial_id, self._trial_in_progress = self._trial_in_progress, None
+        trial, self._trial_scene = self._trial_scene, None
+        if trial_id is None:
+            return
+        name = TRIAL_NAMES[trial_id]
+        if not getattr(trial, "completed", False):  # сцена испытания сама знает, досмотрена ли она
+            self._show_toast(f"Испытание «{name}» прервано — фрагмент не получен")
+        elif self.progress.fragments > self._fragments_before:
+            self._show_toast(f"Получен фрагмент праздника! Теперь {self.progress.fragments}/{self.progress.total}")
+        else:
+            self._show_toast(f"Испытание «{name}» уже пройдено — фрагмент тот же")
 
     def update(self, dt: float) -> None:
         self.time += dt
@@ -308,6 +326,13 @@ class HubScene(Scene):
         pygame.draw.rect(surface, SIGN_COLOR, plaque)
         pygame.draw.rect(surface, SIGN_EDGE_COLOR, plaque, 1)
         surface.blit(label, label.get_rect(center=plaque.center))
+        if self.progress.is_completed(portal.id):
+            # Испытание пройдено: золотая звёздочка у таблички.
+            x, y = plaque.right + 1, plaque.top
+            if x + 3 > WIDTH:
+                x = plaque.left - 1
+            pygame.draw.polygon(surface, HUD_ACCENT_COLOR, [(x, y - 3), (x + 1, y - 1), (x + 3, y), (x + 1, y + 1),
+                                                            (x, y + 3), (x - 1, y + 1), (x - 3, y), (x - 1, y - 1)])
 
     def _draw_chuchmek(self, surface: pygame.Surface, target: Interaction | None) -> None:
         self.chuchmek.draw(surface)

@@ -154,6 +154,14 @@ def load_character_sprites(directory: str | Path) -> CharacterSprites:
     return _Parser(directory, manifest_path.name).parse(data)
 
 
+def try_load_character_sprites(directory: str | Path) -> CharacterSprites | None:
+    """Как load_character_sprites, но вместо ошибки возвращает None: сцена покажет временный спрайт."""
+    try:
+        return load_character_sprites(directory)
+    except (ManifestError, FileNotFoundError, pygame.error):
+        return None
+
+
 class _Parser:
     def __init__(self, directory: Path, name: str) -> None:
         self.directory = directory

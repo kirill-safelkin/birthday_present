@@ -26,7 +26,7 @@ from game.dialogue.model import DialogueChoice, DialogueController
 from game.graphics.animation import AnimationPlayer
 from game.graphics.fonts import load_font, render_text
 from game.graphics.placeholder import placeholder_animations
-from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, ManifestError, load_character_sprites
+from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, try_load_character_sprites
 from game.story.intro_dialogue import (
     BEATS,
     CHOICE_ID,
@@ -236,13 +236,6 @@ def _fallback_frame() -> pygame.Surface:
     return _FALLBACK
 
 
-def _load_sprites(root: Path, char_id: str) -> CharacterSprites | None:
-    try:
-        return load_character_sprites(root / char_id)
-    except (ManifestError, FileNotFoundError, pygame.error):
-        return None
-
-
 class IntroScene(Scene):
     """Вступление. Когда оно сыграно, вызывается on_complete, а затем:
     если задана зарегистрированная сцена next_scene (будущая центральная локация) —
@@ -260,7 +253,7 @@ class IntroScene(Scene):
         self.next_scene = next_scene
         root = Path(characters_dir)
         self.actors = {
-            char_id: StageActor(char_id, _load_sprites(root, char_id), x, pose)
+            char_id: StageActor(char_id, try_load_character_sprites(root / char_id), x, pose)
             for char_id, (x, pose) in ACTOR_LAYOUT.items()
         }
         self.box = DialogueBox()
