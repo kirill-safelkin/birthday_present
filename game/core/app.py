@@ -7,18 +7,23 @@ import os
 import pygame
 
 import config
-from game.debug.debug_screen import DebugScreen
 from game.core.display import Display
+from game.core.input import ActionInput
+from game.core.scenes import SceneManager
+from game.debug.debug_screen import DebugScreen
 
 
 class App:
-    """Владеет окном, часами и текущим экраном и крутит игровой цикл."""
+    """Владеет окном, часами, общим вводом и менеджером сцен и крутит игровой цикл."""
 
     def __init__(self) -> None:
         self.display = Display()
         self._clock = pygame.time.Clock()
-        # Временный экран. Его заменит игровая сцена с теми же handle_event(), update(dt) и draw(surface).
+        self.input = ActionInput()
+        self.scenes = SceneManager(self.input)
+        # Стартовая сцена — временный экран проверки. Его заменит первая игровая сцена.
         self.screen = DebugScreen(self._clock)
+        self.scenes.push(self.screen)
         self.running = False
 
     def run(self) -> None:
@@ -33,6 +38,10 @@ class App:
 
     def _handle_events(self) -> None:
         for event in pygame.event.get():
+            # Общий ввод видит все события. Автоповтор зажатой клавиши пропускаем целиком:
+            # он не должен второй раз подтверждать реплику или переключать полный экран.
+            if not self.input.handle_event(event):
+                continue
             if event.type == pygame.QUIT:  # крестик окна, Alt+F4
                 self.running = False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -40,16 +49,16 @@ class App:
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
                 self.display.toggle_fullscreen()
             else:
-                # Остальные события получает текущий экран (например, клавиши диалога).
-                self.screen.handle_event(event)
+                # Остальные события получает только верхняя сцена.
+                self.scenes.handle_event(event)
 
     def _update(self, dt: float) -> None:
         """Обновление состояния игры; dt — длительность кадра в секундах."""
-        self.screen.update(dt)
+        self.scenes.update(dt)
 
     def _draw(self) -> None:
         """Отрисовка: сцена рисует на холсте 320×180, затем холст выводится в окно."""
-        self.screen.draw(self.display.canvas)
+        self.scenes.draw(self.display.canvas)
         self.display.present()
 
 

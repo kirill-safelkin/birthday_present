@@ -60,6 +60,11 @@
   переменная `SDL_FRAMEBUFFER_ACCELERATION=0`. Не убирать её.
 - Буквенные клавиши проверять и по `event.key`, и по `event.scancode`: у пользователя
   раскладки de и ru. Для этого есть `matches_key()` в `game/core/input.py`.
+- Игровая логика использует логические действия (`Action`, `actions_for()`, `ActionInput`
+  в `game/core/input.py`), а не конкретные клавиши. Экраны — сцены `game/core/scenes.py`;
+  переходы только через `SceneManager` (`push`/`pop`/`replace`), а не прямыми вызовами.
+- Повторный KEYDOWN без KEYUP игра считает автоповтором и пропускает. В тестах одно
+  нажатие — это KEYDOWN и KEYUP (`press()` в `tests/test_app.py`).
 
 ## Структура проекта
 

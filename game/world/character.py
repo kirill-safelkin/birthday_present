@@ -8,44 +8,23 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 
 import pygame
 
 import config
+from game.core.input import MOVE_ACTIONS, Action, ActionInput
 from game.graphics.animation import IDLE, REACT, TALK, WALK, AnimationPlayer, AnimationSet, Direction
-from game.core.input import matches_key
 from game.graphics.placeholder import placeholder_animations
 
 
-@dataclass(frozen=True)
-class MoveKey:
-    """Клавиша движения: код клавиши, скан-код (физическое положение) и направление."""
-
-    key: int
-    scancode: int
-    direction: Direction
-
-
-# Стрелки и WASD. Буквы проверяются и по скан-коду, поэтому работают и в русской раскладке.
-MOVE_KEYS = (
-    MoveKey(pygame.K_UP, pygame.KSCAN_UP, Direction.UP),
-    MoveKey(pygame.K_DOWN, pygame.KSCAN_DOWN, Direction.DOWN),
-    MoveKey(pygame.K_LEFT, pygame.KSCAN_LEFT, Direction.LEFT),
-    MoveKey(pygame.K_RIGHT, pygame.KSCAN_RIGHT, Direction.RIGHT),
-    MoveKey(pygame.K_w, pygame.KSCAN_W, Direction.UP),
-    MoveKey(pygame.K_s, pygame.KSCAN_S, Direction.DOWN),
-    MoveKey(pygame.K_a, pygame.KSCAN_A, Direction.LEFT),
-    MoveKey(pygame.K_d, pygame.KSCAN_D, Direction.RIGHT),
-)
-
-
-def find_move_key(event: pygame.event.Event) -> MoveKey | None:
-    """Клавиша движения, к которой относится событие клавиатуры, или None."""
-    for move_key in MOVE_KEYS:
-        if matches_key(event, move_key.key, move_key.scancode):
-            return move_key
-    return None
+# Логические действия движения → направление. Какие клавиши к ним ведут (стрелки, WASD
+# в любой раскладке), решает слой ввода game.core.input, а не персонаж.
+MOVE_DIRECTIONS = {
+    Action.MOVE_UP: Direction.UP,
+    Action.MOVE_DOWN: Direction.DOWN,
+    Action.MOVE_LEFT: Direction.LEFT,
+    Action.MOVE_RIGHT: Direction.RIGHT,
+}
 
 
 class Character:
@@ -77,7 +56,7 @@ class Character:
         self.state = IDLE
         self.player = AnimationPlayer(self.animations.get(IDLE, direction))
         self._heading = pygame.Vector2()  # единичный вектор направления движения; нулевой, когда стоит
-        self._held_keys: list[MoveKey] = []  # зажатые клавиши движения в порядке нажатия
+        self._controls = ActionInput()  # какие действия движения сейчас зажаты
         self._resume_after_animation = False  # вернуться к ходьбе или idle, когда реакция доиграет
 
     @property
@@ -172,21 +151,17 @@ class Character:
             self._resume_after_animation = True
 
     def handle_event(self, event: pygame.event.Event) -> bool:
-        """Клавиши движения: стрелки и WASD. Возвращает True, если событие относится к движению."""
+        """Действия движения (move_up и т. д.). Возвращает True, если событие относится к движению."""
         if event.type == pygame.WINDOWFOCUSLOST:
             # Отпускание клавиш в неактивном окне может не дойти до игры: считаем их отпущенными.
-            self._held_keys.clear()
+            self._controls.release_all()
             self._follow_controls()
             return False
-        if event.type not in (pygame.KEYDOWN, pygame.KEYUP):
+        if not self._controls.actions_for(event) & MOVE_ACTIONS:
+            self._controls.handle_event(event)  # остальные клавиши тоже помним: так виден их автоповтор
             return False
-        move_key = find_move_key(event)
-        if move_key is None:
-            return False
-        if move_key in self._held_keys:
-            self._held_keys.remove(move_key)
-        if event.type == pygame.KEYDOWN:
-            self._held_keys.append(move_key)
+        if not self._controls.handle_event(event):
+            return True  # автоповтор зажатой клавиши ничего не меняет
         # Нажатие прерывает разговор или реакцию, а отпускание клавиши — нет:
         # после реакции персонаж сам продолжит идти по зажатым клавишам.
         if event.type == pygame.KEYDOWN or self.state in (IDLE, WALK):
@@ -216,19 +191,21 @@ class Character:
             self.stop()
 
     def _controls_heading(self) -> tuple[pygame.Vector2, Direction | None]:
-        """Куда ведут зажатые клавиши и куда при этом смотреть.
+        """Куда ведут зажатые действия движения и куда при этом смотреть.
 
-        Противоположные клавиши гасят друг друга. Смотрит персонаж туда, куда указывает
-        последняя нажатая клавиша из участвующих в движении: если при ходьбе вниз
+        Противоположные направления гасят друг друга, одно направление с двух клавиш
+        (W и ↑) считается один раз. Смотрит персонаж туда, куда указывает последнее
+        нажатое направление из участвующих в движении: если при ходьбе вниз
         нажать →, он повернётся вправо, а когда → отпустят — снова вниз.
         """
+        directions = [MOVE_DIRECTIONS[action] for action in self._controls.held_actions() if action in MOVE_DIRECTIONS]
         heading = pygame.Vector2()
-        for move_key in self._held_keys:
-            heading += move_key.direction.value
-        for move_key in reversed(self._held_keys):
-            dx, dy = move_key.direction.value
+        for direction in directions:
+            heading += direction.value
+        for direction in reversed(directions):
+            dx, dy = direction.value
             if dx * heading.x > 0 or dy * heading.y > 0:
-                return heading, move_key.direction
+                return heading, direction
         return heading, None
 
 

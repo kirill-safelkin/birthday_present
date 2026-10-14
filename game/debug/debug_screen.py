@@ -1,6 +1,7 @@
-"""Временный экран проверки: технический фундамент, демонстрации диалогов и анимации, галерея спрайтов.
+"""Временный экран проверки: технический фундамент и вход в тестовые экраны.
 
-Его заменит первая игровая сцена с теми же методами handle_event(), update() и draw().
+Тестовые экраны (диалог, анимация, галерея спрайтов) открываются через менеджер сцен
+поверх этого экрана и возвращают к нему по Backspace. Экран заменит первая игровая сцена.
 """
 
 from __future__ import annotations
@@ -9,8 +10,10 @@ import pygame
 
 import config
 from game.core.input import matches_key
+from game.core.scenes import Scene
 from game.debug.animation_demo import AnimationDemo
 from game.debug.demo_dialogue import DEMO_SCRIPT, QUESTION_ID
+from game.debug.dialogue_demo import DialogueDemo
 from game.debug.sprite_gallery import SpriteGallery
 from game.dialogue.box import DialogueBox
 from game.dialogue.model import DialogueChoice, DialogueController
@@ -25,6 +28,10 @@ HINTS = (
     ("P", "галерея спрайтов"),
     ("ESC", "выход"),
 )
+# Отладочные сочетания: код клавиши и скан-код (буквы работают в русской и немецкой раскладках).
+DIALOGUE_KEY = (pygame.K_d, pygame.KSCAN_D)
+ANIMATION_KEY = (pygame.K_a, pygame.KSCAN_A)
+GALLERY_KEY = (pygame.K_p, pygame.KSCAN_P)
 # Вертикальная раскладка: центры заголовка, подзаголовка и итога диалога, верх подсказок.
 TITLE_Y = 44
 SUBTITLE_Y = 62
@@ -33,8 +40,8 @@ HINTS_TOP = 108
 LINE_STEP = 13
 
 
-class DebugScreen:
-    """Тёмный фон, название игры, подсказки, счётчик FPS и тестовые экраны (диалог, анимация, галерея)."""
+class DebugScreen(Scene):
+    """Тёмный фон, название игры, подсказки, счётчик FPS и итог последнего тестового диалога."""
 
     def __init__(self, clock: pygame.time.Clock) -> None:
         self._clock = clock
@@ -66,62 +73,53 @@ class DebugScreen:
         self._dialogue_box = DialogueBox()
         # Проверяем при запуске, а не посреди демонстрации, что все реплики помещаются на экран.
         self._dialogue_box.check_fits(DEMO_SCRIPT)
-        self.dialogue: DialogueController | None = None
         # Ответ на вопрос из последнего завершённого прохода демонстрации.
         self.last_answer: DialogueChoice | None = None
-        # Открытые тестовые экраны. Одновременно открыт не больше одного.
-        self.animation_demo: AnimationDemo | None = None
-        self.sprite_gallery: SpriteGallery | None = None
+
+    # Что сейчас открыто поверх экрана проверки. Только для чтения: переходы делает менеджер.
 
     @property
-    def subscreen(self) -> AnimationDemo | SpriteGallery | None:
-        """Открытый тестовый экран, которому достаются события, обновление и отрисовка."""
-        return self.animation_demo or self.sprite_gallery
+    def dialogue(self) -> DialogueController | None:
+        scene = self._open_scene(DialogueDemo)
+        return scene.dialogue if scene is not None else None
+
+    @property
+    def animation_demo(self) -> AnimationDemo | None:
+        return self._open_scene(AnimationDemo)
+
+    @property
+    def sprite_gallery(self) -> SpriteGallery | None:
+        return self._open_scene(SpriteGallery)
+
+    def _open_scene(self, kind: type[Scene]) -> Scene | None:
+        current = self.manager.current if self.manager is not None else None
+        return current if isinstance(current, kind) else None
 
     def handle_event(self, event: pygame.event.Event) -> None:
-        subscreen = self.subscreen
-        if subscreen is not None:
-            # Пока открыт тестовый экран, клавиши достаются ему (в тесте анимации D — шаг вправо).
-            subscreen.handle_event(event)
-            if subscreen.is_finished:
-                self.animation_demo = self.sprite_gallery = None
-        elif self.dialogue is not None:
-            # Пока открыт диалог, клавиши достаются ему.
-            self.dialogue.handle_event(event)
-            if self.dialogue.is_finished:
-                self._finish_dialogue(self.dialogue)
-        elif event.type == pygame.KEYDOWN and matches_key(event, pygame.K_d, pygame.KSCAN_D):
-            self.dialogue = DialogueController(DEMO_SCRIPT)
+        if event.type != pygame.KEYDOWN or self.manager is None:
+            return
+        if matches_key(event, *DIALOGUE_KEY):
             self._result_labels = []  # итог прошлого прохода устарел и мешал бы окну диалога
-        elif event.type == pygame.KEYDOWN and matches_key(event, pygame.K_a, pygame.KSCAN_A):
-            self.animation_demo = AnimationDemo()
-        elif event.type == pygame.KEYDOWN and matches_key(event, pygame.K_p, pygame.KSCAN_P):
-            self.sprite_gallery = SpriteGallery()
+            self.manager.push(DialogueDemo(DEMO_SCRIPT, self._dialogue_box, on_finish=self._finish_dialogue))
+        elif matches_key(event, *ANIMATION_KEY):
+            self.manager.push(AnimationDemo())
+        elif matches_key(event, *GALLERY_KEY):
+            self.manager.push(SpriteGallery())
 
     def update(self, dt: float) -> None:
         self._fps_timer += dt
         if self._fps_timer >= FPS_REFRESH_INTERVAL:
             self._fps_timer = 0.0
             self._fps_label = self._render_fps()
-        if self.subscreen is not None:
-            self.subscreen.update(dt)
-        elif self.dialogue is not None:
-            self.dialogue.update(dt)
 
     def draw(self, surface: pygame.Surface) -> None:
-        if self.subscreen is not None:
-            self.subscreen.draw(surface)
-            return
         surface.fill(config.BACKGROUND_COLOR)
         for image, rect in self._labels + self._result_labels:
             surface.blit(image, rect)
         surface.blit(self._fps_label, (4, 3))
-        if self.dialogue is not None:
-            self._dialogue_box.draw(surface, self.dialogue)
 
     def _finish_dialogue(self, dialogue: DialogueController) -> None:
-        """Возвращает экран проверки и показывает, какой ответ выбран в диалоге."""
-        self.dialogue = None
+        """Показывает на экране проверки, какой ответ выбран в завершённом диалоге."""
         self.last_answer = dialogue.answers.get(QUESTION_ID)
         lines = ["Диалог завершён. D — запустить снова"]
         if self.last_answer is not None:

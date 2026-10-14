@@ -15,9 +15,7 @@ from dataclasses import dataclass
 import pygame
 
 import config
-
-# Enter (основной и на цифровом блоке) и пробел: дописать текст, продолжить, выбрать ответ.
-CONFIRM_KEYS = frozenset({pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE})
+from game.core.input import Action, actions_for
 
 
 class DialogueError(ValueError):
@@ -165,15 +163,18 @@ class DialogueController:
     def handle_event(self, event: pygame.event.Event) -> bool:
         """Обрабатывает нажатие клавиши. Возвращает True, если оно относится к диалогу.
 
-        Реагируем только на KEYDOWN: одно физическое нажатие — один шаг диалога.
+        Действие confirm (Enter, пробел) дописывает текст, продолжает или выбирает ответ;
+        move_up и move_down (стрелки, W/S) двигают выделение. Реагируем только на KEYDOWN:
+        одно физическое нажатие — один шаг диалога (автоповтор отсекает ActionInput).
         """
         if event.type != pygame.KEYDOWN or self.is_finished:
             return False
-        if event.key in CONFIRM_KEYS:
+        actions = actions_for(event)
+        if Action.CONFIRM in actions:
             self.confirm()
-        elif event.key == pygame.K_UP:
+        elif Action.MOVE_UP in actions:
             self.move_selection(-1)
-        elif event.key == pygame.K_DOWN:
+        elif Action.MOVE_DOWN in actions:
             self.move_selection(1)
         else:
             return False

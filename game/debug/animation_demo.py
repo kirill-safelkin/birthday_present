@@ -8,10 +8,11 @@ from __future__ import annotations
 import pygame
 
 import config
+from game.core.input import Action, actions_for, matches_key
+from game.core.scenes import Scene
 from game.graphics.animation import TALK, Direction
-from game.world.character import Character
 from game.graphics.fonts import load_font, render_text
-from game.core.input import matches_key
+from game.world.character import Character
 
 SCREEN_WIDTH, SCREEN_HEIGHT = config.LOGICAL_SIZE
 # Пол — шахматка из клеток 16×16: на ней видно движение и размер игрового пикселя.
@@ -23,8 +24,8 @@ INFO_FONT_SIZE = 9
 FONT_SIZE = 10
 HINTS_TOP = 153
 
-# Backspace — назад: ESC закрывает всю игру, а буквы заняты ходьбой.
-BACK_KEY = pygame.K_BACKSPACE
+# Назад — действие cancel (Backspace): ESC закрывает всю игру, а буквы заняты ходьбой.
+# Реакция и разговор — отладочные клавиши этого экрана, а не игровые действия.
 REACT_KEY = pygame.K_SPACE
 HINTS = (
     "Стрелки/WASD — ходьба  Пробел — реакция  T — речь",
@@ -42,14 +43,13 @@ def _is_talk_key(event: pygame.event.Event) -> bool:
     return matches_key(event, pygame.K_t, pygame.KSCAN_T)
 
 
-class AnimationDemo:
+class AnimationDemo(Scene):
     """Пол, временный персонаж, сведения о его состоянии и подсказки по управлению."""
 
     def __init__(self) -> None:
         self.character = Character("Манекен")
         # Персонаж стоит в центре пола: позиция — точка под ногами.
         self.character.set_position(FLOOR_RECT.centerx, FLOOR_RECT.centery + self.character.rect.height // 2)
-        self.is_finished = False  # пора вернуться на экран проверки
 
         self._info_font = load_font(INFO_FONT_SIZE)
         font = load_font(FONT_SIZE)
@@ -66,8 +66,8 @@ class AnimationDemo:
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.KEYDOWN:
-            if event.key == BACK_KEY:
-                self.is_finished = True
+            if Action.CANCEL in actions_for(event):
+                self.finish()
                 return
             if event.key == REACT_KEY:
                 self.character.react()

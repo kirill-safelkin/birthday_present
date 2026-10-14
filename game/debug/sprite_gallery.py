@@ -12,7 +12,8 @@ from pathlib import Path
 import pygame
 
 import config
-from game.core.input import matches_key
+from game.core.input import Action, actions_for, matches_key
+from game.core.scenes import Scene
 from game.dialogue.box import wrap_text
 from game.graphics.animation import AnimationPlayer
 from game.graphics.fonts import load_font, render_text
@@ -38,7 +39,6 @@ SIZE_KEYS = (
     (pygame.K_4, pygame.K_KP4, pygame.KSCAN_4),
     (pygame.K_5, pygame.K_KP5, pygame.KSCAN_5),
 )
-BACK_KEY = pygame.K_BACKSPACE
 # Зажатая ↑/↓ листает кадры сама: сначала пауза, потом шаг за шагом.
 REPEAT_DELAY = 0.35
 REPEAT_INTERVAL = 0.07
@@ -83,8 +83,12 @@ def load_entries(root: str | Path = CHARACTERS_DIR) -> list[GalleryEntry]:
     return entries
 
 
-class SpriteGallery:
-    """Один персонаж за раз: кадр в увеличении, его описание и группы анимации."""
+class SpriteGallery(Scene):
+    """Один персонаж за раз: кадр в увеличении, его описание и группы анимации.
+
+    Управление — логическими действиями: move_left/move_right — персонаж, move_up/move_down —
+    кадр, confirm — пуск и остановка, cancel — назад. Tab и цифры — отладочные клавиши галереи.
+    """
 
     def __init__(self, characters_dir: str | Path = CHARACTERS_DIR) -> None:
         self.characters_dir = Path(characters_dir)
@@ -94,7 +98,6 @@ class SpriteGallery:
         self.group_index = 0
         self.display_size = DISPLAY_SIZES[-1]
         self.player: AnimationPlayer | None = None  # не None, пока группа проигрывается
-        self.is_finished = False  # пора вернуться на экран проверки
         self._repeat_step = 0
         self._repeat_timer = 0.0
 
@@ -146,24 +149,25 @@ class SpriteGallery:
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type == pygame.WINDOWFOCUSLOST:
             self._repeat_step = 0
-        elif event.type == pygame.KEYUP and event.key in (pygame.K_UP, pygame.K_DOWN):
+        elif event.type == pygame.KEYUP and actions_for(event) & {Action.MOVE_UP, Action.MOVE_DOWN}:
             self._repeat_step = 0
         elif event.type == pygame.KEYDOWN:
             self._handle_key(event)
 
     def _handle_key(self, event: pygame.event.Event) -> None:
-        if event.key == BACK_KEY:
-            self.is_finished = True
-        elif event.key in (pygame.K_LEFT, pygame.K_RIGHT):
-            self.select_character(self.character_index + (1 if event.key == pygame.K_RIGHT else -1))
-        elif event.key in (pygame.K_UP, pygame.K_DOWN):
-            step = 1 if event.key == pygame.K_DOWN else -1
+        actions = actions_for(event)
+        if Action.CANCEL in actions:
+            self.finish()
+        elif actions & {Action.MOVE_LEFT, Action.MOVE_RIGHT}:
+            self.select_character(self.character_index + (1 if Action.MOVE_RIGHT in actions else -1))
+        elif actions & {Action.MOVE_UP, Action.MOVE_DOWN}:
+            step = 1 if Action.MOVE_DOWN in actions else -1
             self.step_frame(step)
             self._repeat_step = step
             self._repeat_timer = REPEAT_DELAY
         elif event.key == pygame.K_TAB:
             self.select_group(self.group_index + (-1 if event.mod & pygame.KMOD_SHIFT else 1))
-        elif event.key == pygame.K_SPACE:
+        elif Action.CONFIRM in actions:
             self.toggle_playback()
         else:
             for size, keys in zip(DISPLAY_SIZES, SIZE_KEYS):
