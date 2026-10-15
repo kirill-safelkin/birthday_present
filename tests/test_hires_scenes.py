@@ -742,7 +742,16 @@ class SolidBackgroundTextTest(SceneTestCase):
         for _ in range(20000):
             if intro.cue_name == "error_message" and intro.beat_time > 2.2:
                 break
-            if intro.dialogue is not None and not intro.dialogue.is_typing:
+            if intro.exploring:  # к месту норы — стрелкой, у готовой норы — E
+                if intro.entrance.can_enter(intro.walker.x):
+                    intro.handle_event(key(pygame.K_RIGHT, pygame.KSCAN_RIGHT, pygame.KEYUP))
+                    press_e(intro)
+                    continue
+                if intro.entrance.can_walk and not intro.walker.is_moving:
+                    intro.handle_event(key(pygame.K_RIGHT, pygame.KSCAN_RIGHT, pygame.KEYUP))
+                    intro.handle_event(key(pygame.K_RIGHT, pygame.KSCAN_RIGHT))
+                intro.update(1 / 30)
+            elif intro.dialogue is not None and not intro.dialogue.is_typing:
                 intro.dialogue.confirm()
                 intro._sync_dialogue()
             else:

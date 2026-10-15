@@ -20,7 +20,10 @@ from game.core.app import App  # noqa: E402
 from game.core.scenes import Scene, SceneManager  # noqa: E402
 from game.dialogue.box import DialogueBox  # noqa: E402
 from game.graphics.fonts import load_font  # noqa: E402
+from game.graphics.hires import HiResLayer, SpriteCommand  # noqa: E402
+from game.graphics.animation import Direction  # noqa: E402
 from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites  # noqa: E402
+from game.story.entrance import ENTER_DISTANCE, HOLE_X, TRIGGER_DISTANCE, WALK_MAX_X, WALK_MIN_X, Stage  # noqa: E402
 from game.story.intro_dialogue import (  # noqa: E402
     ALICE,
     BEATS,
@@ -31,28 +34,38 @@ from game.story.intro_dialogue import (  # noqa: E402
     ERROR_TITLE,
     POSES,
     RABBIT,
+    RABBIT_REMARK_BREAKING,
+    RABBIT_REMARK_READY,
     SPEAKER_ACTORS,
     TITLE_CLASSIC,
     TITLE_FINAL,
     TITLE_REWRITE,
     TITLE_REWRITE_SECONDS,
     Cue,
+    Explore,
     Lines,
     Pause,
     all_scripts,
     title_step_at,
 )
 from game.story.intro_scene import (  # noqa: E402
+    HOLE_COLOR,
     ALICE_BURROW_X,
+    ALICE_LEAP,
+    ALICE_LEAP_X,
+    ALICE_START_X,
     ALICE_X,
+    APPROACH_HINT,
     CAP_HEIGHT,
     CHUCHMEK_X,
+    ENTER_HINT,
     ERROR_H,
     ERROR_W,
     GLITCH_ALICE_POSES,
     JUMP_HEIGHT,
     SPRITE_SIZE,
     TITLE_BOTTOM,
+    WALK_HINT,
     IntroScene,
 )
 from game.world.hub import HubScene  # noqa: E402
@@ -81,11 +94,38 @@ def node_text() -> dict[str, str]:
     return {node.id: f"{node.speaker}: {node.text}" for node in all_nodes()}
 
 
+RIGHT = (pygame.K_RIGHT, pygame.KSCAN_RIGHT)
+LEFT = (pygame.K_LEFT, pygame.KSCAN_LEFT)
+# Стадии эпизода с норой от начала свободной ходьбы до готовой норы — каждая по одному разу.
+SHOW_STAGES = ["free_walk", "glitch_warning", "world_breaking", "hole_opening", "hole_ready"]
+
+
+def walk_to_burrow(scene: IntroScene, dt: float = 1 / 60) -> None:
+    """Шаг игрока в свободной ходьбе: зажать → и идти к месту норы, а у готовой норы — E.
+
+    Когда управление возвращается (после появления норы), → нажимается заново: зажатые
+    до постановки клавиши Алиса забывает, как и на площади после разговора."""
+    entrance = scene.entrance
+    if entrance.can_enter(scene.walker.x):
+        scene.handle_event(key(*RIGHT, pygame.KEYUP))
+        scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
+        scene.handle_event(key(pygame.K_e, pygame.KSCAN_E, pygame.KEYUP))
+        return
+    if entrance.can_walk and not scene.walker.is_moving:
+        scene.handle_event(key(*RIGHT, pygame.KEYUP))
+        scene.handle_event(key(*RIGHT))
+    scene.update(dt)
+
+
 def step(scene: IntroScene, choice_index: int | dict = 0, dt: float = 1 / 60, state: dict | None = None) -> None:
-    """Один шаг игрока: Enter, если реплика напечатана (в выборе — ↓ нужное число раз), иначе время.
+    """Один шаг игрока: Enter, если реплика напечатана (в выборе — ↓ нужное число раз), иначе время;
+    в свободной ходьбе — к норе и E у неё (walk_to_burrow).
 
     choice_index — номер ответа на каждом вопросе или словарь «id вопроса → номер ответа»."""
     state = state if state is not None else {}
+    if scene.exploring:
+        walk_to_burrow(scene, dt)
+        return
     dialogue = scene.dialogue
     if dialogue is not None and dialogue.node is not None and not dialogue.is_typing:
         node = dialogue.node
@@ -108,6 +148,35 @@ def play_through(scene: IntroScene, choice_index: int | dict = 0, dt: float = 1 
             break
         step(scene, choice_index, dt, state)
     return scene.events
+
+
+def advance_to_free_walk(scene: IntroScene, limit: int = 100000) -> None:
+    """Пролистывает вступление до момента, когда Алиса переходит к игроку."""
+    for _ in range(limit):
+        if scene.exploring:
+            return
+        step(scene)
+    raise AssertionError("свободная ходьба не наступила")
+
+
+def hold(scene: IntroScene, code: tuple[int, int], seconds: float, dt: float = 1 / 60) -> None:
+    """Зажать клавишу, подождать seconds и отпустить."""
+    scene.handle_event(key(*code))
+    elapsed = 0.0
+    while elapsed < seconds - 1e-9:
+        chunk = min(dt, seconds - elapsed)
+        scene.update(chunk)
+        elapsed += chunk
+    scene.handle_event(key(*code, pygame.KEYUP))
+
+
+def advance_to_stage(scene: IntroScene, stage: Stage, limit: int = 100000) -> None:
+    """Ведёт вступление как игрок до начала стадии эпизода с норой."""
+    for _ in range(limit):
+        if scene.stage is stage:
+            return
+        step(scene)
+    raise AssertionError(f"стадия {stage} не наступила")
 
 
 def advance_to_cue(scene: IntroScene, name: str, limit: int = 100000) -> None:
@@ -248,15 +317,21 @@ class ScriptTest(IntroTestCase):
         self.assertEqual(sorted(set(parts)), list("ABCDEF"))
         cues = [beat.name for beat in BEATS if isinstance(beat, Cue)]
         expected = [
-            "title_card", "rabbit_runs_in", "rabbit_points", "alice_walks", "alice_prepares", "glitch",
+            "title_card", "rabbit_runs_in", "rabbit_points", "alice_prepares", "alice_jumps", "glitch",
             "error_message", "restart", "title_rewrite", "chuchmek_emerges", "alice_reacts", "finale",
         ]
         self.assertEqual(cues, expected)
         self.assertTrue(any(isinstance(beat, Pause) and beat.part == "A" for beat in BEATS))  # пауза в начале
+        # Прежней автоматической прогулки к норе нет: её место занял один интерактивный шаг.
+        explore = [index for index, beat in enumerate(BEATS) if isinstance(beat, Explore)]
+        self.assertEqual(len(explore), 1)
+        prepares = next(i for i, b in enumerate(BEATS) if isinstance(b, Cue) and b.name == "alice_prepares")
+        self.assertEqual(explore[0] + 1, prepares)
+        self.assertEqual(BEATS[explore[0]].part, "A")
 
     def test_script_before_the_glitch_does_not_mention_chuchmek(self) -> None:
         glitch = next(index for index, beat in enumerate(BEATS) if isinstance(beat, Cue) and beat.name == "glitch")
-        texts = [TITLE_CLASSIC]
+        texts = [TITLE_CLASSIC, RABBIT_REMARK_BREAKING, RABBIT_REMARK_READY, WALK_HINT, APPROACH_HINT, ENTER_HINT]
         early_nodes = set()
         for beat in BEATS[:glitch]:
             if isinstance(beat, Lines):
@@ -278,10 +353,10 @@ class ScriptTest(IntroTestCase):
         rabbit = names.index(("Cue", "rabbit_runs_in"))
         first_lines = next(index for index, beat in enumerate(BEATS) if isinstance(beat, Lines))
         invite = next(i for i, b in enumerate(BEATS) if isinstance(b, Lines) and "r_invite" in b.script.nodes)
-        walk = names.index(("Cue", "alice_walks"))
+        walk = next(index for index, beat in enumerate(BEATS) if isinstance(beat, Explore))
         self.assertLess(rabbit, first_lines)
         self.assertLess(rabbit, invite)
-        self.assertLess(invite, walk)
+        self.assertEqual(invite + 1, walk)  # управление — сразу после приглашения, без лишних реплик
 
     def test_choice_branches_join(self) -> None:
         nodes = {node.id: node for node in all_nodes()}
@@ -322,11 +397,13 @@ class KeysTest(IntroTestCase):
         scene.handle_event(key(pygame.K_e, pygame.KSCAN_E, pygame.KEYUP))
         scene.handle_event(key(ord("у"), pygame.KSCAN_E))  # русская раскладка — та же клавиша
         self.assertNotEqual(scene.dialogue.node.id, first)  # дальше
-        for _ in range(100000):  # до вопроса Алисы — только клавишей E
+        for _ in range(100000):  # до вопроса Алисы — реплики только клавишей E (к норе — стрелкой и E)
             dialogue = scene.dialogue
             if dialogue is not None and dialogue.node.choices and not dialogue.is_typing:
                 break
-            if dialogue is not None and not dialogue.is_typing:
+            if scene.exploring:
+                walk_to_burrow(scene)
+            elif dialogue is not None and not dialogue.is_typing:
                 scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
             else:
                 scene.update(1 / 60)
@@ -346,7 +423,9 @@ class SequenceTest(IntroTestCase):
             ("cue", "title_card"), ("title", TITLE_CLASSIC),
             ("cue", "rabbit_runs_in"), ("node", "r_hello"), ("node", "r_burrow"), ("node", "r_ok"),
             ("cue", "rabbit_points"), ("node", "r_invite"),
-            ("cue", "alice_walks"), ("cue", "alice_prepares"), ("node", "a_go"),
+            ("stage", "free_walk"), ("stage", "glitch_warning"), ("stage", "world_breaking"),
+            ("stage", "hole_opening"), ("stage", "hole_ready"), ("stage", "entering_hole"),
+            ("cue", "alice_prepares"), ("node", "a_go"), ("cue", "alice_jumps"),
             ("cue", "glitch"), ("cue", "error_message"), ("cue", "restart"),
             ("title", TITLE_CLASSIC), ("title", TITLE_TRUNCATED), ("title", TITLE_FINAL),
             ("cue", "chuchmek_emerges"), ("node", "c_who"), ("node", "c_name"), ("node", "c_title"),
@@ -383,54 +462,59 @@ class SequenceTest(IntroTestCase):
             for word in SPOILERS:
                 self.assertNotIn(word, shown.lower(), shown)
 
-    def test_alice_starts_walking_only_after_she_agrees(self) -> None:
+    def test_alice_stands_still_until_the_player_gets_her(self) -> None:
         scene = IntroScene()
         positions = []
         state: dict = {}
-        while scene.cue_name != "alice_walks":
+        while not scene.exploring:
+            scene.handle_event(key(*RIGHT))  # до конца разговора стрелки ничего не делают
+            scene.handle_event(key(*RIGHT, pygame.KEYUP))
             step(scene, state=state)
             positions.append(scene.actors["alice"].x)
-        self.assertEqual(set(positions), {float(ALICE_X)})  # до согласия Алиса стоит на месте
+        self.assertEqual(set(positions), {float(ALICE_START_X)})  # сама Алиса никуда не идёт
         self.assertIn(("node", "r_ok"), scene.events)
-        self.assertEqual(scene.beat_time, 0.0)
-        self.assertTrue(scene.actors["alice"].is_playing)  # идёт анимацией walk_right, не черновой
+        self.assertEqual(scene.events[-2:], [("node", "r_invite"), ("stage", "free_walk")])
+        self.assertIs(scene.actors["alice"].body, scene.walker)
+        self.assertNotIn(("cue", "alice_prepares"), scene.events)
 
-    def test_alice_walk_is_continuous_and_slows_down_at_the_burrow(self) -> None:
+    def test_held_right_walks_steadily_and_release_stops(self) -> None:
         scene = IntroScene()
-        advance_to_cue(scene, "alice_walks")
+        advance_to_free_walk(scene)
         alice = scene.actors["alice"]
+        scene.handle_event(key(*RIGHT))
         xs = [alice.x]
-        while scene.cue_name == "alice_walks":
+        for _ in range(60):
             scene.update(1 / 60)
             xs.append(alice.x)
         deltas = [b - a for a, b in zip(xs, xs[1:])]
-        self.assertTrue(all(delta >= -1e-9 for delta in deltas))  # только вперёд
-        self.assertAlmostEqual(alice.x, ALICE_BURROW_X)
-        middle = deltas[len(deltas) // 3]
-        self.assertGreater(middle, 0.5)  # идёт заметными шагами
-        self.assertLess(deltas[-3], middle * 0.5)  # а у самой норы притормаживает
-        self.assertEqual(scene.cue_name, "alice_prepares")
+        for delta in deltas:  # ровный шаг: WALK_SPEED пикселей в секунду
+            self.assertAlmostEqual(delta, scene.walker.speed / 60, places=6)
+        self.assertTrue(scene.actors["alice"].body.is_moving)
+        scene.handle_event(key(*RIGHT, pygame.KEYUP))
+        stopped = alice.x
+        scene.update(1.0)
+        self.assertEqual(alice.x, stopped)
+        self.assertIs(scene.stage, Stage.FREE_WALK)
 
-    def test_alice_walk_depends_on_time_not_on_frame_rate(self) -> None:
+    def test_walking_depends_on_time_not_on_frame_rate(self) -> None:
         positions = []
         for dt in (1 / 144, 1 / 60, 1 / 30, 0.5):
             scene = IntroScene()
-            advance_to_cue(scene, "alice_walks")
-            elapsed = 0.0
-            while elapsed < 1.3 - 1e-9:
-                chunk = min(dt, 1.3 - elapsed)
-                scene.update(chunk)
-                elapsed += chunk
+            advance_to_free_walk(scene)
+            hold(scene, RIGHT, 1.3, dt)
             positions.append(scene.actors["alice"].x)
+        self.assertAlmostEqual(positions[0], ALICE_START_X + scene.walker.speed * 1.3, places=6)
         for x in positions:
             self.assertAlmostEqual(x, positions[0], places=6)
 
-    def test_glitch_starts_only_at_the_burrow_after_the_last_line(self) -> None:
+    def test_glitch_starts_over_the_burrow_after_the_jump(self) -> None:
         scene = IntroScene()
         advance_to_cue(scene, "glitch")
-        self.assertEqual(scene.actors["alice"].x, ALICE_BURROW_X)
+        alice = scene.actors["alice"]
+        self.assertEqual(alice.x, ALICE_LEAP_X)  # уже над норой
+        self.assertEqual(alice.lift, ALICE_LEAP)  # сказка зависла посреди прыжка
         self.assertEqual(scene.burrow_open, 1.0)
-        self.assertEqual(scene.events[-2], ("node", "a_go"))
+        self.assertEqual(scene.events[-3:-1], [("node", "a_go"), ("cue", "alice_jumps")])
         self.assertEqual(scene.error_text, ())
         self.assertEqual(scene.title, TITLE_CLASSIC)
 
@@ -697,13 +781,13 @@ class StagingTest(IntroTestCase):
         self.assertIsNone(scene.dialogue)
         self.assertEqual(scene.error_text, ())
 
-    def test_burrow_appears_when_the_rabbit_points_to_it(self) -> None:
+    def test_rabbit_points_to_the_place_but_there_is_no_burrow_yet(self) -> None:
         scene = IntroScene()
         advance_to_cue(scene, "rabbit_points")
         self.assertEqual(scene.burrow_open, 0.0)
         while scene.cue_name == "rabbit_points":
             scene.update(1 / 60)
-        self.assertEqual(scene.burrow_open, 1.0)
+            self.assertEqual(scene.burrow_open, 0.0)  # норы ещё не существует
         self.assertEqual(scene.actors["white_rabbit"].pose, "hurries_pointing")
 
     def test_error_box_text_fits_inside_the_box(self) -> None:
@@ -720,7 +804,10 @@ class StagingTest(IntroTestCase):
         while not scene.completed and elapsed < 300:
             scene.draw(self.canvas)
             dialogue = scene.dialogue
-            if dialogue is not None and not dialogue.is_typing:
+            if scene.exploring:
+                walk_to_burrow(scene, 0.03)
+                elapsed += 0.03
+            elif dialogue is not None and not dialogue.is_typing:
                 step(scene, state=state)
             else:
                 scene.update(0.03)
@@ -738,6 +825,407 @@ class StagingTest(IntroTestCase):
         self.assertEqual(scene.error_text, ())
         self.assertEqual(scene.hidden, set())
         scene.draw(self.canvas)
+
+
+class InteractiveEntranceTest(IntroTestCase):
+    """После разговора с Кроликом Алисой управляет игрок: ходьба, сбой у места норы, нора, вход."""
+
+    def free_walk(self) -> IntroScene:
+        scene = IntroScene()
+        advance_to_free_walk(scene)
+        return scene
+
+    def ready(self) -> IntroScene:
+        scene = self.free_walk()
+        advance_to_stage(scene, Stage.HOLE_READY)
+        return scene
+
+    def walk_until(self, scene: IntroScene, code: tuple[int, int], stop, limit: float = 30.0) -> None:
+        """Держит клавишу, пока stop() не станет истинным (не дольше limit секунд)."""
+        scene.handle_event(key(*code))
+        elapsed = 0.0
+        while not stop() and elapsed < limit:
+            scene.update(1 / 60)
+            elapsed += 1 / 60
+        scene.handle_event(key(*code, pygame.KEYUP))
+        self.assertTrue(stop(), "не дошла")
+
+    def hole_pixels(self, scene: IntroScene) -> int:
+        """Сколько пикселей цвета глубины норы видно на месте норы."""
+        canvas = pygame.Surface(config.LOGICAL_SIZE)
+        scene.draw(canvas)
+        area = pygame.Rect(HOLE_X - 30, scene.ground - 12, 60, 24)
+        return sum(
+            1 for x in range(area.left, area.right) for y in range(area.top, area.bottom)
+            if tuple(canvas.get_at((x, y)))[:3] == HOLE_COLOR
+        )
+
+    # --- Управление ---
+
+    def test_control_is_given_once_right_after_the_last_line(self) -> None:
+        scene = IntroScene()
+        while not (scene.dialogue is not None and scene.dialogue.node.id == "r_invite"):
+            step(scene)
+        while scene.dialogue.is_typing:
+            scene.update(1 / 60)
+        self.assertFalse(scene.exploring)
+        scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))  # закрыть приглашение
+        self.assertTrue(scene.exploring)
+        self.assertIsNone(scene.dialogue)  # между разговором и ходьбой нет лишних страниц
+        self.assertIs(scene.stage, Stage.FREE_WALK)
+        self.assertEqual(scene.events.count(("stage", "free_walk")), 1)
+        self.assertEqual(scene.walker.x, ALICE_START_X)
+        self.assertFalse(scene.walker.is_moving)
+        self.assertEqual(scene.hint_text, WALK_HINT)
+        for _ in range(3):  # повторные E ничего не запускают: норы ещё нет
+            scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
+            scene.update(0.2)
+        self.assertIs(scene.stage, Stage.FREE_WALK)
+        self.assertEqual(scene.walker.x, ALICE_START_X)
+
+    def test_alice_walks_both_ways_with_arrows_and_letters_in_both_layouts(self) -> None:
+        layouts = {
+            "стрелки": (LEFT, RIGHT),
+            "A/D": ((pygame.K_a, pygame.KSCAN_A), (pygame.K_d, pygame.KSCAN_D)),
+            "ф/в (русская раскладка)": ((ord("ф"), pygame.KSCAN_A), (ord("в"), pygame.KSCAN_D)),
+        }
+        for name, (left, right) in layouts.items():
+            with self.subTest(keys=name):
+                scene = self.free_walk()
+                start = scene.walker.x
+                hold(scene, right, 0.5)
+                self.assertAlmostEqual(scene.walker.x, start + scene.walker.speed * 0.5, places=6)
+                self.assertEqual(scene.actors["alice"].x, scene.walker.x)
+                hold(scene, left, 1.0)
+                self.assertAlmostEqual(scene.walker.x, start - scene.walker.speed * 0.5, places=6)
+                self.assertIs(scene.stage, Stage.FREE_WALK)
+
+    def test_without_input_alice_does_not_move(self) -> None:
+        scene = self.free_walk()
+        hold(scene, RIGHT, 0.4)
+        x = scene.walker.x
+        for _ in range(120):
+            scene.update(1 / 60)
+        self.assertEqual(scene.walker.x, x)
+        self.assertFalse(scene.walker.is_moving)
+
+    def test_speed_follows_dt(self) -> None:
+        for seconds in (0.1, 0.37, 1.0):
+            for dt in (1 / 144, 1 / 30, 0.25):
+                with self.subTest(seconds=seconds, dt=dt):
+                    scene = self.free_walk()
+                    hold(scene, RIGHT, seconds, dt)
+                    self.assertAlmostEqual(scene.walker.x - ALICE_START_X, scene.walker.speed * seconds, places=6)
+
+    def test_alice_does_not_leave_the_page(self) -> None:
+        scene = self.free_walk()
+        hold(scene, LEFT, 20.0, 0.1)
+        self.assertEqual(scene.walker.x, WALK_MIN_X)
+        body = scene.actors["alice"].bounds(scene.ground)
+        self.assertGreater(body.centerx, 6)  # середина Алисы — внутри рамки страницы
+        self.assertIs(scene.stage, Stage.FREE_WALK)
+
+    def test_turning_changes_direction_and_walk_animation(self) -> None:
+        scene = self.free_walk()
+        alice = scene.actors["alice"]
+        sprites = alice.sprites
+        walk_right = {id(sprites.frame(f).image) for f in sprites.groups["walk_right"].frame_ids}
+        walk_left = {id(sprites.frame(f).image) for f in sprites.groups["walk_left"].frame_ids}
+        scene.handle_event(key(*RIGHT))
+        scene.update(0.3)
+        self.assertIs(scene.walker.direction, Direction.RIGHT)
+        self.assertIn(id(alice.source_image()), walk_right)
+        x = scene.walker.x
+        scene.handle_event(key(*RIGHT, pygame.KEYUP))
+        scene.handle_event(key(*LEFT))
+        scene.update(0.3)
+        self.assertIs(scene.walker.direction, Direction.LEFT)
+        self.assertIn(id(alice.source_image()), walk_left)
+        self.assertLess(scene.walker.x, x)
+        scene.handle_event(key(*LEFT, pygame.KEYUP))
+        scene.update(0.1)
+        self.assertIs(alice.source_image(), sprites.frame("idle_left").image)  # стоит и смотрит влево
+
+    def test_up_and_down_keys_do_not_move_or_turn_alice(self) -> None:
+        scene = self.free_walk()
+        direction, x = scene.walker.direction, scene.walker.x
+        for code in ((pygame.K_UP, pygame.KSCAN_UP), (pygame.K_w, pygame.KSCAN_W),
+                     (pygame.K_DOWN, pygame.KSCAN_DOWN), (ord("ы"), pygame.KSCAN_S)):
+            hold(scene, code, 0.3)
+        self.assertEqual((scene.walker.direction, scene.walker.x), (direction, x))
+
+    def test_lost_focus_releases_held_keys(self) -> None:
+        scene = self.free_walk()
+        scene.handle_event(key(*RIGHT))
+        scene.update(0.2)
+        scene.handle_event(pygame.event.Event(pygame.WINDOWFOCUSLOST))
+        x = scene.walker.x
+        scene.update(1.0)
+        self.assertEqual(scene.walker.x, x)  # KEYUP потерялся вместе с фокусом, но Алиса не идёт сама
+
+    # --- Триггер ---
+
+    def test_far_from_the_place_nothing_breaks(self) -> None:
+        scene = self.free_walk()
+        hold(scene, LEFT, 2.0)
+        for _ in range(600):
+            scene.update(0.05)
+        self.assertIs(scene.stage, Stage.FREE_WALK)
+        self.assertEqual(scene.burrow_open, 0.0)
+        self.assertEqual(scene.events.count(("stage", "glitch_warning")), 0)
+
+    def test_walking_back_and_forth_keeps_control_until_the_place(self) -> None:
+        scene = self.free_walk()
+        edge = HOLE_X - TRIGGER_DISTANCE
+        for code, target in ((RIGHT, edge - 6), (LEFT, edge - 60), (RIGHT, edge - 4), (LEFT, edge - 30)):
+            going_right = code is RIGHT
+            self.walk_until(scene, code, lambda: scene.walker.x >= target if going_right else scene.walker.x <= target)
+            self.assertIs(scene.stage, Stage.FREE_WALK)
+            self.assertTrue(scene.entrance.can_walk)
+        self.walk_until(scene, RIGHT, lambda: scene.stage is not Stage.FREE_WALK)
+        self.assertIs(scene.stage, Stage.GLITCH_WARNING)
+        self.assertGreaterEqual(scene.actors["alice"].x, edge)
+
+    def test_trigger_works_at_any_frame_rate_and_only_once(self) -> None:
+        edge = HOLE_X - TRIGGER_DISTANCE
+        for dt in (1 / 144, 1 / 60, 1 / 30, 0.1, 0.5, 5.0):
+            with self.subTest(dt=dt):
+                scene = self.free_walk()
+                scene.handle_event(key(*RIGHT))
+                while scene.stage is Stage.FREE_WALK:
+                    scene.update(dt)
+                trigger_x = scene._lock_x
+                self.assertGreaterEqual(trigger_x, edge)
+                self.assertLess(trigger_x, edge + 3.5)  # не проскочила место, даже за один большой кадр
+                for _ in range(400):
+                    scene.update(1 / 30)
+                stages = [value for kind, value in scene.events if kind == "stage"]
+                self.assertEqual(stages, SHOW_STAGES)
+
+    def test_one_huge_dt_passes_every_stage(self) -> None:
+        scene = self.free_walk()
+        scene.handle_event(key(*RIGHT))
+        scene.update(60.0)
+        stages = [value for kind, value in scene.events if kind == "stage"]
+        self.assertEqual(stages, SHOW_STAGES)
+        self.assertTrue(scene.entrance.can_walk)
+        self.assertIs(scene.actors["alice"].body, scene.walker)
+        self.assertEqual(scene.burrow_open, 1.0)
+        self.assertEqual(scene.flash, 0.0)
+
+    def test_keys_during_the_show_change_nothing(self) -> None:
+        scene = self.free_walk()
+        self.walk_until(scene, RIGHT, lambda: scene.stage is not Stage.FREE_WALK)
+        alice = scene.actors["alice"]
+        self.assertIsNone(alice.body)  # Алису ведёт постановка
+        while scene.stage is not Stage.HOLE_READY:
+            for code in (LEFT, RIGHT, (pygame.K_e, pygame.KSCAN_E), (pygame.K_RETURN, 0), (pygame.K_SPACE, 0)):
+                scene.handle_event(key(*code))
+                scene.handle_event(key(*code, pygame.KEYUP))
+            x = alice.x
+            scene.update(1 / 30)
+            if scene.stage is Stage.HOLE_OPENING:
+                self.assertEqual(alice.x, x)  # стоит и смотрит, как появляется нора
+        self.assertEqual(scene.events.count(("stage", "entering_hole")), 0)
+        self.assertFalse(scene.walker.is_moving)  # зажатое во время постановки не тянет Алису дальше
+
+    def test_world_reacts_step_by_step(self) -> None:
+        scene = self.free_walk()
+        self.walk_until(scene, RIGHT, lambda: scene.stage is not Stage.FREE_WALK)
+        rabbit, alice = scene.actors["white_rabbit"], scene.actors["alice"]
+        seen = {}
+        while scene.stage is not Stage.HOLE_READY:
+            fx = scene.entrance_effects()
+            info = seen.setdefault(scene.stage, {"flicker": 0, "shift": 0, "tear": 0, "flash": 0, "sparks": 0,
+                                                 "remark": set(), "rabbit": set()})
+            for name in ("flicker", "shift", "tear", "flash"):
+                info[name] = max(info[name], getattr(fx, name))
+            info["sparks"] = max(info["sparks"], len(fx.sparks))
+            info["remark"].add(scene.rabbit_remark)
+            info["rabbit"].add(rabbit.pose)
+            scene.update(1 / 60)
+        warning, breaking = seen[Stage.GLITCH_WARNING], seen[Stage.WORLD_BREAKING]
+        # Сначала только странности: мерцание, сдвиги мелочей, первые искры — без рывков страницы.
+        self.assertGreater(warning["flicker"], 0)
+        self.assertGreater(warning["shift"], 0)
+        self.assertGreater(warning["sparks"], 0)
+        self.assertEqual((warning["tear"], warning["flash"]), (0, 0))
+        self.assertEqual(warning["remark"], {""})
+        # Потом сильнее: полосы страницы съезжают, вспышки, вихрь искр, Кролик в панике.
+        self.assertGreater(breaking["tear"], 0)
+        self.assertGreater(breaking["flash"], 0)
+        self.assertGreater(breaking["sparks"], warning["sparks"])
+        self.assertEqual(breaking["remark"], {RABBIT_REMARK_BREAKING})
+        self.assertIn("panics_watch", breaking["rabbit"])
+        self.assertLess(alice.x, scene._lock_x)  # Алиса отшатнулась от места сбоя
+        self.assertEqual(rabbit.pose, "confident_point")
+        self.assertEqual(scene.rabbit_remark, RABBIT_REMARK_READY)
+
+    # --- Появление норы ---
+
+    def test_no_hole_is_drawn_before_the_event(self) -> None:
+        scene = IntroScene()
+        while not scene.exploring:
+            self.assertEqual(self.hole_pixels(scene), 0)
+            for _ in range(10):
+                step(scene)
+        self.walk_until(scene, RIGHT, lambda: scene.walker.x > HOLE_X - TRIGGER_DISTANCE - 2)
+        self.assertIs(scene.stage, Stage.FREE_WALK)
+        for _ in range(100):  # и подсказки у места норы не похожи на открытую нору
+            scene.update(0.03)
+            self.assertEqual(self.hole_pixels(scene), 0)
+            self.assertEqual(scene.burrow_open, 0.0)
+
+    def test_hole_opens_gradually_and_settles(self) -> None:
+        scene = self.free_walk()
+        self.walk_until(scene, RIGHT, lambda: scene.stage is not Stage.FREE_WALK)
+        opening, rims, pixels = [], [], []
+        while scene.stage is not Stage.HOLE_READY:
+            scene.update(1 / 30)
+            if scene.stage is Stage.HOLE_OPENING:
+                opening.append(scene.burrow_open)
+                rims.append(scene.burrow_rim)
+                pixels.append(self.hole_pixels(scene))
+            self.assertFalse(scene.entrance.can_enter(scene.actors["alice"].x))
+        self.assertEqual(opening, sorted(opening))
+        self.assertEqual(rims, sorted(rims))
+        self.assertEqual(opening[0], 0.0)
+        self.assertEqual(rims[0], 0.0)  # окантовка складывается последней, уже вокруг открытой глубины
+        first_rim = next(index for index, rim in enumerate(rims) if rim > 0)
+        self.assertGreaterEqual(opening[first_rim], 0.5)
+        self.assertEqual(scene.burrow_rim, 1.0)
+        self.assertGreater(len({round(value, 2) for value in opening}), 10)  # не включается одной картинкой
+        self.assertEqual(pixels[0], 0)
+        self.assertGreater(max(pixels), 100)
+        self.assertEqual(scene.burrow_open, 1.0)
+        scene.update(3.0)  # эффекты затихли, Кролик договорил: нора стоит и не мерцает
+        self.assertEqual(scene.rabbit_remark, "")
+        frames = []
+        for _ in range(3):
+            canvas = pygame.Surface(config.LOGICAL_SIZE)
+            scene.draw(canvas)
+            frames.append(pygame.image.tobytes(canvas, "RGB"))
+            scene.update(0.37)
+        self.assertEqual(len(set(frames)), 1)
+        self.assertTrue(scene.entrance_effects().is_calm)
+
+    def test_control_returns_after_the_hole_opens(self) -> None:
+        scene = self.ready()
+        self.assertIs(scene.actors["alice"].body, scene.walker)
+        self.assertEqual(scene.walker.x, scene.actors["alice"].x)
+        self.assertIs(scene.walker.direction, Direction.RIGHT)
+        x = scene.walker.x
+        hold(scene, LEFT, 0.5)
+        self.assertAlmostEqual(scene.walker.x, x - scene.walker.speed * 0.5, places=6)
+        hold(scene, RIGHT, 0.5)
+        self.assertAlmostEqual(scene.walker.x, x, places=6)
+
+    def test_alice_cannot_walk_over_the_hole(self) -> None:
+        scene = self.ready()
+        hold(scene, RIGHT, 10.0)
+        self.assertEqual(scene.walker.x, WALK_MAX_X)
+        self.assertLess(scene.actors["alice"].x, HOLE_X)
+
+    # --- Вход в нору ---
+
+    def test_e_far_from_the_hole_does_not_enter(self) -> None:
+        scene = self.ready()
+        self.assertGreater(HOLE_X - scene.walker.x, ENTER_DISTANCE)  # после сбоя Алиса стоит поодаль
+        self.assertEqual(scene.hint_text, APPROACH_HINT)
+        keys = ((pygame.K_e, pygame.KSCAN_E), (ord("у"), pygame.KSCAN_E), (pygame.K_RETURN, 0), (pygame.K_SPACE, 0))
+        for code in keys:
+            scene.handle_event(key(*code))
+            scene.handle_event(key(*code, pygame.KEYUP))
+            scene.update(0.1)
+        self.assertIs(scene.stage, Stage.HOLE_READY)
+        self.assertTrue(scene.exploring)
+        self.assertNotIn(("cue", "alice_prepares"), scene.events)
+
+    def test_e_near_the_hole_enters_exactly_once(self) -> None:
+        scene = self.ready()
+        self.walk_until(scene, RIGHT, lambda: scene.entrance.can_enter(scene.walker.x))
+        self.assertEqual(scene.hint_text, ENTER_HINT)
+        scene.handle_event(key(pygame.K_SPACE))  # пробел — не «войти»
+        self.assertTrue(scene.exploring)
+        beat = scene.beat_index
+        for _ in range(5):  # первое E входит, остальные ничего не добавляют
+            scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
+            scene.handle_event(key(pygame.K_RETURN))
+        self.assertEqual(scene.beat_index, beat + 1)
+        self.assertEqual(scene.cue_name, "alice_prepares")
+        self.assertEqual(scene.events.count(("stage", "entering_hole")), 1)
+        self.assertEqual(scene.events.count(("cue", "alice_prepares")), 1)
+        self.assertFalse(scene.exploring)
+        self.assertIsNone(scene.actors["alice"].body)  # дальше Алису ведёт сценарий
+
+    def test_enter_key_works_like_e(self) -> None:
+        scene = self.ready()
+        self.walk_until(scene, RIGHT, lambda: scene.entrance.can_enter(scene.walker.x))
+        scene.handle_event(key(pygame.K_RETURN))
+        self.assertIs(scene.stage, Stage.ENTERING_HOLE)
+
+    def test_walking_away_and_back_to_the_hole(self) -> None:
+        scene = self.ready()
+        self.walk_until(scene, LEFT, lambda: scene.walker.x <= 120)
+        self.assertEqual(scene.hint_text, APPROACH_HINT)
+        scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
+        self.assertIs(scene.stage, Stage.HOLE_READY)
+        self.assertEqual(scene.burrow_open, 1.0)  # нора на месте
+        self.walk_until(scene, RIGHT, lambda: scene.entrance.can_enter(scene.walker.x))
+        scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
+        self.assertIs(scene.stage, Stage.ENTERING_HOLE)
+
+    def test_after_entering_alice_crouches_jumps_and_the_old_glitch_follows(self) -> None:
+        scene = self.ready()
+        self.walk_until(scene, RIGHT, lambda: scene.entrance.can_enter(scene.walker.x))
+        scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
+        alice = scene.actors["alice"]
+        while scene.cue_name == "alice_prepares":
+            scene.update(1 / 60)
+        self.assertEqual((alice.x, alice.squash), (ALICE_BURROW_X, 0.88))  # на самом краю и присела
+        self.assertEqual(scene.dialogue.node.id, "a_go")  # «Ну, поехали.»
+        while scene.cue_name != "alice_jumps":
+            step(scene)
+        lifts = []
+        while scene.cue_name == "alice_jumps":
+            scene.update(1 / 60)
+            lifts.append(alice.lift)
+        self.assertEqual(lifts[:-1], sorted(lifts[:-1]))  # взлетает
+        self.assertEqual(scene.cue_name, "glitch")
+        for cue in ("error_message", "restart", "title_rewrite", "chuchmek_emerges"):
+            advance_to_cue(scene, cue)
+        self.assertEqual(scene.title, TITLE_FINAL)
+
+    def test_explore_frames_draw_through_a_strict_layer_without_double_alice(self) -> None:
+        scene = self.free_walk()
+        alice = scene.actors["alice"]
+        alice_images = {id(frame.image) for frame in alice.sprites.frames}
+        canvas = pygame.Surface(config.LOGICAL_SIZE)
+        stages = set()
+        while scene.exploring:
+            layer = HiResLayer(strict=True)  # логическая графика не выходит за свои области
+            scene.draw(canvas, layer)
+            sprites = [c for c in layer.commands if isinstance(c, SpriteCommand) and id(c.image) in alice_images]
+            self.assertEqual(len(sprites), 1, scene.stage)  # ни двойного силуэта, ни пропавшей Алисы
+            self.assertEqual(sprites[0].rect, alice.bounds(scene.ground))
+            stages.add(scene.stage)
+            walk_to_burrow(scene, 1 / 30)
+        self.assertEqual(stages, set(Stage) - {Stage.ENTERING_HOLE})
+
+    def test_rabbit_stays_visible_and_reacts(self) -> None:
+        scene = self.free_walk()
+        rabbit = scene.actors["white_rabbit"]
+        self.assertEqual(rabbit.pose, "hurries_pointing")  # показывает, куда идти
+        scene.handle_event(key(*LEFT))
+        scene.update(0.3)
+        self.assertEqual(rabbit.pose, "annoyed_watch")  # Алиса пошла не туда — Кролик смотрит на часы
+        scene.handle_event(key(*LEFT, pygame.KEYUP))
+        scene.update(0.1)
+        self.assertEqual(rabbit.pose, "hurries_pointing")
+        while scene.exploring:
+            self.assertTrue(rabbit.visible)
+            self.assertNotIn("white_rabbit", scene.hidden)
+            walk_to_burrow(scene, 1 / 30)
 
 
 class Base(Scene):
@@ -812,7 +1300,10 @@ class MissingSpritesTest(IntroTestCase):
         while not scene.completed and elapsed < 300:
             scene.draw(self.canvas)
             dialogue = scene.dialogue
-            if dialogue is not None and not dialogue.is_typing:
+            if scene.exploring:
+                walk_to_burrow(scene, 0.1)
+                elapsed += 0.1
+            elif dialogue is not None and not dialogue.is_typing:
                 step(scene, state=state)
             else:
                 scene.update(0.1)
@@ -914,6 +1405,55 @@ class AppIntegrationTest(unittest.TestCase):
                 self.send(pygame.event.Event(pygame.QUIT))
                 self.assertFalse(self.app.running)
                 self.assertEqual(intro.cue_name, cue)  # события не сбили сцену
+                self.press(pygame.K_BACKSPACE)
+                self.assertIs(self.app.scenes.current, self.app.screen)
+
+    def test_held_e_closes_the_last_line_and_does_nothing_more(self) -> None:
+        self.press(pygame.K_i, pygame.KSCAN_I)
+        intro = self.app.scenes.current
+        while not (intro.dialogue is not None and intro.dialogue.node.id == "r_invite"):
+            step(intro)
+        while intro.dialogue.is_typing:
+            intro.update(1 / 60)
+        e = (pygame.K_e, pygame.KSCAN_E)
+        self.send(key(*e))  # нажала E и держит: системный автоповтор шлёт KEYDOWN без KEYUP
+        self.assertTrue(intro.exploring)
+        for _ in range(10):
+            self.send(key(*e))
+            self.app.scenes.update(0.1)
+        self.assertIs(intro.stage, Stage.FREE_WALK)
+        self.assertEqual(intro.walker.x, ALICE_START_X)
+        self.assertEqual(intro.events.count(("stage", "free_walk")), 1)
+        self.send(key(*e, pygame.KEYUP))
+        # Стрелка через приложение ведёт Алису, а её автоповтор не сбивает шаг.
+        self.send(key(*RIGHT))
+        self.app.scenes.update(0.5)
+        self.send(key(*RIGHT), key(*RIGHT))
+        self.app.scenes.update(0.5)
+        self.send(key(*RIGHT, pygame.KEYUP))
+        self.assertAlmostEqual(intro.walker.x, ALICE_START_X + intro.walker.speed, places=6)
+
+    def test_escape_f11_and_window_close_while_exploring(self) -> None:
+        for stage in (Stage.FREE_WALK, Stage.WORLD_BREAKING, Stage.HOLE_OPENING, Stage.HOLE_READY):
+            with self.subTest(stage=stage):
+                self.press(pygame.K_i, pygame.KSCAN_I)
+                intro = self.app.scenes.current
+                advance_to_stage(intro, stage)
+                intro.update(0.2 if stage is not Stage.FREE_WALK else 0.0)
+                before = intro.stage
+                self.app.running = True
+                self.press(pygame.K_F11)
+                self.assertTrue(self.app.display.is_fullscreen)
+                self.app.scenes.draw(self.app.display.canvas, self.app.display.hires)
+                self.app.display.present()
+                self.press(pygame.K_F11)
+                self.assertFalse(self.app.display.is_fullscreen)
+                self.press(pygame.K_ESCAPE)
+                self.assertFalse(self.app.running)
+                self.app.running = True
+                self.send(pygame.event.Event(pygame.QUIT))
+                self.assertFalse(self.app.running)
+                self.assertIs(intro.stage, before)  # события окна не сбили эпизод
                 self.press(pygame.K_BACKSPACE)
                 self.assertIs(self.app.scenes.current, self.app.screen)
 

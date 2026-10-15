@@ -631,12 +631,25 @@ class TransitionsTest(HubTestCase):
         manager.register(HUB_SCENE, lambda: HubScene(self.progress))
         intro = manager.push(IntroScene(next_scene=HUB_SCENE))
         intro.update(1000.0)  # заставки и паузы
-        while not intro.completed:
+        right = (pygame.K_RIGHT, pygame.KSCAN_RIGHT)
+        for _ in range(100000):  # с пределом: зависшее вступление — провал теста, а не вечный цикл
+            if intro.completed:
+                break
             dialogue = intro.dialogue
-            if dialogue is not None:
+            if intro.exploring:  # Алиса сама идёт к месту норы (→), а у готовой норы — E
+                if intro.entrance.can_enter(intro.walker.x):
+                    intro.handle_event(key(*right, pygame.KEYUP))
+                    intro.handle_event(key(pygame.K_e, pygame.KSCAN_E))
+                    continue
+                if intro.entrance.can_walk and not intro.walker.is_moving:
+                    intro.handle_event(key(*right, pygame.KEYUP))
+                    intro.handle_event(key(*right))
+                intro.update(0.5)
+            elif dialogue is not None:
                 intro.handle_event(key(pygame.K_RETURN))
             else:
                 intro.update(0.5)
+        self.assertTrue(intro.completed)
         hub = manager.current
         self.assertIsInstance(hub, HubScene)
         self.assertEqual(manager.stack, (base, hub))  # вступление заменено площадью, база под ней

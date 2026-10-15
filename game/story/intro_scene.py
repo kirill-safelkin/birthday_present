@@ -6,6 +6,12 @@
 Сбой сказки — чисто визуальный: рывки, пропущенные кадры, рваные строки и шуточное
 сообщение, нарисованное как страница книги. Ни исключений, ни пауз, ни блокировок.
 
+После разговора с Кроликом Алисой управляет игрок (шаг Explore): она ходит влево и вправо
+как Character — тем же вводом и анимациями, что и на площади. Ход эпизода — стадии сбоя,
+появление норы, вход в неё — ведёт модель game/story/entrance.py, а сцена рисует её эффекты:
+всё, что лежит на земле, — на холсте под персонажами, искры — поверх них (logical_target),
+а сдвиги и полосы — только у страницы, не у персонажей.
+
 Оформление временное: страница и эффекты нарисованы программно, настоящие локации
 появятся отдельно.
 
@@ -28,43 +34,55 @@ from game.core.input import Action, actions_for
 from game.core.scenes import Scene
 from game.dialogue.box import DialogueBox
 from game.dialogue.model import DialogueChoice, DialogueController
-from game.graphics.animation import AnimationPlayer
+from game.graphics.animation import Animation, AnimationPlayer, AnimationSet, Direction
 from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
 from game.graphics.hires import HiResLayer, logical_target
 from game.graphics.placeholder import placeholder_animations
 from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, try_load_character_sprites
+from game.story.entrance import HOLE_X, Effects, Entrance, Spark, Stage
 from game.story.intro_dialogue import (
     BEATS,
     CHOICE_ID,
     ERROR_LINES,
     ERROR_TITLE,
     POSES,
+    RABBIT_REMARK_BREAKING,
+    RABBIT_REMARK_READY,
     SPEAKER_ACTORS,
     TITLE_CLASSIC,
     TITLE_FINAL,
     TITLE_REVEAL_START,
     Beat,
     Cue,
+    Explore,
     Lines,
     TitleStep,
     all_scripts,
     title_step_at,
 )
+from game.world.character import Character
 
 WIDTH, HEIGHT = config.LOGICAL_SIZE
 SPRITE_SIZE = 48  # кадры 64×64 уменьшаются до 48×48 ближайшим соседом
 
 # Расстановка на сцене (x — середина под ногами).
-ALICE_X = 160
-RABBIT_X = 96
-BURROW_X = 268  # нора у правого края
-ALICE_BURROW_X = 240  # где Алиса останавливается перед норой
+ALICE_START_X = 120  # в начале Алиса левее середины: справа — место, которое ей предстоит найти
+RABBIT_X = 64
+ALICE_X = 160  # после перезапуска сказки Алиса стоит посреди страницы
+BURROW_X = HOLE_X  # нора у правого края — там, где её найдёт Алиса
+ALICE_BURROW_X = 240  # где Алиса приседает на краю норы
+ALICE_LEAP_X = 256  # куда она прыгает: уже над норой
+ALICE_LEAP = 13  # на какой высоте прыжок «зависает», когда сказка сбоит
 CHUCHMEK_X = 232  # где Чучмек стоит после выхода из норы
+WALK_SPEED = 56  # скорость Алисы под управлением игрока, логических пикселей в секунду
+RECOIL = 12  # на сколько Алиса отшатывается, когда мир начинает ломаться
+RECOIL_SECONDS = 0.3
+REMARK_SECONDS = {Stage.HOLE_OPENING: 1.0, Stage.HOLE_READY: 2.4}  # сколько видна реплика Кролика
 CAP_HEIGHT = 17  # сколько пикселей шляпки видно, когда Чучмек только выглядывает
 JUMP_HEIGHT = 22  # «слишком высокий» прыжок Чучмека: выше он зашёл бы на заголовок
 ACTOR_LAYOUT = {
     "white_rabbit": (RABBIT_X, "idle_front"),
-    "alice": (ALICE_X, "idle_down"),
+    "alice": (ALICE_START_X, "idle_down"),
     "chuchmek": (CHUCHMEK_X, "idle"),
 }
 DRAW_ORDER = ("white_rabbit", "chuchmek", "alice")
@@ -125,20 +143,31 @@ ERROR_TITLE_STYLE = TextStyle(9, CREAM_COLOR, bold=True, background=PLUM_COLOR) 
 ERROR_LINE_STYLE = TextStyle(8, INK_COLOR)
 ERROR_LINE_STEP = 13  # строки сообщения об ошибке — через столько пикселей
 FINALE_STYLE = TextStyle(9, INK_COLOR)
+LABEL_STYLE = TextStyle(8, INK_COLOR)  # подсказка управления и реплики Кролика над головой
+
+# Свободная ходьба и появление норы.
+WALK_HINT = "Стрелки или A/D — идти"
+APPROACH_HINT = "Нора открылась. Подойди поближе"
+ENTER_HINT = "Нора открылась. E — заглянуть внутрь"
+HINT_CENTER = (WIDTH // 2, HEIGHT - 17)
+SPARK_COLORS = (GOLD_COLOR, CREAM_COLOR, (255, 196, 222), (196, 240, 226))
+MAGIC_COLOR = (255, 226, 150)  # магический круг и волны
+ROOT_COLOR = (112, 78, 50)
+RIM_LIGHT_COLOR = (186, 146, 98)
+# Мелочи страницы, которые при первых признаках сбоя на миг сдвигаются: дерево, солнце, облако, цветы.
+SHIFT_AREAS = (
+    pygame.Rect(290, 70, 20, 30),
+    pygame.Rect(254, 30, 44, 44),
+    pygame.Rect(196, 46, 40, 18),
+    pygame.Rect(234, 138, 14, 10),
+    pygame.Rect(264, 154, 14, 10),
+)
 
 
 def _ease(t: float) -> float:
     """Плавный разгон и торможение: 0 → 1."""
     t = min(1.0, max(0.0, t))
     return t * t * (3 - 2 * t)
-
-
-def _walk_progress(p: float) -> float:
-    """Доля пути Алисы к норе: ровный шаг, а у самой норы — торможение."""
-    if p < 0.75:
-        return 0.85 * p / 0.75
-    q = (p - 0.75) / 0.25
-    return 0.85 + 0.15 * (1 - (1 - q) ** 2)
 
 
 class StageActor:
@@ -148,6 +177,9 @@ class StageActor:
     а в крайнем случае — временный манекен: вступление не падает из-за ресурса.
     Кадры только масштабируются (ближайший сосед) и, для комических эффектов, наклоняются
     или приседают; отражение по горизонтали не используется.
+
+    Пока к актёру прикреплён body (Character под управлением игрока), кадр — текущий кадр
+    его анимации ходьбы или ожидания, а место по горизонтали сцена берёт у него.
     """
 
     def __init__(self, char_id: str, sprites: CharacterSprites | None, home_x: int, pose: str) -> None:
@@ -164,7 +196,21 @@ class StageActor:
         self.default_pose = pose
         self.pose = pose
         self.player: AnimationPlayer | None = None
+        self.body: Character | None = None
         self._scaled: dict[int, pygame.Surface] = {}
+
+    def attach(self, body: Character) -> None:
+        """Отдаёт персонажа игроку: дальше кадр и место — у body."""
+        self.body = body
+        self.player = None
+        self.x = body.x
+
+    def detach(self, pose: str) -> None:
+        """Забирает персонажа у игрока: он остаётся там, где стоял, в позе pose."""
+        if self.body is not None:
+            self.x = self.body.x
+        self.body = None
+        self.set_pose(pose)
 
     def set_pose(self, frame_id: str) -> None:
         self.pose = frame_id
@@ -184,14 +230,18 @@ class StageActor:
         return self.player is not None and not self.player.is_finished
 
     def update(self, dt: float) -> None:
-        if self.player is not None:
-            self.player.update(dt)
+        if self.player is not None and self.body is None:
+            self.player.update(dt)  # анимацию body двигает сам Character
 
     def source_image(self) -> pygame.Surface:
         """Текущий кадр без масштабирования: 64×64 из манифеста или временный манекен."""
+        if self.body is not None:
+            return self.body.player.source
         return self.player.frame if self.player is not None else self._pose_image()
 
     def image(self) -> pygame.Surface:
+        if self.body is not None:
+            return self.body.player.frame  # набор анимаций body уже сделан под размер вступления
         source = self.source_image()
         if source.get_size() != (64, 64):
             return source  # временный манекен уже нужного размера
@@ -267,10 +317,21 @@ def _fallback_frame() -> pygame.Surface:
     return _FALLBACK
 
 
+def _walker_animations(sprites: CharacterSprites | None) -> AnimationSet:
+    """Анимации Алисы для ходьбы во вступлении: кадры 48×48 из манифеста (исходники 64×64 остаются
+    для слоя высокого разрешения), а без спрайтов — тот же манекен, что и в остальном вступлении."""
+    if sprites is not None:
+        return sprites.animation_set(SPRITE_SIZE)
+    return AnimationSet(Animation([_fallback_frame()], 1))
+
+
 class IntroScene(Scene):
     """Вступление. Когда оно сыграно, вызывается on_complete, а затем:
     если задана зарегистрированная сцена next_scene (будущая центральная локация) —
-    переход на неё, иначе возврат к предыдущей сцене. Backspace прерывает вступление."""
+    переход на неё, иначе возврат к предыдущей сцене. Backspace прерывает вступление.
+
+    На шаге Explore Алисой управляет игрок: walker — её Character (←/→, A/D), entrance — модель
+    эпизода (стадии сбоя и появления норы). E или Enter у готовой норы продолжают вступление."""
 
     supports_hires = True
 
@@ -297,6 +358,20 @@ class IntroScene(Scene):
         nodes = [node for script in all_scripts() for node in script.nodes.values()]
         self.ground = min(self._box_top(node, hires) for node in nodes for hires in (False, True)) - 3
 
+        # Алиса под управлением игрока: тот же Character, что ходит по площади, но с кадрами вступления.
+        # Ходит только по линии земли: вертикальное движение сюда не передаётся, collider держит её
+        # между рамкой страницы и краем норы.
+        alice = self.actors["alice"]
+        self.walker = Character(
+            "Алиса", _walker_animations(alice.sprites), position=(alice.x, 0), speed=WALK_SPEED,
+            direction=Direction.LEFT,
+        )
+        self.walker.collider = lambda x, y, dx, dy: (Entrance.clamp(x + dx), y)
+        self.entrance: Entrance | None = None  # появляется на шаге Explore и остаётся до конца
+        self._stages_seen = 0  # сколько стадий эпизода сцена уже встретила
+        self._lock_x = 0.0  # где Алиса стояла, когда сказка начала ломаться
+        self._prepare_from = self._jump_from = 0.0  # откуда она шагает к краю норы и откуда прыгает
+
         self.beat_index = 0
         self.beat_time = 0.0
         self.time = 0.0  # общее время сцены — для покачиваний и дрожания
@@ -321,6 +396,7 @@ class IntroScene(Scene):
         self.glitch_slot = 0
         self.error_text: tuple[str, ...] = ()  # какие строки сообщения об ошибке видны сейчас
         self.burrow_open = 0.0
+        self.burrow_rim = 0.0  # окантовка норы: земля, корни, трава
         self.chuchmek_clipped = False  # Чучмек ещё внутри норы
         self.watch_reversed = False  # Кролик «незаметно» крутит часы наоборот
         self._lag_slot = -1
@@ -343,6 +419,13 @@ class IntroScene(Scene):
         self._dim_surface = pygame.Surface(config.LOGICAL_SIZE)
         self._dim_surface.fill(DIM_COLOR)
         self._dim_surface.set_alpha(120)
+        # Эффекты у места норы: круг, волны, свечение — на прозрачной поверхности этой области.
+        self.magic_area = pygame.Rect(BURROW_X - 64, self.ground - 26, 128, 44)
+        spark_area = pygame.Rect(BURROW_X - 64, self.ground - 66, 128, 86)
+        self.spark_area = spark_area.clip(pygame.Rect((0, 0), config.LOGICAL_SIZE))
+        self._magic = pygame.Surface(self.magic_area.size, pygame.SRCALPHA)
+        self._ground_band = pygame.Surface((WIDTH, 22))
+        self._ground_band.fill(FLASH_COLOR)
         self._start_beat()
 
     # --- Состояние ---
@@ -376,6 +459,45 @@ class IntroScene(Scene):
         """Ответ Алисы в части E, если он уже выбран."""
         return self.answers.get(CHOICE_ID)
 
+    @property
+    def exploring(self) -> bool:
+        """Идёт шаг Explore: Алиса ищет место норы или стоит у готовой норы."""
+        return isinstance(self.beat, Explore)
+
+    @property
+    def stage(self) -> Stage | None:
+        """Стадия эпизода с норой (None, пока до него не дошло)."""
+        return self.entrance.stage if self.entrance is not None else None
+
+    def entrance_effects(self) -> Effects | None:
+        """Эффекты эпизода с норой, пока он идёт; иначе None."""
+        if not self.exploring:
+            return None
+        return self.entrance.effects(self.walker.x if self.entrance.can_walk else self._alice.x)
+
+    @property
+    def hint_text(self) -> str:
+        """Подсказка внизу страницы: как ходить, а у готовой норы — как в неё заглянуть."""
+        if not self.exploring:
+            return ""
+        if self.entrance.stage is Stage.FREE_WALK:
+            return WALK_HINT
+        if self.entrance.stage is Stage.HOLE_READY:
+            return ENTER_HINT if self.entrance.can_enter(self.walker.x) else APPROACH_HINT
+        return ""
+
+    @property
+    def rabbit_remark(self) -> str:
+        """Короткая реплика Кролика над головой, пока сказка ломается и когда нора готова."""
+        if not self.exploring:
+            return ""
+        stage, t = self.entrance.stage, self.entrance.stage_time
+        if stage is Stage.WORLD_BREAKING or (stage is Stage.HOLE_OPENING and t < REMARK_SECONDS[stage]):
+            return RABBIT_REMARK_BREAKING
+        if stage is Stage.HOLE_READY and t < REMARK_SECONDS[stage]:
+            return RABBIT_REMARK_READY
+        return ""
+
     def _box_top(self, node, hires: bool = False) -> int:
         layout = self.box.layout(node, hires)
         return (layout.name_tab or layout.box).top
@@ -391,6 +513,9 @@ class IntroScene(Scene):
         if event.type == pygame.KEYDOWN and Action.CANCEL in actions_for(event):
             self.finish()  # тестовое вступление прервано, итога нет
             return
+        if self.exploring:
+            self._explore_event(event)
+            return
         if self.dialogue is None:
             return  # во время пауз и эффектов нажатия ничего не пропускают
         actions = actions_for(event) if event.type == pygame.KEYDOWN else frozenset()
@@ -399,6 +524,22 @@ class IntroScene(Scene):
         else:
             self.dialogue.handle_event(event)
         self._sync_dialogue()
+
+    def _explore_event(self, event: pygame.event.Event) -> None:
+        """Свободная ходьба: ←/→ (A/D) ведут Алису, E или Enter у готовой норы — заглянуть внутрь.
+
+        Пока идёт постановка (сбой, появление норы), нажатия ничего не меняют и не копятся.
+        ↑/↓ (W/S) сюда не передаются: Алиса ходит только по линии земли."""
+        if event.type == pygame.WINDOWFOCUSLOST:
+            self.walker.handle_event(event)  # отпущенные вне окна клавиши не залипают
+            return
+        if not self.entrance.can_walk:
+            return
+        actions = actions_for(event)
+        if event.type == pygame.KEYUP or actions & {Action.MOVE_LEFT, Action.MOVE_RIGHT}:
+            self.walker.handle_event(event)
+        if event.type == pygame.KEYDOWN and Action.INTERACT in actions and self.entrance.enter(self.walker.x):
+            self._begin_entering()
 
     def update(self, dt: float) -> None:
         self.time += dt
@@ -412,6 +553,12 @@ class IntroScene(Scene):
                 self._sync_dialogue()
                 break
             beat = self.beat
+            if isinstance(beat, Explore):  # длится, пока игрок не заглянет в нору
+                step = min(remaining, MAX_SUBSTEP)
+                remaining -= step
+                self.beat_time += step
+                self._explore(step)
+                continue
             step = min(remaining, beat.seconds - self.beat_time, MAX_SUBSTEP)
             self.beat_time += step
             remaining -= step
@@ -431,6 +578,8 @@ class IntroScene(Scene):
         elif isinstance(beat, Cue):
             self.events.append(("cue", beat.name))
             self._call_cue("begin", beat.name)
+        elif isinstance(beat, Explore):
+            self._begin_explore()
 
     def _next_beat(self) -> None:
         beat = self.beat
@@ -497,6 +646,85 @@ class IntroScene(Scene):
         else:
             self.finish()
 
+    # --- Свободная ходьба: Алиса сама находит место норы ---
+
+    def _begin_explore(self) -> None:
+        """Разговор с Кроликом закончен: Алиса у игрока. Смотрит туда же, куда смотрела."""
+        self.entrance = Entrance()
+        self._stages_seen = 0
+        alice = self._alice
+        self.walker.set_position(alice.x, 0)
+        self.walker.release_controls()
+        self.walker.face(Direction.LEFT if alice.pose == "idle_left" else Direction.RIGHT)
+        alice.attach(self.walker)
+        self._log_new_stages()
+
+    def _explore(self, step: float) -> None:
+        """Один шаг эпизода: Алиса идёт (если управление у игрока), модель решает, что дальше."""
+        entrance = self.entrance
+        if entrance.can_walk:
+            self.walker.update(step)
+            self._alice.x = self.walker.x
+        entrance.update(step, self._alice.x)
+        self._log_new_stages()
+        stage, t = entrance.stage, entrance.stage_time
+        rabbit = self._rabbit
+        if stage is Stage.FREE_WALK:
+            # Кролик показывает, куда идти; а когда Алиса уходит в другую сторону — нервно смотрит на часы.
+            walking_away = self.walker.is_moving and self.walker.direction is Direction.LEFT
+            pose = "annoyed_watch" if walking_away else "hurries_pointing"
+            if rabbit.pose != pose:
+                rabbit.set_pose(pose)
+        elif stage is Stage.WORLD_BREAKING:
+            # Алиса отшатывается от места, где ломается земля.
+            self._alice.x = Entrance.clamp(self._lock_x - RECOIL * _ease(t / RECOIL_SECONDS))
+        fx = entrance.effects(self.walker.x if entrance.can_walk else self._alice.x)
+        self.burrow_open, self.burrow_rim, self.flash = fx.depth, fx.rim, fx.flash
+
+    def _log_new_stages(self) -> None:
+        """Записывает в журнал каждую новую стадию эпизода и ставит персонажей для неё."""
+        log = self.entrance.stage_log
+        while self._stages_seen < len(log):
+            stage = log[self._stages_seen]
+            self._stages_seen += 1
+            self.events.append(("stage", stage.value))
+            self._call_cue("begin", stage.value)
+
+    def _begin_glitch_warning(self) -> None:
+        """Сказка начинает ломаться: управление у постановки, Алиса останавливается и смотрит."""
+        self.walker.release_controls()
+        alice = self._alice
+        alice.detach("idle_right")
+        self._lock_x = alice.x
+        self._rabbit.set_pose("confused_watch")
+
+    def _begin_world_breaking(self) -> None:
+        alice = self._alice
+        if not alice.play("react_down"):
+            alice.set_pose("react_down_2")
+        self._rabbit.set_pose("panics_watch")
+
+    def _begin_hole_opening(self) -> None:
+        self._alice.set_pose("idle_right")  # смотрит, как появляется нора
+        self._rabbit.set_pose("confused_watch")
+
+    def _begin_hole_ready(self) -> None:
+        """Нора готова: управление снова у игрока — с того места, где Алиса стоит."""
+        alice = self._alice
+        self.walker.set_position(alice.x, 0)
+        self.walker.release_controls()
+        self.walker.face(Direction.RIGHT)
+        alice.attach(self.walker)
+        self._rabbit.set_pose("confident_point")
+
+    def _begin_entering(self) -> None:
+        """E у готовой норы: дальше Алису ведёт сценарий — край норы, «Ну, поехали», прыжок."""
+        self.walker.release_controls()
+        self._alice.detach("idle_right")
+        self._log_new_stages()
+        self.flash = 0.0
+        self._next_beat()
+
     # --- Постановочные события: _begin_<имя>, _do_<имя>(p), _end_<имя> ---
 
     @property
@@ -545,38 +773,35 @@ class IntroScene(Scene):
         self._rabbit.set_pose("checks_watch_happy")
 
     def _begin_rabbit_points(self) -> None:
+        # Кролик показывает, где по расписанию должна быть нора. Её там пока нет.
         self._rabbit.set_pose("hurries_pointing")
-        self.burrow_open = 0.0
-
-    def _do_rabbit_points(self, p: float) -> None:
-        self.burrow_open = _ease(p)  # нора раскрывается там, куда указывает Кролик
-
-    def _end_rabbit_points(self) -> None:
-        self.burrow_open = 1.0
-
-    def _begin_alice_walks(self) -> None:
-        self._alice.play("walk_right", loop=True)  # не черновая группа: ходьба вправо
-        if not self._alice.is_playing:
-            self._alice.set_pose("idle_right")
-
-    def _do_alice_walks(self, p: float) -> None:
-        alice = self._alice
-        alice.x = ALICE_X + (ALICE_BURROW_X - ALICE_X) * _walk_progress(p)
-        if p > 0.93 and alice.player is not None:
-            alice.set_pose("idle_right")  # остановилась — ноги больше не шагают
-
-    def _end_alice_walks(self) -> None:
-        self._alice.x = ALICE_BURROW_X
-        self._alice.set_pose("idle_right")
 
     def _begin_alice_prepares(self) -> None:
         self._alice.set_pose("idle_right")
+        self._prepare_from = self._alice.x
 
     def _do_alice_prepares(self, p: float) -> None:
-        self._alice.squash = 1 - 0.12 * _ease(p / 0.5)  # присела, чтобы прыгнуть
+        alice = self._alice
+        alice.x = self._prepare_from + (ALICE_BURROW_X - self._prepare_from) * _ease(p / 0.3)  # шаг к самому краю
+        alice.squash = 1 - 0.12 * _ease((p - 0.2) / 0.5)  # присела, чтобы прыгнуть
 
     def _end_alice_prepares(self) -> None:
+        self._alice.x = ALICE_BURROW_X
         self._alice.squash = 0.88
+
+    def _begin_alice_jumps(self) -> None:
+        alice = self._alice
+        alice.squash = 1.0
+        alice.set_pose("walk_right_3")  # шаг-прыжок: ноги врозь
+        self._jump_from = alice.x
+
+    def _do_alice_jumps(self, p: float) -> None:
+        alice = self._alice
+        alice.x = self._jump_from + (ALICE_LEAP_X - self._jump_from) * _ease(p)
+        alice.lift = ALICE_LEAP * math.sin(p * math.pi / 2)  # к концу — в высшей точке, над норой
+
+    def _end_alice_jumps(self) -> None:
+        self._alice.x = ALICE_LEAP_X
 
     # B. Сбой сказки
 
@@ -584,6 +809,7 @@ class IntroScene(Scene):
         self._lag_slot = self._lag_hires_slot = -1
         self.hidden = set()
         self._alice.squash = 1.0
+        self._alice.lift = ALICE_LEAP  # сказка зависла прямо посреди прыжка
         self.title_shake = 2
 
     def _do_glitch(self, p: float) -> None:
@@ -602,9 +828,9 @@ class IntroScene(Scene):
             self.hidden.add("title")
         if slot % 9 == 5:
             self.hidden.add("alice")
-        # Алиса «прыгает» неправильными фазами движения, рывками.
+        # Алиса «прыгает» неправильными фазами движения, рывками — так и не долетев до норы.
         alice.set_pose(GLITCH_ALICE_POSES[slot % len(GLITCH_ALICE_POSES)])
-        alice.lift = ((slot * 3) % 5 - 2) * 2
+        alice.lift = ALICE_LEAP + ((slot * 3) % 5 - 2) * 2
         alice.dx = ((slot * 7) % 5 - 2) * 2
         rabbit.set_pose(GLITCH_RABBIT_POSES[slot % len(GLITCH_RABBIT_POSES)])
 
@@ -748,6 +974,8 @@ class IntroScene(Scene):
             self._compose(surface, hires)
             if name == "finale":
                 self._draw_finale_plaque(surface, hires)
+            if self.exploring:
+                self._draw_explore_labels(surface, hires)
         if self.flash > 0:
             alpha = round(255 * min(1.0, self.flash))
             if hires is not None:
@@ -759,31 +987,169 @@ class IntroScene(Scene):
             self.box.draw(surface, self.dialogue, hires)
 
     def _compose(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
-        """Страница, нора, персонажи и заголовок. Персонажи не заходят на заголовок и окно диалога."""
-        surface.blit(self._pages["fairy"], (0, 0))
+        """Страница, нора, персонажи и заголовок. Персонажи не заходят на заголовок и окно диалога.
+
+        Пока Алиса ищет нору, сюда же добавляются эффекты эпизода: сдвиги и полосы страницы
+        и всё, что на земле, — под персонажами, искры — поверх них."""
+        fx = self.entrance_effects()
+        self._draw_page(surface, fx)
         if self.page_blend > 0:
             absurd = self._pages["absurd"]
             absurd.set_alpha(round(255 * self.page_blend))
             surface.blit(absurd, (0, 0))
+        if fx is not None:
+            self._draw_magic_ground(surface, fx)
         show_burrow = "burrow" not in self.hidden and self.burrow_open > 0
         if show_burrow:
-            _draw_burrow_back(surface, self.burrow_open, self.ground)
+            _draw_burrow_back(surface, self.burrow_open, self.ground, self.burrow_rim)
         for char_id in DRAW_ORDER:
             if char_id in self.hidden:
                 continue
             clip = self.ground + 1 if char_id == "chuchmek" and self.chuchmek_clipped else None
             self.actors[char_id].draw(surface, self.ground, clip, hires)
-        # Передний край норы и часы Кролика — поверх персонажей.
+        # Передний край норы, искры и часы Кролика — поверх персонажей.
         if show_burrow:
             area = pygame.Rect(0, 0, 52, 26)
             area.center = (BURROW_X, self.ground)
             with logical_target(surface, hires, area) as front:
                 _draw_burrow_front(front, self.burrow_open, self.ground)
+        if fx is not None and fx.sparks:
+            with logical_target(surface, hires, self.spark_area) as front:
+                self._draw_sparks(front, fx.sparks)
         if self.watch_reversed and "white_rabbit" not in self.hidden:
             cx, cy = self._watch_center()
             with logical_target(surface, hires, pygame.Rect(cx - 6, cy - 6, 13, 13)) as front:
                 self._draw_reversed_watch(front)
         self._draw_title(surface, hires)
+
+    def _draw_page(self, surface: pygame.Surface, fx: Effects | None) -> None:
+        """Сказочная страница. Когда сказка ломается, съезжают полосы и сдвигаются мелочи —
+        только у страницы: персонажи рисуются поверх, целыми и без двойных силуэтов."""
+        page = self._pages["fairy"]
+        if fx is not None and fx.tear:
+            self._tear(surface, page, fx.slot, fx.tear)
+        else:
+            surface.blit(page, (0, 0))
+        if fx is not None and fx.shift:
+            for index, area in enumerate(SHIFT_AREAS):
+                offset = fx.shift if index % 2 == 0 else -fx.shift
+                surface.blit(page, area.move(offset, (index % 3) - 1), area)
+
+    def _draw_magic_ground(self, surface: pygame.Surface, fx: Effects) -> None:
+        """Всё, что происходит на земле у места норы: намёки, мерцание, свечение, магический круг,
+        волны и сворачивающаяся внутрь земля. Рисуется на холсте под персонажами."""
+        cx, cy = BURROW_X, self.ground
+        if fx.hint:
+            # Трава на месте будущей норы шевелится, хотя ветра нет.
+            for k, (dx, dy, height) in enumerate(((-7, 2, 4), (2, 1, 5), (9, 3, 3))):
+                sway = round(math.sin(self.time * 5 + k * 2.1) * (1 + fx.hint))
+                x, y = cx + dx, cy + dy
+                pygame.draw.line(surface, GRASS_COLOR, (x, y), (x + sway, y - height))
+        if fx.flicker >= 0.7:  # первое мерцание задевает всю землю
+            self._ground_band.set_alpha(round(70 * fx.flicker))
+            surface.blit(self._ground_band, (0, cy - 10))
+        if fx.scanlines:
+            for k in range(fx.scanlines):
+                y = 40 + (fx.slot * 37 + k * 53) % (cy + 30 - 40)
+                pygame.draw.line(surface, GLITCH_LINE_COLORS[k % len(GLITCH_LINE_COLORS)], (8, y), (WIDTH - 9, y))
+        magic = self._magic
+        magic.fill((0, 0, 0, 0))
+        mx, my = cx - self.magic_area.x, cy - self.magic_area.y
+        if fx.glow:
+            _ellipse(magic, (*CREAM_COLOR, round(120 * fx.glow)), (mx, my), 32, 10)
+        if fx.flicker:
+            _ellipse(magic, (*FLASH_COLOR, round(190 * fx.flicker)), (mx, my), 36, 11)
+        if fx.fold:
+            # Земля сворачивается внутрь круга: середина темнеет, клочки травы и дорожки закручиваются к центру.
+            _ellipse(magic, (*EARTH_COLOR, round(220 * fx.fold)), (mx, my), 6 + 18 * fx.fold, 2 + 6 * fx.fold)
+            colors = (HILL_COLORS[1], PATH_COLOR, GRASS_COLOR, HILL_COLORS[0])
+            for k in range(16):
+                angle = k * 2.4 + fx.fold * 3.2
+                radius = (14 + (k * 7) % 17) * (1 - 0.85 * fx.fold)
+                size = 2 if fx.fold < 0.6 else 1
+                x, y = mx + math.cos(angle) * radius, my + math.sin(angle) * radius / 3
+                magic.fill((*colors[k % len(colors)], 255), (round(x), round(y), size, size))
+        if fx.ring:
+            # Магический круг: пунктир из золотых и светлых точек вращается и чуть пульсирует.
+            rx = 27 * (1 + 0.05 * math.sin(self.time * 14))
+            alpha = round(255 * fx.ring)
+            for k in range(28):
+                if k % 4 == 3:
+                    continue
+                angle = fx.spin + k * math.tau / 28
+                x, y = mx + math.cos(angle) * rx, my + math.sin(angle) * rx / 3
+                color = MAGIC_COLOR if k % 2 else CREAM_COLOR
+                magic.fill((*color, alpha), (round(x), round(y), 2, 1))
+            for k in range(4):  # «руны» — звёздочки по сторонам круга
+                angle = -fx.spin * 0.5 + k * math.pi / 2
+                _draw_star(magic, round(mx + math.cos(angle) * rx * 1.18), round(my + math.sin(angle) * rx * 0.4),
+                           (*GOLD_COLOR, alpha))
+        for wave in fx.waves:
+            rx = 12 + 46 * wave
+            _ellipse(magic, (*MAGIC_COLOR, round(210 * (1 - wave))), (mx, my), rx, rx / 3, 1)
+        surface.blit(magic, self.magic_area)
+
+    def _draw_sparks(self, surface: pygame.Surface, sparks: tuple[Spark, ...]) -> None:
+        """Искры поверх персонажей: точка, плюсик или звёздочка. Бледные — мельче."""
+        old_clip = surface.get_clip()
+        surface.set_clip(old_clip.clip(self.spark_area))
+        for spark in sparks:
+            if spark.alpha < 0.25:
+                continue
+            size = spark.size if spark.alpha >= 0.5 else max(1, spark.size - 1)
+            x, y = round(BURROW_X + spark.dx), round(self.ground + spark.dy)
+            color = SPARK_COLORS[spark.color % len(SPARK_COLORS)]
+            if size == 1:
+                surface.fill(color, (x, y, 1, 1))
+            elif size == 2:
+                surface.fill(color, (x - 1, y, 3, 1))
+                surface.fill(color, (x, y - 1, 1, 3))
+            else:
+                _draw_star(surface, x, y, color)
+        surface.set_clip(old_clip)
+
+    def label_rect(self, text: str, center: tuple[int, int], hires: bool = False) -> pygame.Rect:
+        """Табличка с надписью (подсказка, реплика Кролика) — по размеру надписи выбранным шрифтом."""
+        if hires:
+            width, height = self._fonts.metrics(LABEL_STYLE).size(text)
+            rect = pygame.Rect(0, 0, math.ceil(width), math.ceil(height))
+        else:
+            rect = self._text(self._font, text, INK_COLOR).get_rect()
+        rect.center = center
+        return rect.inflate(10, 6)
+
+    def remark_rect(self, text: str, hires: bool = False) -> pygame.Rect:
+        """Где реплика Кролика: над его головой, но не за краем страницы и не на заголовке."""
+        rect = self.label_rect(text, (round(self._rabbit.x), self.ground - 58), hires)
+        rect.clamp_ip(pygame.Rect(10, 0, WIDTH - 20, HEIGHT))
+        return rect
+
+    def _draw_explore_labels(self, canvas: pygame.Surface, hires: HiResLayer | None) -> None:
+        """Реплика Кролика над головой и подсказка внизу страницы."""
+        remark = self.rabbit_remark
+        if remark and "white_rabbit" not in self.hidden:
+            rect = self.remark_rect(remark, hires is not None)
+            tip = (min(rect.right - 6, max(rect.left + 6, round(self._rabbit.x) + 6)), rect.bottom + 3)
+            with logical_target(canvas, hires, rect.inflate(0, 8)) as surface:
+                tail = [(tip[0] - 4, rect.bottom - 1), (tip[0] + 2, rect.bottom - 1), tip]
+                pygame.draw.polygon(surface, PAGE_EDGE_COLOR, tail)
+                pygame.draw.rect(surface, PAGE_COLOR, rect)
+                pygame.draw.rect(surface, PAGE_EDGE_COLOR, rect, 1)
+            self._label_text(canvas, hires, remark, rect)
+        hint = self.hint_text
+        if hint:
+            rect = self.label_rect(hint, HINT_CENTER, hires is not None)
+            with logical_target(canvas, hires, rect) as surface:
+                pygame.draw.rect(surface, PAGE_COLOR, rect)
+                pygame.draw.rect(surface, PAGE_EDGE_COLOR, rect, 1)
+            self._label_text(canvas, hires, hint, rect)
+
+    def _label_text(self, canvas: pygame.Surface, hires: HiResLayer | None, text: str, rect: pygame.Rect) -> None:
+        if hires is not None:
+            hires.text(text, LABEL_STYLE, rect.center, anchor="center")
+            return
+        image = self._text(self._font, text, INK_COLOR)
+        canvas.blit(image, image.get_rect(center=rect.center))
 
     def _text(self, font: pygame.font.Font, text: str, color: config.Color) -> pygame.Surface:
         key = (id(font), text, color)
@@ -988,6 +1354,14 @@ def _tear_bands(slot: int, amplitude: int) -> list[tuple[int, int, int]]:
     return bands
 
 
+def _ellipse(surface: pygame.Surface, color: tuple, center: tuple[float, float], rx: float, ry: float,
+             width: int = 0) -> None:
+    """Эллипс с центром center и полуосями rx, ry (на земле круги видны сбоку — сплюснутыми)."""
+    rect = pygame.Rect(0, 0, max(2, round(2 * rx)), max(2, round(2 * ry)))
+    rect.center = (round(center[0]), round(center[1]))
+    pygame.draw.ellipse(surface, color, rect, width)
+
+
 def _draw_star(surface: pygame.Surface, x: int, y: int, color: config.Color) -> None:
     """Маленькая сказочная звёздочка-плюс 5×5."""
     pygame.draw.line(surface, color, (x - 2, y), (x + 2, y))
@@ -1002,12 +1376,23 @@ def _burrow_rect(open_t: float, ground: int) -> pygame.Rect:
     return rect
 
 
-def _draw_burrow_back(surface: pygame.Surface, open_t: float, ground: int) -> None:
-    """Тёмный вход в землю с тенью и пучками травы. Задняя половина: за ней появляется Чучмек."""
+def _draw_burrow_back(surface: pygame.Surface, open_t: float, ground: int, rim: float = 1.0) -> None:
+    """Тёмный вход в землю с тенью и пучками травы. Задняя половина: за ней появляется Чучмек.
+
+    rim — окантовка, которая проявляется последней: светлый дальний край и корни внутри."""
     rect = _burrow_rect(open_t, ground)
     pygame.draw.ellipse(surface, HOLE_SHADOW_COLOR, rect.inflate(10, 5))
     pygame.draw.ellipse(surface, EARTH_COLOR, rect.inflate(4, 2))
     pygame.draw.ellipse(surface, HOLE_COLOR, rect)
+    if rim > 0 and open_t > 0.5:
+        # Дальний край норы освещён, а из него внутрь свисают корни.
+        old_clip = surface.get_clip()
+        surface.set_clip(old_clip.clip(pygame.Rect(0, 0, WIDTH, rect.centery)))
+        pygame.draw.ellipse(surface, RIM_LIGHT_COLOR, rect.inflate(4, 2), 1)
+        surface.set_clip(old_clip)
+        for dx, length in ((-9, 4), (-2, 3), (6, 5)):
+            x, top = rect.centerx + dx, rect.top + 1
+            pygame.draw.line(surface, ROOT_COLOR, (x, top), (x + (1 if dx > 0 else -1), top + round(length * rim)))
     for dx, height in ((-22, 4), (-18, 6), (-14, 3), (15, 5), (19, 3), (23, 6)):
         x, y = rect.centerx + round(dx * open_t), rect.centery - 1
         pygame.draw.line(surface, GRASS_COLOR, (x, y), (x - 1, y - round(height * open_t)))

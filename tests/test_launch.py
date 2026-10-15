@@ -89,14 +89,28 @@ class LaunchTestCase(unittest.TestCase):
             self.advance(scene)
         raise AssertionError("диалог не заканчивается")
 
+    def walk_to_burrow(self, intro: IntroScene) -> None:
+        """Свободная ходьба через приложение: зажать → и идти к месту норы, у готовой норы — E.
+
+        Когда управление возвращается, → нажимается заново (KEYUP и KEYDOWN): повторный
+        KEYDOWN без KEYUP приложение считает автоповтором."""
+        right = (pygame.K_RIGHT, pygame.KSCAN_RIGHT)
+        if intro.entrance.can_enter(intro.walker.x):
+            self.send(key(*right, pygame.KEYUP))
+            self.press_e()
+        elif intro.entrance.can_walk and not intro.walker.is_moving:
+            self.send(key(*right, pygame.KEYUP), key(*right))
+
     def play_intro(self) -> IntroScene:
-        """Вступление целиком, как игрок: ждать пауз и листать реплики Enter."""
+        """Вступление целиком, как игрок: ждать пауз, листать реплики Enter, дойти до норы и заглянуть в неё."""
         intro = self.app.scenes.current
         self.assertIsInstance(intro, IntroScene)
         for _ in range(20000):
             if self.app.scenes.current is not intro:
                 return intro
-            if intro.dialogue is not None:
+            if intro.exploring:
+                self.walk_to_burrow(intro)
+            elif intro.dialogue is not None:
                 self.advance(intro)
             self.app._update(1 / 30)
         raise AssertionError("вступление не закончилось")

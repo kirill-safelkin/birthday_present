@@ -87,6 +87,32 @@ def screen_pixels(surface: pygame.Surface, rect: pygame.Rect) -> bytes:
     return pygame.image.tobytes(surface.subsurface(rect), "RGB")
 
 
+def intro_key(code: int, scancode: int, event_type: int = pygame.KEYDOWN) -> pygame.event.Event:
+    return pygame.event.Event(event_type, key=code, mod=0, unicode="", scancode=scancode)
+
+
+def intro_step(scene: IntroScene, dt: float = 1 / 30) -> None:
+    """Шаг вступления: напечатанная реплика — дальше; в свободной ходьбе — → к месту норы
+    (заново, когда управление вернулось) и E у готовой норы; иначе — время."""
+    if scene.exploring:
+        right = (pygame.K_RIGHT, pygame.KSCAN_RIGHT)
+        if scene.entrance.can_enter(scene.walker.x):
+            scene.handle_event(intro_key(*right, pygame.KEYUP))
+            scene.handle_event(intro_key(pygame.K_e, pygame.KSCAN_E))
+            return
+        if scene.entrance.can_walk and not scene.walker.is_moving:
+            scene.handle_event(intro_key(*right, pygame.KEYUP))
+            scene.handle_event(intro_key(*right))
+        scene.update(dt)
+        return
+    dialogue = scene.dialogue
+    if dialogue is not None and not dialogue.is_typing:
+        dialogue.confirm()
+        scene._sync_dialogue()
+    else:
+        scene.update(dt)
+
+
 class PygameTestCase(unittest.TestCase):
     def setUp(self) -> None:
         pygame.display.init()
@@ -709,20 +735,17 @@ class IntroHiResTest(PygameTestCase):
             layer.clear()
             scene.draw(canvas, layer)
             yield layer
-            dialogue = scene.dialogue
-            if dialogue is not None and not dialogue.is_typing:
-                dialogue.confirm()
-                scene._sync_dialogue()
-            else:
-                scene.update(1 / 30)
+            intro_step(scene)
 
     def test_whole_intro_draws_through_the_layer(self) -> None:
         scene = IntroScene()
         # Кадры манифестов как есть — те самые объекты: персонажей не масштабируют заранее и не отражают.
         originals = {id(frame.image) for actor in scene.actors.values() for frame in actor.sprites.frames}
-        cues = set()
+        cues, stages = set(), set()
         for layer in self.frames(scene):
             cues.add(scene.cue_name)
+            if scene.exploring:
+                stages.add(scene.stage.value)
             commands = layer.commands
             if scene.cue_name == "glitch":
                 tears = [c for c in commands if isinstance(c, TearCommand)]
@@ -733,6 +756,7 @@ class IntroHiResTest(PygameTestCase):
                     self.assertIn(id(command.image), originals, scene.cue_name)
         self.assertTrue(scene.completed)
         self.assertTrue({"glitch", "error_message", "chuchmek_emerges", "title_rewrite", "finale"} <= cues)
+        self.assertTrue(stages >= {"free_walk", "world_breaking", "hole_opening", "hole_ready"})  # и эпизод с норой
 
     def test_actor_sprite_keeps_place_and_size_of_the_canvas_version(self) -> None:
         scene = IntroScene()
@@ -764,12 +788,7 @@ class IntroHiResTest(PygameTestCase):
     def test_flash_covers_characters_and_title(self) -> None:
         scene = IntroScene()
         while scene.cue_name != "restart":
-            dialogue = scene.dialogue
-            if dialogue is not None and not dialogue.is_typing:
-                dialogue.confirm()
-                scene._sync_dialogue()
-            else:
-                scene.update(1 / 30)
+            intro_step(scene)
         scene.update(0.1)
         layer = HiResLayer()
         scene.draw(pygame.Surface(config.LOGICAL_SIZE), layer)
@@ -823,12 +842,7 @@ class PlaceholderHiResTest(PygameTestCase):
                 layer.clear()
                 scene.draw(canvas, layer)
                 layer.render(screen, transform)
-                dialogue = scene.dialogue
-                if dialogue is not None and not dialogue.is_typing:
-                    dialogue.confirm()
-                    scene._sync_dialogue()
-                else:
-                    scene.update(1 / 30)
+                intro_step(scene)
             self.assertTrue(scene.completed)
 
 
