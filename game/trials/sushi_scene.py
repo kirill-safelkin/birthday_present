@@ -7,7 +7,9 @@ CollisionMap, как на площади), станции ингредиенто
 Этапы: вступление → сбор заказа → реакция повара → … → финальная реплика → награда.
 Фрагмент (GameProgress.complete("sushi")) выдаётся только после финальной реплики;
 отмена (Backspace) в любой момент до этого возвращает на площадь без награды.
-Оформление временное: кухня нарисована геометрией.
+Оформление временное: кухня нарисована геометрией. Тарелка и готовые блюда — в
+game/trials/sushi_dishes.py: пока заказ не собран, на тарелке отдельные ингредиенты, а когда
+SushiOrders.order_complete — одно готовое блюдо этого заказа.
 
 Со слоем высокого разрешения (game/graphics/hires.py) Алиса и кот-повар рисуются из исходных
 кадров 64×64, а надписи — шрифтом размера окна; кухня и значки остаются пиксельными.
@@ -40,6 +42,14 @@ from game.story.sushi_dialogue import (
     REACTIONS,
     all_scripts,
     chef_tip,
+)
+from game.trials.sushi_dishes import (
+    FINISH_EFFECT_SECONDS,
+    draw_dish,
+    draw_food_shadow,
+    draw_plate,
+    draw_sparks,
+    plate_rect,
 )
 from game.trials.sushi_orders import INGREDIENT_NAMES, INGREDIENTS, PlateResult, SushiOrders, TakeResult
 from game.world.character import Character
@@ -90,8 +100,6 @@ BAR_TOP_COLOR = (170, 122, 82)
 STOOL_COLOR = (92, 64, 48)
 TABLE_COLOR = (186, 140, 96)
 TABLE_EDGE_COLOR = (130, 92, 62)
-PLATE_COLOR = (250, 250, 244)
-PLATE_EDGE_COLOR = (180, 180, 190)
 LABEL_COLOR = (252, 240, 214)
 HUD_COLOR = (44, 38, 58)
 HUD_TEXT_COLOR = (240, 230, 206)
@@ -111,7 +119,9 @@ LABEL_STYLE = TextStyle(TEXT_SIZE, LABEL_COLOR)  # на стойке под по
 HUD_ROWS = (6.5, 17.5)  # середины двух строк верхней полосы
 LABEL_MIDDLE = COUNTER.top + 21  # середина подписи станции на передней стенке стойки
 # Где рисуется стол с тарелкой: подсветка, сияние собранного заказа и тень столешницы.
-TABLE_AREA = TABLE.inflate(6, 8).union(TABLE.move(0, 2))
+# Над столом — место для вспышки над готовым блюдом.
+TABLE_AREA = TABLE.inflate(6, 8).union(TABLE.move(0, 2)).union(
+    pygame.Rect(TABLE.centerx - 16, TABLE.centery - 17, 32, 16))
 
 
 @dataclass(frozen=True)
@@ -179,6 +189,7 @@ class SushiTrialScene(Scene):
         self.toast = ""
         self._toast_time = 0.0
         self._disapproval_time = 0.0
+        self._dish_age: float | None = None  # сколько секунд назад заказ собран (None — не собран)
         self.time = 0.0
         self._font = load_font(9)
         self._text_cache: dict[tuple[str, config.Color], pygame.Surface] = {}
@@ -211,6 +222,12 @@ class SushiTrialScene(Scene):
         if recipe is None:
             return "Все заказы готовы"
         return f"Заказ {self.orders.index + 1}/{len(self.orders.recipes)}: {recipe.name}"
+
+    def plate_dish(self) -> str | None:
+        """Какое готовое блюдо лежит на тарелке: id рецепта, если модель заказа подтвердила
+        сборку (по идентификаторам ингредиентов), иначе None — тогда видны отдельные ингредиенты."""
+        recipe = self.orders.current
+        return recipe.id if recipe is not None and self.orders.order_complete else None
 
     def held_text(self) -> str:
         held = self.orders.held
@@ -300,6 +317,7 @@ class SushiTrialScene(Scene):
             self._disapproval_time = DISAPPROVAL_SECONDS
         elif result is PlateResult.ORDER_COMPLETE:
             self.phase = REACTION
+            self._dish_age = 0.0  # вспышка над готовым блюдом; повторно её ничто не запускает
             self._show_toast(f"На тарелке: {name}")
             self._open_dialogue(REACTIONS[self.orders.index])
 
@@ -321,6 +339,7 @@ class SushiTrialScene(Scene):
             self.phase = COOKING
         elif self.phase == REACTION:
             self.orders.next_order()
+            self._dish_age = None
             if self.orders.all_done:
                 self.phase = FINAL_PHASE
                 self._open_dialogue(FINAL)
@@ -346,6 +365,8 @@ class SushiTrialScene(Scene):
         if self.dialogue is not None:
             self.dialogue.update(dt)
         self.alice.update(dt)
+        if self._dish_age is not None:
+            self._dish_age += dt
         if self._toast_time > 0:
             self._toast_time -= dt
             if self._toast_time <= 0:
@@ -414,17 +435,23 @@ class SushiTrialScene(Scene):
     def _draw_table_on(self, surface: pygame.Surface, highlighted: bool) -> None:
         pygame.draw.rect(surface, TABLE_EDGE_COLOR, TABLE.move(0, 2), border_radius=2)
         pygame.draw.rect(surface, TABLE_COLOR, TABLE, border_radius=2)
-        plate = pygame.Rect(0, 0, 36, 10)
-        plate.center = (TABLE.centerx, TABLE.centery - 1)
-        pygame.draw.ellipse(surface, PLATE_COLOR, plate)
-        pygame.draw.ellipse(surface, PLATE_EDGE_COLOR, plate, 1)
-        items = self.orders.plate
-        for index, item in enumerate(items):
-            x = plate.centerx + (index - (len(items) - 1) / 2) * 8
-            draw_ingredient(surface, item, (round(x), plate.centery - 2), small=True)
+        plate = plate_rect(TABLE)
+        draw_plate(surface, plate)
         if self.orders.order_complete:  # заказ собран: тарелка сияет
             glow = plate.inflate(6 + round(abs(math.sin(self.time * 6)) * 2), 6)
             pygame.draw.ellipse(surface, MARK_COLOR, glow, 1)
+        dish = self.plate_dish()
+        if dish is not None:
+            draw_dish(surface, dish, plate.center)
+            if self._dish_age is not None:
+                draw_sparks(surface, plate.center, self._dish_age / FINISH_EFFECT_SECONDS)
+        else:
+            items = self.orders.plate
+            for index, item in enumerate(items):
+                x = round(plate.centerx + (index - (len(items) - 1) / 2) * 8)
+                y = plate.centery - 2
+                draw_food_shadow(surface, pygame.Rect(x - 5, y - 1, 10, 5))
+                draw_ingredient(surface, item, (x, y), small=True)
         if highlighted:
             pygame.draw.rect(surface, MARK_COLOR, TABLE.inflate(4, 6), 1, border_radius=3)
 
