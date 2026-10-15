@@ -1,7 +1,8 @@
 """Временное оформление диалога: окно внизу экрана с именем, текстом и вариантами ответа.
 
 Когда варианты ответа видны, на верхней рамке справа появляется табличка-подсказка
-«E — ответить»: ответ выбирают E или Enter, а пробел только листает реплики.
+«E — ответить»: ответ выбирают E или Enter, а пробел только листает реплики. Если игрок
+вернулся стрелкой ← к уже пройденному вопросу, подсказки нет: там выделен прежний ответ.
 
 Два способа вывода. На холсте (прежний путь, для сцен без слоя высокого разрешения) всё
 рисуется пиксельным шрифтом холста. Со слоем высокого разрешения (game/graphics/hires.py)
@@ -153,7 +154,7 @@ class DialogueBox:
             tab = layout.name_tab
             name = render_text(self._font, node.speaker, config.DIALOGUE_NAME_COLOR)
             surface.blit(name, (tab.x + NAME_PADDING_X, tab.y + NAME_PADDING_Y))
-        if layout.hint_tab is not None and dialogue.choices:
+        if layout.hint_tab is not None and _answering(dialogue):
             tab = layout.hint_tab
             surface.blit(render_text(self._font, CHOICE_HINT, config.DIALOGUE_CHOICE_COLOR),
                          (tab.x + NAME_PADDING_X, tab.y + NAME_PADDING_Y))
@@ -190,7 +191,7 @@ class DialogueBox:
             tab = layout.name_tab
             hires.text(node.speaker, NAME_STYLE, (tab.x + NAME_PADDING_X, tab.y + NAME_PADDING_Y + line_height / 2),
                        anchor="midleft")
-        if layout.hint_tab is not None and dialogue.choices:
+        if layout.hint_tab is not None and _answering(dialogue):
             tab = layout.hint_tab
             hires.text(CHOICE_HINT, HINT_STYLE, (tab.x + NAME_PADDING_X, tab.y + NAME_PADDING_Y + line_height / 2),
                        anchor="midleft")
@@ -223,7 +224,7 @@ class DialogueBox:
         if dialogue.is_typing:
             return
         if dialogue.choices:
-            if layout.hint_tab is not None:
+            if layout.hint_tab is not None and _answering(dialogue):
                 _draw_tab(surface, layout.hint_tab, box)
             self._draw_choice_marks(surface, layout, dialogue.selected_index)
         else:
@@ -293,6 +294,11 @@ class DialogueBox:
             )
         choices_top = text_top + len(text_spans) * line_height + CHOICES_GAP
         return DialogueLayout(box, name_tab, text_spans, choice_lines, choices_top, line_height, text_top, hint_tab)
+
+
+def _answering(dialogue: DialogueController) -> bool:
+    """Варианты на экране ждут ответа (а не показывают прежний ответ из истории)."""
+    return bool(dialogue.choices) and not dialogue.is_reviewing
 
 
 def _draw_tab(surface: pygame.Surface, tab: pygame.Rect, box: pygame.Rect) -> None:

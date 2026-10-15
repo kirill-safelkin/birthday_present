@@ -283,6 +283,216 @@ class ControllerTest(unittest.TestCase):
             DialogueController(linear_script(), chars_per_second=0)
 
 
+def three_lines_script() -> DialogueScript:
+    return DialogueScript(
+        "one",
+        [
+            DialogueNode("one", "Алиса", "Раз.", next_id="two"),
+            DialogueNode("two", "Лео", "Два.", next_id="three"),
+            DialogueNode("three", "Чучмек", "Три."),
+        ],
+    )
+
+
+def arrow(code: int) -> pygame.event.Event:
+    """Стрелка со скан-кодом, как от настоящей клавиатуры."""
+    scancode = {pygame.K_LEFT: pygame.KSCAN_LEFT, pygame.K_RIGHT: pygame.KSCAN_RIGHT}[code]
+    return pygame.event.Event(pygame.KEYDOWN, key=code, mod=0, unicode="", scancode=scancode)
+
+
+class HistoryNavigationTest(unittest.TestCase):
+    """← — к прежней реплике, → — как пробел; история не меняет ответов и не повторяет переходов."""
+
+    def steps(self, code: int) -> list[tuple[str | None, str]]:
+        dialogue = DialogueController(three_lines_script())
+        event = arrow(code) if code == pygame.K_RIGHT else key(code)
+        steps = []
+        for _ in range(6):
+            self.assertTrue(dialogue.handle_event(event))
+            steps.append((dialogue.node.id if dialogue.node else None, dialogue.visible_text))
+        return steps
+
+    def test_space_and_right_arrow_continue_the_same_way(self) -> None:
+        expected = [("one", "Раз."), ("two", ""), ("two", "Два."), ("three", ""), ("three", "Три."), (None, "")]
+        self.assertEqual(self.steps(pygame.K_SPACE), expected)
+        self.assertEqual(self.steps(pygame.K_RIGHT), expected)
+
+    def test_left_arrow_shows_previous_line_in_full(self) -> None:
+        dialogue = DialogueController(three_lines_script())
+        dialogue.confirm()
+        dialogue.confirm()  # на «two», печать с нуля
+        dialogue.update(0.01)
+        self.assertTrue(dialogue.handle_event(arrow(pygame.K_LEFT)))
+        self.assertEqual(dialogue.node.id, "one")
+        self.assertEqual(dialogue.visible_text, "Раз.")  # прежняя реплика видна сразу целиком
+        self.assertFalse(dialogue.is_typing)
+        self.assertTrue(dialogue.is_reviewing)
+        dialogue.update(10)  # пока листают историю, текущая реплика не допечатывается
+        dialogue.handle_event(arrow(pygame.K_RIGHT))
+        self.assertEqual(dialogue.node.id, "two")
+        self.assertFalse(dialogue.is_reviewing)
+        self.assertTrue(dialogue.is_typing)  # текущая реплика вернулась такой, какой была
+        self.assertEqual(dialogue.visible_chars, int(0.01 * dialogue.chars_per_second))
+
+    def test_right_arrow_restores_next_seen_line_then_continues_normally(self) -> None:
+        dialogue = DialogueController(three_lines_script())
+        for _ in range(4):
+            dialogue.confirm()  # «one» и «two» прочитаны, «three» печатается
+        for _ in range(2):
+            dialogue.handle_event(arrow(pygame.K_LEFT))
+        self.assertEqual(dialogue.node.id, "one")
+        shown = []
+        for _ in range(2):
+            dialogue.handle_event(arrow(pygame.K_RIGHT))
+            shown.append((dialogue.node.id, dialogue.is_reviewing))
+        self.assertEqual(shown, [("two", True), ("three", False)])
+        dialogue.handle_event(arrow(pygame.K_RIGHT))  # дальше — по обычным правилам: дописать…
+        self.assertEqual(dialogue.visible_text, "Три.")
+        dialogue.handle_event(arrow(pygame.K_RIGHT))  # …и закончить
+        self.assertTrue(dialogue.is_finished)
+
+    def test_cannot_go_back_before_the_first_line(self) -> None:
+        dialogue = DialogueController(three_lines_script())
+        self.assertFalse(dialogue.can_go_back)
+        self.assertTrue(dialogue.handle_event(arrow(pygame.K_LEFT)))  # клавиша диалога, но шага нет
+        self.assertEqual(dialogue.node.id, "one")
+        self.assertFalse(dialogue.is_reviewing)
+        dialogue.confirm()
+        dialogue.confirm()
+        for _ in range(3):
+            dialogue.back()
+        self.assertEqual(dialogue.node.id, "one")
+        self.assertFalse(dialogue.back())
+
+    def test_one_press_moves_exactly_one_line(self) -> None:
+        dialogue = DialogueController(three_lines_script())
+        for _ in range(4):
+            dialogue.confirm()
+        dialogue.handle_event(arrow(pygame.K_LEFT))
+        self.assertEqual(dialogue.node.id, "two")
+        dialogue.handle_event(arrow(pygame.K_LEFT))
+        self.assertEqual(dialogue.node.id, "one")
+        dialogue.handle_event(arrow(pygame.K_RIGHT))
+        self.assertEqual(dialogue.node.id, "two")  # не сразу к текущей
+
+    def test_enter_and_e_in_history_also_step_forward(self) -> None:
+        dialogue = DialogueController(three_lines_script())
+        dialogue.confirm()
+        dialogue.confirm()
+        dialogue.back()
+        dialogue.handle_event(key(pygame.K_RETURN))
+        self.assertEqual((dialogue.node.id, dialogue.is_reviewing), ("two", False))
+        dialogue.back()
+        dialogue.confirm()  # так сцены передают E
+        self.assertEqual((dialogue.node.id, dialogue.is_reviewing), ("two", False))
+        self.assertTrue(dialogue.is_typing)
+
+    def test_last_line_still_finishes_after_going_back(self) -> None:
+        dialogue = DialogueController(linear_script())
+        dialogue.confirm()
+        dialogue.confirm()
+        dialogue.update(10)  # «Пока.» видна целиком
+        dialogue.back()
+        dialogue.handle_event(key(pygame.K_SPACE))  # к последней реплике, она уже дописана
+        self.assertEqual(dialogue.node.id, "second")
+        self.assertFalse(dialogue.is_finished)
+        dialogue.handle_event(key(pygame.K_SPACE))
+        self.assertTrue(dialogue.is_finished)
+        self.assertFalse(dialogue.can_go_back)  # после конца диалог больше ничего не листает
+        self.assertFalse(dialogue.handle_event(arrow(pygame.K_LEFT)))
+        self.assertIsNone(dialogue.node)
+
+    def test_answered_question_in_history_shows_its_answer_read_only(self) -> None:
+        dialogue = DialogueController(branching_script())
+        dialogue.update(10)
+        dialogue.move_selection(1)
+        dialogue.confirm()  # «Нет»
+        self.assertEqual(dialogue.node.id, "no")
+        dialogue.handle_event(arrow(pygame.K_LEFT))
+        self.assertEqual(dialogue.node.id, "question")
+        self.assertEqual([choice.text for choice in dialogue.choices], ["Да", "Нет", "Повтори вопрос"])
+        self.assertEqual(dialogue.selected_index, 1)  # выделен ответ, который тогда выбрали
+        for code in (pygame.K_UP, pygame.K_DOWN, pygame.K_DOWN):
+            dialogue.handle_event(key(code))
+        self.assertEqual(dialogue.selected_index, 1)  # прежний ответ не меняется
+        dialogue.handle_event(key(pygame.K_RETURN))  # Enter — снова к ветке этого ответа
+        self.assertEqual(dialogue.node.id, "no")
+        self.assertEqual(dialogue.answers, {"question": DialogueChoice("Нет", "no")})
+
+    def test_space_and_right_arrow_step_out_of_answered_question_in_history(self) -> None:
+        for code in (pygame.K_SPACE, pygame.K_RIGHT):
+            with self.subTest(key=code):
+                dialogue = DialogueController(branching_script())
+                dialogue.update(10)
+                dialogue.confirm()  # «Да»
+                dialogue.back()
+                dialogue.handle_event(arrow(code) if code == pygame.K_RIGHT else key(code))
+                self.assertEqual(dialogue.node.id, "yes")  # ответ уже был, вслепую ничего не выбрано
+                self.assertEqual(dialogue.answers, {"question": DialogueChoice("Да", "yes")})
+
+    def test_live_question_still_needs_e_or_enter(self) -> None:
+        dialogue = DialogueController(branching_script())
+        dialogue.update(10)
+        for _ in range(3):
+            dialogue.handle_event(arrow(pygame.K_RIGHT))
+            dialogue.handle_event(key(pygame.K_SPACE))
+        self.assertEqual(dialogue.node.id, "question")
+        self.assertEqual(dialogue.answers, {})
+        dialogue.handle_event(key(pygame.K_DOWN))
+        dialogue.handle_event(arrow(pygame.K_LEFT))  # назад некуда: выделение на месте
+        self.assertEqual(dialogue.selected_index, 1)
+        dialogue.handle_event(key(pygame.K_RETURN))
+        self.assertEqual(dialogue.node.id, "no")
+
+    def test_repeated_question_remembers_each_answer_in_history(self) -> None:
+        dialogue = DialogueController(branching_script())
+        dialogue.update(10)
+        dialogue.move_selection(2)
+        dialogue.confirm()  # «Повтори вопрос»
+        dialogue.update(10)
+        dialogue.confirm()  # «Да»
+        seen = []
+        while dialogue.back():
+            seen.append((dialogue.node.id, dialogue.selected_index))
+        self.assertEqual(seen, [("question", 0), ("question", 2)])
+        self.assertEqual(dialogue.answers, {"question": DialogueChoice("Да", "yes")})
+
+    def test_live_selection_survives_a_look_back(self) -> None:
+        script = DialogueScript("intro", [
+            DialogueNode("intro", "Чучмек", "Внимание.", next_id="question"),
+            *branching_script().nodes.values(),
+        ])
+        dialogue = DialogueController(script)
+        dialogue.confirm()
+        dialogue.confirm()
+        dialogue.update(10)
+        dialogue.move_selection(1)
+        dialogue.back()
+        self.assertEqual(dialogue.node.id, "intro")
+        dialogue.handle_event(arrow(pygame.K_RIGHT))
+        self.assertEqual((dialogue.node.id, dialogue.selected_index), ("question", 1))
+        dialogue.confirm()
+        self.assertEqual(dialogue.node.id, "no")
+
+    def test_letters_a_and_d_do_not_page(self) -> None:
+        dialogue = DialogueController(three_lines_script())
+        dialogue.confirm()
+        dialogue.confirm()
+        for code, scancode in ((pygame.K_a, pygame.KSCAN_A), (pygame.K_d, pygame.KSCAN_D)):
+            event = pygame.event.Event(pygame.KEYDOWN, key=code, mod=0, unicode="", scancode=scancode)
+            self.assertFalse(dialogue.handle_event(event))
+        self.assertEqual((dialogue.node.id, dialogue.is_reviewing), ("two", False))
+
+    def test_new_dialogue_starts_with_empty_history(self) -> None:
+        first = DialogueController(three_lines_script())
+        for _ in range(4):
+            first.confirm()
+        second = DialogueController(three_lines_script())
+        self.assertFalse(second.can_go_back)
+        second.back()
+        self.assertEqual(second.node.id, "one")
+
+
 class LongTextTest(unittest.TestCase):
     font: pygame.font.Font
 
@@ -456,6 +666,22 @@ class DialogueBoxTest(unittest.TestCase):
         self.assertIn("E — ответить", texts)
         self.assertEqual(texts[0], "Чучмек")
         self.assertIn("Выбирай.", texts)
+
+    def test_answered_question_in_history_has_no_answer_hint(self) -> None:
+        dialogue = DialogueController(branching_script())
+        dialogue.update(10)
+        dialogue.confirm()
+        dialogue.back()
+        tab = self.box.layout(dialogue.node).hint_tab
+        self.canvas.fill(config.BACKGROUND_COLOR)
+        self.box.draw(self.canvas, dialogue)
+        self.assertEqual(tuple(self.canvas.get_at((tab.centerx, tab.top)))[:3], config.BACKGROUND_COLOR)
+        layer = HiResLayer()
+        self.box.draw(self.canvas, dialogue, layer)
+        texts = [command.text for command in layer.commands if isinstance(command, TextCommand)]
+        self.assertNotIn("E — ответить", texts)
+        self.assertIn("Выбирай.", texts)  # прежний вопрос — целиком, с вариантами
+        self.assertIn("Да", texts)
 
     def test_short_question_box_is_as_tall_as_a_plain_line(self) -> None:
         # Вопрос в строку и два ответа в строку: окно не подпрыгивает, когда появляется вопрос.

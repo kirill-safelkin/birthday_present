@@ -32,11 +32,21 @@ class ActionMappingTest(unittest.TestCase):
             Action.INTERACT: [(pygame.K_e, pygame.KSCAN_E), (ord("у"), pygame.KSCAN_E)],
             Action.CANCEL: [(pygame.K_BACKSPACE, pygame.KSCAN_BACKSPACE)],
         }
+        # Стрелки ← и → ещё и листают реплики диалога; буквы A и D — нет.
+        paging = {pygame.K_LEFT: {Action.PAGE_BACK}, pygame.K_RIGHT: {Action.PAGE_FORWARD}}
         for action, keys in cases.items():
             for key, scancode in keys:
                 with self.subTest(action=action, key=key):
-                    self.assertEqual(actions_for(key_event(key, scancode)), {action})
-                    self.assertEqual(actions_for(up(key, scancode)), {action})  # отпускание тоже распознаётся
+                    expected = {action} | paging.get(key, set())
+                    self.assertEqual(actions_for(key_event(key, scancode)), expected)
+                    self.assertEqual(actions_for(up(key, scancode)), expected)  # отпускание тоже распознаётся
+
+    def test_only_arrows_page_dialogue(self) -> None:
+        self.assertEqual(actions_for(key_event(pygame.K_LEFT, pygame.KSCAN_LEFT)), {Action.MOVE_LEFT, Action.PAGE_BACK})
+        self.assertEqual(actions_for(key_event(pygame.K_RIGHT)), {Action.MOVE_RIGHT, Action.PAGE_FORWARD})
+        for letter, scancode in ((pygame.K_a, pygame.KSCAN_A), (pygame.K_d, pygame.KSCAN_D), (ord("в"), pygame.KSCAN_D)):
+            actions = actions_for(key_event(letter, scancode))
+            self.assertFalse(actions & {Action.PAGE_BACK, Action.PAGE_FORWARD}, letter)
 
     def test_letter_without_scancode_in_german_layout(self) -> None:
         # В немецкой раскладке W, A, S, D, E на своих местах: хватает и кода клавиши.
@@ -102,7 +112,8 @@ class ActionInputTest(unittest.TestCase):
         self.controls.handle_event(key_event(pygame.K_UP))
         self.controls.handle_event(key_event(pygame.K_LEFT))
         self.controls.handle_event(key_event(pygame.K_w, pygame.KSCAN_W))  # вверх нажат снова, другой клавишей
-        self.assertEqual(self.controls.held_actions(), [Action.MOVE_LEFT, Action.MOVE_UP])
+        # ← — это и ходьба, и листание реплик: оба действия нажаты одной клавишей.
+        self.assertEqual(self.controls.held_actions(), [Action.MOVE_LEFT, Action.PAGE_BACK, Action.MOVE_UP])
 
     def test_same_action_from_two_keys(self) -> None:
         self.controls.handle_event(key_event(pygame.K_UP))

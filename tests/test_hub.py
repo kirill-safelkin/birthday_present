@@ -540,6 +540,84 @@ class ChuchmekChoiceTest(HubTestCase):
         self.assertTrue(dialogue.is_typing)  # …и новая реплика начата с нуля, а не пролистана
 
 
+class DialogueHistoryTest(HubTestCase):
+    """← и → в разговоре на площади: просмотр уже сказанного, без новых ответов и без ходьбы."""
+
+    def right(self) -> None:
+        press(self.hub, pygame.K_RIGHT, pygame.KSCAN_RIGHT)
+
+    def left(self) -> None:
+        press(self.hub, pygame.K_LEFT, pygame.KSCAN_LEFT)
+
+    def test_arrows_page_the_talk_and_alice_stays(self) -> None:
+        walk_to_chuchmek(self.hub)
+        press(self.hub, pygame.K_e, pygame.KSCAN_E)
+        position = (self.hub.alice.x, self.hub.alice.y)
+        dialogue = self.hub.dialogue
+        for _ in range(4):
+            self.right()  # → как пробел: дописать и дальше — до «h_because»
+        self.right()
+        self.assertEqual((dialogue.node.id, dialogue.is_typing), ("h_because", False))
+        self.left()
+        self.assertEqual((dialogue.node.id, dialogue.visible_text), ("h_why", "Почему она центральная?"))
+        self.left()
+        self.left()  # раньше приветствия не уходит
+        self.assertEqual(dialogue.node.id, "h_welcome")
+        self.right()
+        self.right()
+        self.assertEqual((dialogue.node.id, dialogue.is_reviewing), ("h_because", False))
+        hold(self.hub, [(pygame.K_LEFT, pygame.KSCAN_LEFT)], 0.5)  # зажатая ← — один шаг назад, Алиса стоит
+        self.assertEqual(dialogue.node.id, "h_why")
+        self.assertEqual((self.hub.alice.x, self.hub.alice.y), position)
+
+    def test_answer_seen_in_history_cannot_be_changed(self) -> None:
+        walk_to_chuchmek(self.hub)
+        press(self.hub, pygame.K_e, pygame.KSCAN_E)
+        dialogue = self.hub.dialogue
+        while dialogue.node.id != HUB_CHOICE_ID or dialogue.is_typing:
+            press(self.hub, pygame.K_RETURN)
+        press(self.hub, pygame.K_DOWN)
+        press(self.hub, pygame.K_e, pygame.KSCAN_E)  # «что поручено Лео»
+        self.assertEqual(dialogue.node.id, "h_leo")
+        self.left()
+        self.assertEqual((dialogue.node.id, dialogue.selected_index), (HUB_CHOICE_ID, 1))
+        press(self.hub, pygame.K_UP)
+        press(self.hub, pygame.K_e, pygame.KSCAN_E)  # E в истории — к уже показанной ветке
+        self.assertEqual(dialogue.node.id, "h_leo")
+        self.assertEqual(dialogue.answers[HUB_CHOICE_ID].next_id, "h_leo")
+        shown = []
+        while self.hub.dialogue is not None:
+            shown.append(self.hub.dialogue.node.id)
+            self.right()
+            self.right()
+        self.assertEqual(shown, ["h_leo", "h_yawn", "h_commission", HUB_JOIN_ID, "h_mosaic"])
+        self.assertEqual(self.progress.completed, ())
+
+    def test_closed_talk_returns_control_and_next_talk_has_fresh_history(self) -> None:
+        walk_to_chuchmek(self.hub)
+        talk(self.hub, 0)
+        self.assertIsNone(self.hub.dialogue)
+        x = self.hub.alice.x
+        hold(self.hub, [(pygame.K_RIGHT, pygame.KSCAN_RIGHT)], 0.3)  # после разговора → снова ведёт Алису
+        self.assertGreater(self.hub.alice.x, x)
+        walk_to_chuchmek(self.hub)
+        press(self.hub, pygame.K_e, pygame.KSCAN_E)
+        self.assertEqual(self.hub.dialogue.node.id, "h_again")
+        self.left()  # прошлый разговор не продолжается: назад некуда
+        self.assertEqual((self.hub.dialogue.node.id, self.hub.dialogue.is_reviewing), ("h_again", False))
+
+    def test_right_arrow_on_the_last_line_closes_the_talk_without_walking(self) -> None:
+        hub = self.hub
+        hub.alice.set_position(*LEO_POINT)
+        press(hub, pygame.K_e, pygame.KSCAN_E)  # одна реплика у корзинки
+        self.assertIsNotNone(hub.dialogue)
+        self.right()  # дописать
+        self.right()  # закрыть
+        self.assertIsNone(hub.dialogue)
+        hub.update(0.5)
+        self.assertEqual((hub.alice.x, hub.alice.y), LEO_POINT)  # отпущенная → не ведёт Алису дальше
+
+
 class LeoTest(HubTestCase):
     def walk_to_leo(self, hub: HubScene) -> None:
         walk_route(hub, ROUTE_TO["leo"])

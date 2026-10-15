@@ -194,6 +194,22 @@ class AppEventsTest(unittest.TestCase):
         self.assertEqual(dialogue.node.id, "start")  # реплика не пролистана повтором
         self.assertFalse(dialogue.is_typing)
 
+    def test_arrows_page_the_dialogue_and_held_arrow_steps_once(self) -> None:
+        press(pygame.K_d, pygame.KSCAN_D)
+        post_keys(pygame.K_SPACE, pygame.K_SPACE)  # «start»: дописать и дальше — к «rumour»
+        press(pygame.K_LEFT, pygame.KSCAN_LEFT)  # назад к «start»
+        press(pygame.K_LEFT, pygame.KSCAN_LEFT)  # раньше первой реплики не уходит
+        pygame.event.post(key_down(pygame.K_RIGHT, pygame.KSCAN_RIGHT))  # вперёд к «rumour»
+        pygame.event.post(key_down(pygame.K_RIGHT, pygame.KSCAN_RIGHT))  # системный автоповтор: → не отпускали
+        pygame.event.post(key_down(pygame.K_RIGHT, pygame.KSCAN_RIGHT))
+        pygame.event.post(key_up(pygame.K_RIGHT, pygame.KSCAN_RIGHT))
+        press(pygame.K_ESCAPE)
+        self.app.run()
+        dialogue = self.app.screen.dialogue
+        self.assertEqual(dialogue.node.id, "rumour")  # один шаг: повтор не пролистал реплику
+        self.assertFalse(dialogue.is_reviewing)
+        self.assertLess(dialogue.visible_chars, len(dialogue.node.text))  # и не дописал её
+
     def open_demo_question(self) -> None:
         """Демо-диалог до напечатанного вопроса: «start» и «rumour» — дописать и дальше, вопрос — дописать."""
         press(pygame.K_d, pygame.KSCAN_D)

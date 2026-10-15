@@ -27,9 +27,14 @@ class Action(str, Enum):
     CONFIRM = "confirm"  # подтвердить: продолжить реплику (ответ в диалоге — только вместе с interact)
     INTERACT = "interact"  # действие с объектом или персонажем рядом
     CANCEL = "cancel"  # назад, закрыть вложенный экран
+    # Листать реплики диалога стрелками: назад — к уже показанной, вперёд — как confirm у пробела.
+    # Только стрелки, без A/D: буквы в диалоге ничего не листают.
+    PAGE_BACK = "page_back"
+    PAGE_FORWARD = "page_forward"
 
 
 MOVE_ACTIONS = frozenset({Action.MOVE_UP, Action.MOVE_DOWN, Action.MOVE_LEFT, Action.MOVE_RIGHT})
+_ACTION_ORDER = {action: index for index, action in enumerate(Action)}
 
 
 @dataclass(frozen=True)
@@ -41,8 +46,8 @@ class KeyBinding:
     scancode: int | None = None
 
 
-# Одна клавиша может вызывать несколько действий (Enter — и подтверждение, и взаимодействие):
-# сцена сама решает, какое из них ей нужно.
+# Одна клавиша может вызывать несколько действий (Enter — и подтверждение, и взаимодействие;
+# ← и → — и ходьба, и листание реплик): сцена сама решает, какое из них ей нужно.
 DEFAULT_BINDINGS: tuple[KeyBinding, ...] = (
     KeyBinding(Action.MOVE_UP, pygame.K_UP, pygame.KSCAN_UP),
     KeyBinding(Action.MOVE_UP, pygame.K_w, pygame.KSCAN_W),
@@ -59,6 +64,8 @@ DEFAULT_BINDINGS: tuple[KeyBinding, ...] = (
     KeyBinding(Action.INTERACT, pygame.K_RETURN),
     KeyBinding(Action.INTERACT, pygame.K_KP_ENTER),
     KeyBinding(Action.CANCEL, pygame.K_BACKSPACE),
+    KeyBinding(Action.PAGE_BACK, pygame.K_LEFT, pygame.KSCAN_LEFT),
+    KeyBinding(Action.PAGE_FORWARD, pygame.K_RIGHT, pygame.KSCAN_RIGHT),
 )
 
 
@@ -126,10 +133,12 @@ class ActionInput:
 
     def held_actions(self) -> list[Action]:
         """Удерживаемые действия от давно нажатого к последнему нажатому, без повторов."""
-        latest: dict[Action, int] = {}
+        latest: dict[Action, tuple[int, int]] = {}
         for position, actions in enumerate(self._held.values()):
             for action in actions:
-                latest[action] = position
+                # Действия одной клавиши (← — ходьба и листание) — в порядке объявления в Action:
+                # порядок внутри frozenset от запуска к запуску разный.
+                latest[action] = (position, _ACTION_ORDER[action])
         return sorted(latest, key=latest.__getitem__)
 
     def release_all(self) -> None:

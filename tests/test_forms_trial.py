@@ -33,7 +33,7 @@ from game.story.forms_dialogue import (  # noqa: E402
     all_scripts,
 )
 from game.story.intro_dialogue import ALICE  # noqa: E402
-from game.trials.forms_puzzle import CORRECT_ORDER, DOCUMENT_NAMES, DOCUMENTS, SECTIONS  # noqa: E402
+from game.trials.forms_puzzle import CORRECT_ORDER, DOCUMENT_NAMES, DOCUMENTS, ISSUED, SECTIONS  # noqa: E402
 from game.trials.forms_scene import (  # noqa: E402
     CABINETS,
     DONE,
@@ -576,6 +576,39 @@ class RewardTest(TrialTestCase):
         self.assertEqual(self.progress.fragments, 0)
         finish_dialogue(self.scene)
         self.assertEqual(self.progress.fragments, 0)
+
+    def test_paging_back_and_forth_repeats_no_procedure_step(self) -> None:
+        # ← до начала разговора и → обратно вокруг выдачи разрешения и свидетельства: документы
+        # не выдаются повторно, Алиса стоит, фрагмент — только после последней реплики, один раз.
+        scene = self.scene
+        finish_dialogue(scene)
+        find_all(scene)
+        arrange(scene)
+        talk_to_goose(scene)
+        position = (scene.alice.x, scene.alice.y)
+        for node_id, issued in (("r_stamp", ["citizenship_permit"]), ("f_certificate", list(ISSUED))):
+            if scene.dialogue.node.id != node_id:
+                until_node(scene, node_id)
+            self.assertEqual(scene.puzzle.issued, issued)
+            for _ in range(2):
+                steps = 0
+                while scene.dialogue.can_go_back:
+                    press(scene, pygame.K_LEFT, pygame.KSCAN_LEFT)
+                    steps += 1
+                self.assertGreater(steps, 0)
+                for _ in range(steps):
+                    press(scene, pygame.K_RIGHT, pygame.KSCAN_RIGHT)
+                self.assertEqual((scene.dialogue.node.id, scene.dialogue.is_reviewing), (node_id, False))
+                self.assertEqual(scene.puzzle.issued, issued)  # ни второго разрешения, ни второго свидетельства
+            self.assertEqual(self.progress.fragments, 0)
+            self.assertEqual((scene.alice.x, scene.alice.y), position)
+            if node_id == "r_stamp":
+                finish_dialogue(scene)  # приём закончен — гусь переходит к гражданству
+        self.assertEqual(scene.phase, FINAL_PHASE)
+        finish_dialogue(scene)
+        self.assertEqual(self.progress.completed, ("forms",))
+        self.assertTrue(scene.reward_given)
+        self.assertIs(self.manager.current, self.hub)
 
     def test_cancel_returns_to_hub_without_reward_at_any_stage(self) -> None:
         stages = {
