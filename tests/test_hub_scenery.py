@@ -161,6 +161,93 @@ class TreeGeometryTest(SceneryTestCase):
                 self.assertLessEqual(portal.radius, 14)
 
 
+SUSHI_COLORS = {hub_scenery.NORI, hub_scenery.RICE, hub_scenery.RICE_SHADE, hub_scenery.SALMON, hub_scenery.TUNA,
+                hub_scenery.CUCUMBER, hub_scenery.TAMAGO}
+
+
+def tree_pixel(piece: Piece, x: float, y: float) -> tuple[int, int, int, int]:
+    """Пиксель картинки дерева в точке холста (x, y)."""
+    return tuple(piece.image.get_at((round((x - piece.rect.x) * SCALE), round((y - piece.rect.y) * SCALE))))
+
+
+def colors_in(piece: Piece, rect: pygame.Rect) -> set[tuple[int, int, int]]:
+    area = pygame.Rect((rect.x - piece.rect.x) * SCALE, (rect.y - piece.rect.y) * SCALE, rect.w * SCALE, rect.h * SCALE)
+    image = piece.image.subsurface(area)
+    return {tuple(image.get_at((x, y)))[:3] for x in range(area.w) for y in range(area.h) if image.get_at((x, y)).a}
+
+
+class SushiTreeTest(SceneryTestCase):
+    """Дерево суши украшено суши: роллы и нигири в кроне, гирлянда из маки, фонарики-рыбки."""
+
+    def test_geometry_and_lights_stay_as_they_were(self) -> None:
+        spec = hub_scenery.TREE_SPECS["sushi"]
+        self.assertEqual((spec.cx, spec.ground, spec.door_size), (44, 90, (14, 16)))
+        self.assertEqual((spec.sign, spec.block, spec.stand, spec.radius),
+                         (pygame.Rect(25, 54, 38, 10), pygame.Rect(12, 44, 64, 46), (44, 97), 12))
+        self.assertEqual(spec.sign_text, "СУШИ")
+        art = hub_scenery.sushi_tree()
+        self.assertEqual([(x, y) for x, y, _, _ in art.lights], [(spec.cx - 33, 62), (spec.cx + 33, 59)])
+        self.assertTrue(art.piece.rect.contains(spec.sign) and art.piece.rect.contains(spec.door))
+
+    def test_crown_bears_rolls_and_nigiri_on_top_of_the_leaves(self) -> None:
+        art, cx = hub_scenery.sushi_tree(), hub_scenery.TREE_SPECS["sushi"].cx
+        kinds = [kind for kind, *_ in hub_scenery.SUSHI_FRUITS]
+        self.assertGreaterEqual(kinds.count("maki"), 3)
+        self.assertGreaterEqual(kinds.count("nigiri"), 2)
+        for kind, dx, y, color, _ in hub_scenery.SUSHI_FRUITS:
+            with self.subTest(kind=kind, dx=dx):
+                # Начинка ролла или ломтик нигири (слева от полоски нори) видны: украшение лежит
+                # поверх листвы, а не под ней.
+                x = cx + dx - (0.1 if kind == "maki" else 1.1)
+                self.assertEqual(tree_pixel(art.piece, x, y - 0.3)[:3], color)
+                around = colors_in(art.piece, pygame.Rect(round(cx + dx) - 3, round(y) - 2, 6, 5))
+                self.assertIn(hub_scenery.RICE, around)
+                self.assertIn(hub_scenery.NORI, around)
+
+    def test_old_red_balls_are_gone_and_sushi_colours_are_plentiful(self) -> None:
+        piece = hub_scenery.sushi_tree().piece
+        crown = pygame.Rect(piece.rect.x, piece.rect.y, piece.rect.w, 62 - piece.rect.y)
+        crown_colors = colors_in(piece, crown)
+        self.assertNotIn(hub_scenery.palette_from((196, 60, 60))[1], crown_colors)  # красно-белых бутонов нет
+        mask = pygame.mask.from_surface(piece.image)
+        counts = {color: 0 for color in SUSHI_COLORS}
+        for x in range(piece.image.get_width()):
+            for y in range(piece.image.get_height()):
+                if mask.get_at((x, y)):
+                    color = tuple(piece.image.get_at((x, y)))[:3]
+                    if color in counts:
+                        counts[color] += 1
+        for color in (hub_scenery.RICE, hub_scenery.NORI, hub_scenery.SALMON, hub_scenery.CUCUMBER, hub_scenery.TAMAGO):
+            self.assertGreater(counts[color], 12, color)  # различимо, а не пара случайных точек
+
+    def test_sign_and_door_stay_clear(self) -> None:
+        spec, piece = hub_scenery.TREE_SPECS["sushi"], hub_scenery.sushi_tree().piece
+        self.assertFalse(colors_in(piece, spec.sign) & SUSHI_COLORS)  # украшения не лежат поверх таблички
+        self.assertFalse(colors_in(piece, spec.door.inflate(-2, -2)) & SUSHI_COLORS)  # и не висят в дупле
+        cx = spec.cx
+        for _, dx, y, _, _ in hub_scenery.SUSHI_FRUITS:
+            fruit = pygame.Rect(round(cx + dx) - 4, round(y) - 4, 8, 8)
+            self.assertFalse(fruit.colliderect(spec.sign), dx)
+            self.assertLess(fruit.bottom, spec.door.top - 8, dx)
+
+    def test_decorated_tree_draws_at_window_and_fullscreen_sizes(self) -> None:
+        from game.core.display import fit_viewport
+        from game.graphics.hires import ViewTransform
+        hub = self.hub()
+        spec = hub_scenery.TREE_SPECS["sushi"]
+        for size in ((960, 540), (1920, 1200)):
+            with self.subTest(size=size):
+                layer = HiResLayer()
+                hub.draw(self.canvas, layer)
+                screen = pygame.Surface(size)
+                transform = ViewTransform(fit_viewport(size, config.LOGICAL_SIZE, config.INTEGER_SCALING))
+                pygame.transform.scale(self.canvas, transform.viewport.size, screen.subsurface(transform.viewport))
+                layer.render(screen, transform)
+                # Середина ролла в кроне — цвет начинки и в окне, и на весь экран.
+                kind, dx, y, color, _ = hub_scenery.SUSHI_FRUITS[2]
+                self.assertEqual(tuple(screen.get_at(transform.point((spec.cx + dx - 0.1, y - 0.1))))[:3], color)
+
+
 class ReachabilityTest(SceneryTestCase):
     def reachable(self, hub: HubScene) -> set[tuple[int, int]]:
         start = (int(SPAWN[0]), int(SPAWN[1]))

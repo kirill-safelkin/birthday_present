@@ -131,6 +131,81 @@ def _fish(art: Art, x: float, y: float, color: config.Color) -> None:
     art.dot((20, 20, 40), x - 1.6, y - 0.4, 2)
 
 
+# Суши-украшения: нори, рис и начинки — те же цвета, что у плиток и грибов-нигири.
+NORI = (30, 44, 40)
+NORI_SHINE = (78, 104, 84)
+RICE = (250, 248, 238)
+RICE_SHADE = (208, 200, 184)
+SALMON = (246, 130, 96)
+SALMON_FAT = (255, 206, 176)
+TUNA = (214, 62, 78)
+TUNA_FAT = (246, 150, 150)
+CUCUMBER = (112, 186, 88)
+TAMAGO = (250, 210, 92)
+THREAD = (70, 50, 40)
+
+
+def _maki(art: Art, x: float, y: float, r: float, filling: config.Color, hang: float = 0.0) -> None:
+    """Ролл-маки в три четверти: бок из тёмного нори и сверху торец — белый рис и яркая начинка.
+
+    (x, y) — середина торца; hang — длина нитки над роллом (0 — без нитки)."""
+    side = r * 0.95  # высота бока
+    if hang:
+        art.line(THREAD, (x, y - r * 0.5 - hang), (x, y - r * 0.5 + 0.3), 0.4)
+    art.ellipse(NORI, x, y + side, r, r * 0.5)
+    art.rect_(NORI, x - r, y, r * 2, side)
+    art.rect_(NORI_SHINE, x - r + 0.5, y + 0.6, 0.7, side - 0.5)  # блик на нори
+    art.ellipse(RICE_SHADE, x, y, r, r * 0.5)
+    art.ellipse(RICE, x - 0.1, y - 0.1, r - 0.35, r * 0.5 - 0.3)
+    art.ellipse(palette_from(filling)[1], x, y, r * 0.42 + 0.2, r * 0.22 + 0.15)
+    art.ellipse(filling, x - 0.05, y - 0.05, r * 0.42, r * 0.22)
+
+
+def _nigiri(art: Art, x: float, y: float, topping: config.Color, fat: config.Color, hang: float = 0.0) -> None:
+    """Нигири: комочек риса, на нём ломтик рыбы с прожилками, перехваченный полоской нори.
+
+    (x, y) — середина ломтика; hang — нитка над ним (0 — без нитки)."""
+    if hang:
+        art.line(THREAD, (x, y - 1.8 - hang), (x, y - 1.4), 0.4)
+    art.ellipse(RICE_SHADE, x, y + 1.5, 3.3, 1.7)
+    art.ellipse(RICE, x - 0.1, y + 1.2, 3.1, 1.5)
+    art.ellipse(palette_from(topping)[1], x, y + 0.1, 3.7, 1.7)
+    art.ellipse(topping, x - 0.1, y - 0.1, 3.5, 1.45)
+    for k in (-1.8, -0.2, 1.4):  # светлые прожилки поперёк ломтика
+        art.line(fat, (x + k - 0.5, y - 1.0), (x + k + 0.5, y + 0.8), 0.35)
+    art.rect_(NORI, x - 0.6, y - 1.6, 1.2, 4.2)
+
+
+def _maki_garland(art: Art, points: Sequence[tuple[float, float]], every: int = 5) -> None:
+    """Гирлянда на нитке: маленькие маки с разными начинками — по очереди лосось, огурец, тамаго."""
+    art.lines(THREAD, points, 0.4)
+    fillings = (SALMON, CUCUMBER, TAMAGO)
+    for n, i in enumerate(range(2, len(points) - 2, every)):
+        x, y = points[i]
+        _maki(art, x, y + 2.0, 1.9, fillings[n % len(fillings)], hang=0.8)
+
+
+def _fish_lantern(art: Art, x: float, y: float, color: config.Color, facing: int = 1) -> None:
+    """Бумажный фонарик-рыбка (как японский кингё-тётин): круглое светящееся тельце с рёбрами,
+    хвост веером, плавники и глаз. facing — куда смотрит голова: 1 вправо, −1 влево."""
+    shade = palette_from(color)
+    tail = x - facing * 3.4
+    art.line(THREAD, (x, y - 5.2), (x, y - 2.6), 0.5)
+    art.polygon(shade[1], [(tail + facing * 0.6, y), (tail - facing * 2.4, y - 2.6), (tail - facing * 1.5, y),
+                           (tail - facing * 2.4, y + 2.6)])
+    art.polygon(shade[3], [(tail + facing * 0.2, y - 0.2), (tail - facing * 1.6, y - 1.8), (tail - facing * 1.1, y - 0.2)])
+    art.polygon(shade[1], [(x - facing * 0.6, y - 2.2), (x + facing * 0.8, y - 3.6), (x + facing * 1.4, y - 2.0)])
+    art.ellipse(shade[0], x, y, 4.0, 3.0)
+    art.ellipse(shade[2], x, y, 3.6, 2.6)
+    art.ellipse(shade[3], x - 0.6, y - 0.6, 2.4, 1.6)
+    for k in (-1.6, 0.0, 1.6):  # рёбра бумажного фонарика
+        art.line(shade[1], (x + k, y - 2.3), (x + k, y + 2.3), 0.3)
+    art.rect_((70, 50, 40), x - 1.3, y - 3.4, 2.6, 0.9)
+    art.circle(CREAM, x + facing * 2.1, y - 0.5, 0.75)
+    art.dot((20, 20, 40), x + facing * 2.3, y - 0.5, 2)
+    art.line((250, 220, 120), (x, y + 2.9), (x, y + 5.0), 0.5)  # кисточка
+
+
 def _sign_board(art: Art, rect: pygame.Rect, board: Palette, rope: config.Color, ropes_from: float) -> None:
     """Табличка на двух верёвках: дерево с каймой; надпись рисует слой окна."""
     for x in (rect.left + 3, rect.right - 3):
@@ -157,12 +232,31 @@ def _glow_group(points: Sequence[tuple[float, float]], color: config.Color, radi
 
 # --- Дерево суши ---
 
+# «Плоды» дерева суши: роллы и нигири висят под листвой на коротких черенках.
+# Вид, сдвиг от середины ствола (dx) и высота, начинка или ломтик (с прожилками).
+SUSHI_FRUITS = (
+    ("nigiri", -31, 50, SALMON, SALMON_FAT),
+    ("maki", -23, 52, CUCUMBER, None),
+    ("maki", -5, 30, SALMON, None),
+    ("nigiri", 11, 30, TUNA, TUNA_FAT),
+    ("maki", 29, 47, TAMAGO, None),
+    ("maki", 4, 37, TUNA, None),
+)
+
+
+def _sushi_fruit(art: Art, kind: str, x: float, y: float, color: config.Color, fat: config.Color | None) -> None:
+    if kind == "maki":
+        _maki(art, x, y, 2.6, color, hang=1.2)
+    else:
+        _nigiri(art, x, y, color, fat, hang=1.2)
+
+
 def build_sushi_tree() -> TreeArt:
-    """Старое «подстриженное облаками» дерево с красно-белыми украшениями."""
+    """Старое «подстриженное облаками» дерево: в кроне вместо плодов — роллы и нигири, через неё —
+    гирлянда из маки, на ветвях — фонарики-рыбки."""
     spec = TREE_SPECS["sushi"]
     cx, ground = spec.cx, spec.ground
     art = Art(pygame.Rect(0, 14, 90, 86), seed=11)
-    red_white = palette_from((196, 60, 60))
     # Корни и ствол: широкий, чуть изогнутый, с наклоном ветвей в стороны.
     _roots(art, cx, ground, 17, BARK, 11)
     trunk = spline([(cx, ground + 1), (cx - 1, 80), (cx + 1, 70), (cx - 1.5, 60), (cx, 52)], 10)
@@ -179,19 +273,14 @@ def build_sushi_tree() -> TreeArt:
     art.cluster([(cx - 36, 52, 6), (cx - 30, 49, 8), (cx - 22, 52, 8), (cx - 15, 54, 6.5), (cx - 27, 56, 6.5), (cx - 38, 57, 4.5)], LEAVES_DEEP)
     art.cluster([(cx - 8, 31, 8), (cx, 25, 9.5), (cx + 9, 24, 9.5), (cx + 17, 29, 8), (cx + 2, 34, 9.5), (cx + 11, 34, 8)], LEAVES_DEEP)
     art.cluster([(cx + 23, 44, 7), (cx + 30, 42, 7.5), (cx + 35, 46, 5.5), (cx + 28, 49, 6)], LEAVES_DEEP)
-    # Красно-белые бутоны в кроне.
-    for x, y in ((cx - 31, 48), (cx - 22, 51), (cx - 4, 27), (cx + 12, 27), (cx + 28, 42), (cx + 5, 33)):
-        art.ball(red_white, x, y, 1.7)
-        art.dot(CREAM, x - 0.4, y - 0.5, 2)
-    # Красно-белая гирлянда флажков, провисающая через крону.
-    flags = spline([(cx - 36, 50), (cx - 18, 57), (cx, 59.5), (cx + 18, 56), (cx + 35, 49)], 14)
-    art.lines((70, 40, 36), flags, 0.4)
-    for i in range(2, len(flags) - 2, 4):
-        x, y = flags[i]
-        art.polygon(RED if (i // 4) % 2 == 0 else CREAM, [(x - 1.8, y), (x + 1.8, y), (x, y + 4.2)])
-    # Подвески: два фонарика и рыбка.
-    _lantern(art, cx - 33, 62, RED)
-    _lantern(art, cx + 33, 59, (232, 120, 60))
+    # Суши-«плоды» под листвой.
+    for kind, dx, y, color, fat in SUSHI_FRUITS:
+        _sushi_fruit(art, kind, cx + dx, y, color, fat)
+    # Гирлянда из маки, провисающая через крону (середина — за табличкой).
+    _maki_garland(art, spline([(cx - 36, 50), (cx - 18, 57), (cx, 59.5), (cx + 18, 56), (cx + 35, 49)], 14))
+    # Подвески: два фонарика-рыбки (светятся, как прежние фонарики) и серебристая рыбка.
+    _fish_lantern(art, cx - 33, 62, RED, facing=1)
+    _fish_lantern(art, cx + 33, 59, (232, 120, 60), facing=-1)
     _fish(art, cx + 27, 62, (150, 190, 220))
     # Табличка «СУШИ».
     sign = spec.sign
