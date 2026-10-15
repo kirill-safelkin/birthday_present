@@ -72,7 +72,7 @@ class NavigationTest(GalleryTestCase):
         self.assertEqual(self.gallery.frame_index, 0)  # у нового персонажа — с первого кадра
         self.press(self.gallery, pygame.K_LEFT)
         self.press(self.gallery, pygame.K_LEFT)
-        self.assertEqual(self.gallery.entry.id, "hamster_official")
+        self.assertEqual(self.gallery.entry.id, "great_cake")  # последний в списке
 
     def test_up_and_down_browse_every_frame(self) -> None:
         sprites = self.gallery.sprites
@@ -285,6 +285,85 @@ class BrokenAssetsTest(GalleryTestCase):
         gallery.draw(self.canvas)
         self.press(gallery, pygame.K_BACKSPACE)
         self.assertTrue(gallery.is_finished)
+
+
+class GreatCakeGalleryTest(GalleryTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.gallery = SpriteGallery()
+        while self.gallery.entry.id != "great_cake":
+            self.press(self.gallery, pygame.K_RIGHT)
+
+    def test_listed_after_other_characters_with_its_name(self) -> None:
+        self.assertEqual(CHARACTER_ORDER[-1], "great_cake")
+        self.assertEqual(self.gallery.entries[-1].id, "great_cake")
+        self.assertEqual([entry.id for entry in self.gallery.entries].count("great_cake"), 1)
+        self.assertEqual(self.gallery.sprites.display_name, "Тортище")
+        self.assertEqual(self.gallery.sprites.atlas.get_size(), (256, 256))
+        self.gallery.draw(self.canvas)
+
+    def test_every_frame_one_by_one_and_never_mirrored(self) -> None:
+        sprites = self.gallery.sprites
+        seen = []
+        for _ in range(16):
+            frame = self.gallery.current_frame
+            seen.append(frame.id)
+            for key, size in ((pygame.K_4, 48), (pygame.K_5, 64)):  # размер в сценах и исходный
+                self.press(self.gallery, key)
+                shown = pygame.image.tobytes(self.gallery.scaled_frame(), "RGBA")
+                expected = pygame.transform.scale(frame.image, (size, size))
+                mirrored = pygame.transform.flip(expected, True, False)
+                with self.subTest(frame=frame.id, size=size):
+                    self.assertEqual(shown, pygame.image.tobytes(expected, "RGBA"))
+                    self.assertNotEqual(shown, pygame.image.tobytes(mirrored, "RGBA"))
+                self.gallery.draw(self.canvas)
+            self.press(self.gallery, pygame.K_DOWN)
+        self.assertEqual(seen, [frame.id for frame in sprites.frames])
+        self.assertEqual(len(set(seen)), 16)
+
+    def test_draft_walk_plays_safely_and_is_marked(self) -> None:
+        for name in ("walk_right", "walk_left", "reaction"):
+            self.open_group(self.gallery, "great_cake", name)
+            group = self.gallery.group
+            self.assertTrue(any(line.startswith("ЧЕРНОВИК: ") for line in self.gallery.info_lines()))
+            self.press(self.gallery, pygame.K_SPACE)
+            shown = []
+            for _ in range(len(group.frame_ids) * 2):
+                shown.append(self.gallery.current_frame.id)
+                self.gallery.update(1 / group.fps)
+                self.gallery.draw(self.canvas)
+                self.assertEqual(tuple(self.canvas.get_at(PANEL_RECT.topleft))[:3], DRAFT_COLOR)
+            self.assertEqual(shown, list(group.frame_ids) * 2)  # по кругу, в порядке манифеста
+            self.press(self.gallery, pygame.K_SPACE)
+            self.assertFalse(self.gallery.is_playing)
+
+    def test_single_poses_are_not_drafts(self) -> None:
+        for name in ("idle_down", "wink_down", "idle_up", "idle_right"):
+            self.open_group(self.gallery, "great_cake", name)
+            self.assertFalse(any("ЧЕРНОВИК" in line for line in self.gallery.info_lines()))
+            self.press(self.gallery, pygame.K_SPACE)
+            self.gallery.update(1.0)
+            self.gallery.draw(self.canvas)
+            self.assertNotEqual(tuple(self.canvas.get_at(PANEL_RECT.topleft))[:3], DRAFT_COLOR)
+            self.press(self.gallery, pygame.K_SPACE)
+
+    def test_broken_great_cake_does_not_break_the_gallery(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            for char_id in ("alice", "great_cake"):
+                shutil.copytree(CHARACTERS_DIR / char_id, root / char_id)
+            (root / "great_cake" / "great_cake_atlas_64px.png").unlink()
+            gallery = SpriteGallery(root)
+            self.assertEqual([entry.id for entry in gallery.entries], ["alice", "great_cake"])
+            self.assertIn("great_cake_atlas_64px.png", gallery.entries[1].error)
+            self.press(gallery, pygame.K_RIGHT)
+            for key in (pygame.K_DOWN, pygame.K_TAB, pygame.K_SPACE, pygame.K_4):
+                self.press(gallery, key)
+            gallery.update(1.0)
+            gallery.draw(self.canvas)
+            self.assertIsNone(gallery.current_frame)
+            self.press(gallery, pygame.K_RIGHT)
+            self.assertEqual(gallery.current_frame.id, "idle_down")  # Алиса показывается как раньше
 
 
 if __name__ == "__main__":

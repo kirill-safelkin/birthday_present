@@ -29,7 +29,9 @@ from game.graphics.sprite_manifest import (
 
 SCREEN_WIDTH, SCREEN_HEIGHT = config.LOGICAL_SIZE
 # Сначала главные герои, остальные папки — по алфавиту после них.
-CHARACTER_ORDER = ("alice", "chuchmek", "leo", "white_rabbit", "cat_chef", "goose_inspector", "hamster_official")
+CHARACTER_ORDER = (
+    "alice", "chuchmek", "leo", "white_rabbit", "cat_chef", "goose_inspector", "hamster_official", "great_cake",
+)
 # Размер, до которого увеличивается или уменьшается кадр на холсте 320×180, в логических пикселях.
 DISPLAY_SIZES = (24, 32, 40, 48, 64)
 SIZE_KEYS = (

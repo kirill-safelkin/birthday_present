@@ -12,7 +12,7 @@
                   "description": "Стоит, смотрит вниз"}, ...],
       "animations": {"walk_down": {"frames": ["walk_down_1", ...], "fps": 8, "loop": true,
                                    "draft": true, "draft_reason": "…"}, ...},
-      "poses": {"wink": "wink"},             — необязательно: псевдоним → кадр
+      "poses": {"wink": "wink"},             — необязательно: псевдоним → кадр (CharacterSprites.pose)
       "source": {...}, "notes": [...]        — необязательно: откуда ресурсы и заметки
     }
 
@@ -82,6 +82,10 @@ class CharacterSprites:
             if frame.id == frame_id:
                 return frame
         raise KeyError(frame_id)
+
+    def pose(self, name: str) -> SpriteFrame:
+        """Кадр позы для неподвижного персонажа: псевдоним из poses или id кадра (KeyError, если нет)."""
+        return self.frame(self.poses.get(name, name))
 
     def animation(self, group_name: str, loop: bool | None = None) -> Animation:
         """Анимация из группы кадров; loop переопределяет цикличность (например, для просмотра)."""

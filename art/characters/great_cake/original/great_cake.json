@@ -1,0 +1,442 @@
+{
+  "character": "great_cake",
+  "display_name": "Тортище (Великий Тортищ)",
+  "frame_size": [
+    64,
+    64
+  ],
+  "atlas": "great_cake_atlas_64px.png",
+  "source_sheet": "great_cake_source_sheet.png",
+  "source_frames_dir": "source_frames/",
+  "grid": {
+    "columns": 4,
+    "rows": 4,
+    "frames": 16,
+    "cell_size": [
+      64,
+      64
+    ],
+    "order": "слева направо, сверху вниз"
+  },
+  "frames": [
+    {
+      "index": 0,
+      "file": "frames/00_idle_front.png",
+      "source_file": "source_frames/00_idle_front.png",
+      "source_bbox": [
+        0,
+        10,
+        272,
+        286
+      ],
+      "source_size": [
+        272,
+        276
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 0,
+      "column": 0,
+      "name": "00_idle_front"
+    },
+    {
+      "index": 1,
+      "file": "frames/01_wink_front.png",
+      "source_file": "source_frames/01_wink_front.png",
+      "source_bbox": [
+        291,
+        9,
+        556,
+        287
+      ],
+      "source_size": [
+        265,
+        278
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 0,
+      "column": 1,
+      "name": "01_wink_front"
+    },
+    {
+      "index": 2,
+      "file": "frames/02_back_cape.png",
+      "source_file": "source_frames/02_back_cape.png",
+      "source_bbox": [
+        597,
+        10,
+        847,
+        288
+      ],
+      "source_size": [
+        250,
+        278
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 0,
+      "column": 2,
+      "name": "02_back_cape"
+    },
+    {
+      "index": 3,
+      "file": "frames/03_profile_right.png",
+      "source_file": "source_frames/03_profile_right.png",
+      "source_bbox": [
+        875,
+        11,
+        1134,
+        289
+      ],
+      "source_size": [
+        259,
+        278
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 0,
+      "column": 3,
+      "name": "03_profile_right"
+    },
+    {
+      "index": 4,
+      "file": "frames/04_angry_shout.png",
+      "source_file": "source_frames/04_angry_shout.png",
+      "source_bbox": [
+        7,
+        326,
+        279,
+        603
+      ],
+      "source_size": [
+        272,
+        277
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 1,
+      "column": 0,
+      "name": "04_angry_shout"
+    },
+    {
+      "index": 5,
+      "file": "frames/05_unimpressed.png",
+      "source_file": "source_frames/05_unimpressed.png",
+      "source_bbox": [
+        290,
+        327,
+        564,
+        604
+      ],
+      "source_size": [
+        274,
+        277
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 1,
+      "column": 1,
+      "name": "05_unimpressed"
+    },
+    {
+      "index": 6,
+      "file": "frames/06_angry_scepter.png",
+      "source_file": "source_frames/06_angry_scepter.png",
+      "source_bbox": [
+        581,
+        326,
+        871,
+        603
+      ],
+      "source_size": [
+        290,
+        277
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 1,
+      "column": 2,
+      "name": "06_angry_scepter"
+    },
+    {
+      "index": 7,
+      "file": "frames/07_crossed_arms.png",
+      "source_file": "source_frames/07_crossed_arms.png",
+      "source_bbox": [
+        870,
+        326,
+        1144,
+        604
+      ],
+      "source_size": [
+        274,
+        278
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 1,
+      "column": 3,
+      "name": "07_crossed_arms"
+    },
+    {
+      "index": 8,
+      "file": "frames/08_walk_right_01.png",
+      "source_file": "source_frames/08_walk_right_01.png",
+      "source_bbox": [
+        4,
+        653,
+        276,
+        931
+      ],
+      "source_size": [
+        272,
+        278
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 2,
+      "column": 0,
+      "name": "08_walk_right_01"
+    },
+    {
+      "index": 9,
+      "file": "frames/09_walk_right_02.png",
+      "source_file": "source_frames/09_walk_right_02.png",
+      "source_bbox": [
+        304,
+        657,
+        577,
+        924
+      ],
+      "source_size": [
+        273,
+        267
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 2,
+      "column": 1,
+      "name": "09_walk_right_02"
+    },
+    {
+      "index": 10,
+      "file": "frames/10_walk_right_03.png",
+      "source_file": "source_frames/10_walk_right_03.png",
+      "source_bbox": [
+        601,
+        659,
+        867,
+        926
+      ],
+      "source_size": [
+        266,
+        267
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 2,
+      "column": 2,
+      "name": "10_walk_right_03"
+    },
+    {
+      "index": 11,
+      "file": "frames/11_walk_right_04.png",
+      "source_file": "source_frames/11_walk_right_04.png",
+      "source_bbox": [
+        899,
+        654,
+        1145,
+        928
+      ],
+      "source_size": [
+        246,
+        274
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 2,
+      "column": 3,
+      "name": "11_walk_right_04"
+    },
+    {
+      "index": 12,
+      "file": "frames/12_walk_left_01.png",
+      "source_file": "source_frames/12_walk_left_01.png",
+      "source_bbox": [
+        19,
+        980,
+        269,
+        1245
+      ],
+      "source_size": [
+        250,
+        265
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 3,
+      "column": 0,
+      "name": "12_walk_left_01"
+    },
+    {
+      "index": 13,
+      "file": "frames/13_walk_left_02.png",
+      "source_file": "source_frames/13_walk_left_02.png",
+      "source_bbox": [
+        292,
+        979,
+        554,
+        1244
+      ],
+      "source_size": [
+        262,
+        265
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 3,
+      "column": 1,
+      "name": "13_walk_left_02"
+    },
+    {
+      "index": 14,
+      "file": "frames/14_walk_left_03.png",
+      "source_file": "source_frames/14_walk_left_03.png",
+      "source_bbox": [
+        584,
+        976,
+        840,
+        1244
+      ],
+      "source_size": [
+        256,
+        268
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 3,
+      "column": 2,
+      "name": "14_walk_left_03"
+    },
+    {
+      "index": 15,
+      "file": "frames/15_walk_left_04.png",
+      "source_file": "source_frames/15_walk_left_04.png",
+      "source_bbox": [
+        872,
+        982,
+        1132,
+        1246
+      ],
+      "source_size": [
+        260,
+        264
+      ],
+      "cell_size": [
+        64,
+        64
+      ],
+      "row": 3,
+      "column": 3,
+      "name": "15_walk_left_04"
+    }
+  ],
+  "animations": {
+    "idle_down": {
+      "frames": [
+        0
+      ],
+      "fps": 2,
+      "loop": true
+    },
+    "wink_down": {
+      "frames": [
+        1
+      ],
+      "fps": 2,
+      "loop": false
+    },
+    "idle_up": {
+      "frames": [
+        2
+      ],
+      "fps": 2,
+      "loop": true
+    },
+    "idle_right": {
+      "frames": [
+        3
+      ],
+      "fps": 2,
+      "loop": true
+    },
+    "reaction": {
+      "frames": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "fps": 4,
+      "loop": false
+    },
+    "walk_right": {
+      "frames": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "fps": 6,
+      "loop": true
+    },
+    "walk_left": {
+      "frames": [
+        12,
+        13,
+        14,
+        15
+      ],
+      "fps": 6,
+      "loop": true
+    }
+  },
+  "notes": [
+    "Runtime frames and atlas are normalized to 64x64, matching the existing character asset convention.",
+    "High-resolution isolated crops are preserved in source_frames/ and the original full sheet is preserved as great_cake_source_sheet.png.",
+    "The four row-2 and row-3 poses are directional pose variants; review them in the animation preview before using them as continuous walk cycles.",
+    "The sprite was approved as the crowned, strawberry-topped cake king with a royal burgundy cape and a dessert scepter. Do not mirror horizontally.",
+    "Some source edge pixels contain a generated colored fringe. Original crops are preserved for review; runtime frames are normalized with premultiplied-alpha downsampling."
+  ]
+}

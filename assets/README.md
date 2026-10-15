@@ -75,9 +75,12 @@ characters/<id>/
 - Группы (`animations`) — это кадры, которые можно проиграть подряд. `draft: true`
   значит, что непрерывность группы не подтверждена (группа собрана из разных
   сюжетных поз или помечена черновой в исходниках); причина — в `draft_reason`.
-- `poses`, `source`, `notes` и `source_file` необязательны.
+- `poses`, `source`, `notes` и `source_file` необязательны. Псевдоним позы и id кадра
+  принимает `CharacterSprites.pose()` — так неподвижный персонаж берёт кадр эмоции.
+- Кадры не отражаются: если персонаж несимметричен (скипетр, поднос), для взгляда
+  влево и вправо нужны свои кадры, а не зеркальная копия.
 - Исходные JSON и README из архивов хранятся без изменений
   в `art/characters/<id>/original/`.
 - Имена файлов и идентификаторы — латиница, нижний регистр, `snake_case`:
   `alice`, `leo`, `chuchmek`, `white_rabbit`, `cat_chef`, `goose_inspector`,
-  `hamster_official`, `strawberry`.
+  `hamster_official`, `great_cake`, `strawberry`.

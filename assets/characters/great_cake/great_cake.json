@@ -1,0 +1,220 @@
+{
+  "format": 1,
+  "id": "great_cake",
+  "display_name": "Тортище",
+  "source": {
+    "archive": "great_cake_sprite_assets.zip",
+    "id": "great_cake",
+    "manifest": "art/characters/great_cake/original/great_cake.json"
+  },
+  "frame_size": [
+    64,
+    64
+  ],
+  "atlas": {
+    "file": "great_cake_atlas_64px.png",
+    "columns": 4,
+    "rows": 4
+  },
+  "frames": [
+    {
+      "id": "idle_front",
+      "index": 0,
+      "file": "frames/00_idle_front.png",
+      "description": "Величественно стоит лицом к зрителю, скипетр в руке",
+      "source_file": "frames/00_idle_front.png"
+    },
+    {
+      "id": "wink_front",
+      "index": 1,
+      "file": "frames/01_wink_front.png",
+      "description": "Подмигивает, стоя лицом к зрителю",
+      "source_file": "frames/01_wink_front.png"
+    },
+    {
+      "id": "back_cape",
+      "index": 2,
+      "file": "frames/02_back_cape.png",
+      "description": "Вид сзади: королевская накидка с меховой окантовкой",
+      "source_file": "frames/02_back_cape.png"
+    },
+    {
+      "id": "profile_right",
+      "index": 3,
+      "file": "frames/03_profile_right.png",
+      "description": "Стоит в профиль, смотрит вправо, скипетр впереди",
+      "source_file": "frames/03_profile_right.png"
+    },
+    {
+      "id": "angry_shout",
+      "index": 4,
+      "file": "frames/04_angry_shout.png",
+      "description": "Гневно кричит",
+      "source_file": "frames/04_angry_shout.png"
+    },
+    {
+      "id": "unimpressed",
+      "index": 5,
+      "file": "frames/05_unimpressed.png",
+      "description": "Самодовольно смотрит из-под прикрытых век",
+      "source_file": "frames/05_unimpressed.png"
+    },
+    {
+      "id": "angry_scepter",
+      "index": 6,
+      "file": "frames/06_angry_scepter.png",
+      "description": "Грозит кулаком, в другой руке скипетр",
+      "source_file": "frames/06_angry_scepter.png"
+    },
+    {
+      "id": "crossed_arms",
+      "index": 7,
+      "file": "frames/07_crossed_arms.png",
+      "description": "Скрестил руки и сурово смотрит",
+      "source_file": "frames/07_crossed_arms.png"
+    },
+    {
+      "id": "walk_right_01",
+      "index": 8,
+      "file": "frames/08_walk_right_01.png",
+      "description": "Шагает вправо, поза 1 из 4",
+      "source_file": "frames/08_walk_right_01.png"
+    },
+    {
+      "id": "walk_right_02",
+      "index": 9,
+      "file": "frames/09_walk_right_02.png",
+      "description": "Шагает вправо, поза 2 из 4",
+      "source_file": "frames/09_walk_right_02.png"
+    },
+    {
+      "id": "walk_right_03",
+      "index": 10,
+      "file": "frames/10_walk_right_03.png",
+      "description": "Шагает вправо, поза 3 из 4",
+      "source_file": "frames/10_walk_right_03.png"
+    },
+    {
+      "id": "walk_right_04",
+      "index": 11,
+      "file": "frames/11_walk_right_04.png",
+      "description": "Шагает вправо, поза 4 из 4",
+      "source_file": "frames/11_walk_right_04.png"
+    },
+    {
+      "id": "walk_left_01",
+      "index": 12,
+      "file": "frames/12_walk_left_01.png",
+      "description": "Шагает влево, поза 1 из 4",
+      "source_file": "frames/12_walk_left_01.png"
+    },
+    {
+      "id": "walk_left_02",
+      "index": 13,
+      "file": "frames/13_walk_left_02.png",
+      "description": "Шагает влево, поза 2 из 4",
+      "source_file": "frames/13_walk_left_02.png"
+    },
+    {
+      "id": "walk_left_03",
+      "index": 14,
+      "file": "frames/14_walk_left_03.png",
+      "description": "Шагает влево, поза 3 из 4",
+      "source_file": "frames/14_walk_left_03.png"
+    },
+    {
+      "id": "walk_left_04",
+      "index": 15,
+      "file": "frames/15_walk_left_04.png",
+      "description": "Шагает влево, поза 4 из 4",
+      "source_file": "frames/15_walk_left_04.png"
+    }
+  ],
+  "animations": {
+    "idle_down": {
+      "frames": [
+        "idle_front"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "wink_down": {
+      "frames": [
+        "wink_front"
+      ],
+      "fps": 2,
+      "loop": false,
+      "draft": false
+    },
+    "idle_up": {
+      "frames": [
+        "back_cape"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "idle_right": {
+      "frames": [
+        "profile_right"
+      ],
+      "fps": 2,
+      "loop": true,
+      "draft": false
+    },
+    "reaction": {
+      "frames": [
+        "angry_shout",
+        "unimpressed",
+        "angry_scepter",
+        "crossed_arms"
+      ],
+      "fps": 4,
+      "loop": false,
+      "draft": true,
+      "draft_reason": "Четыре разные эмоции, а не фазы одного движения: брать как отдельные позы"
+    },
+    "walk_right": {
+      "frames": [
+        "walk_right_01",
+        "walk_right_02",
+        "walk_right_03",
+        "walk_right_04"
+      ],
+      "fps": 6,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "Варианты позы, а не фазы шага: корона и скипетр перерисованы, корпус сдвигается на 2–3 px — подряд дёргается"
+    },
+    "walk_left": {
+      "frames": [
+        "walk_left_01",
+        "walk_left_02",
+        "walk_left_03",
+        "walk_left_04"
+      ],
+      "fps": 6,
+      "loop": true,
+      "draft": true,
+      "draft_reason": "Варианты позы, а не фазы шага: корона и скипетр перерисованы, корпус сдвигается на 2–3 px — подряд дёргается"
+    }
+  },
+  "poses": {
+    "idle": "idle_front",
+    "wink": "wink_front",
+    "back": "back_cape",
+    "facing_right": "profile_right",
+    "angry": "angry_shout",
+    "smug": "unimpressed",
+    "threaten": "angry_scepter",
+    "stern": "crossed_arms"
+  },
+  "notes": [
+    "Runtime frames and atlas are normalized to 64x64, matching the existing character asset convention.",
+    "High-resolution isolated crops are preserved in source_frames/ and the original full sheet is preserved as great_cake_source_sheet.png.",
+    "The four row-2 and row-3 poses are directional pose variants; review them in the animation preview before using them as continuous walk cycles.",
+    "The sprite was approved as the crowned, strawberry-topped cake king with a royal burgundy cape and a dessert scepter. Do not mirror horizontally.",
+    "Some source edge pixels contain a generated colored fringe. Original crops are preserved for review; runtime frames are normalized with premultiplied-alpha downsampling."
+  ]
+}
