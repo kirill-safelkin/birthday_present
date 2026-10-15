@@ -7,8 +7,10 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
+import shutil  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
+from dataclasses import replace  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import pygame  # noqa: E402
@@ -17,6 +19,7 @@ import config  # noqa: E402
 from game.core.app import App  # noqa: E402
 from game.core.scenes import Scene, SceneManager  # noqa: E402
 from game.dialogue.box import DialogueBox  # noqa: E402
+from game.graphics.hires import HiResLayer, SpriteCommand, ViewTransform, scale_sprite  # noqa: E402
 from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites  # noqa: E402
 from game.story import cakes_dialogue as lines  # noqa: E402
 from game.story.intro_dialogue import ALICE, CHUCHMEK  # noqa: E402
@@ -35,16 +38,23 @@ from game.trials.cakes_scene import (  # noqa: E402
     ESCAPE_SECONDS,
     FINAL_PHASE,
     FOUND_PHASE,
+    GREAT_CAKE_SIZE,
+    GREAT_CAKE_SPOT,
     HUD_HEIGHT,
     INTRO_PHASE,
     MAZE,
     ORDERING,
     PANTRY,
+    PANTRY_DOOR,
     SPRITE_SIZE,
     STATUS_TOP,
     STRAWBERRY_COLOR,
+    STRAWBERRY_ON_TABLE,
     SUCCESS_PHASE,
+    TABLE_AREA,
+    TOAST_SECONDS,
     CakesTrialScene,
+    draw_strawberry,
 )
 from game.trials.forms_scene import CABINETS, GOOSE_POSITION, SLOT_XS, SLOT_Y, FormsTrialScene  # noqa: E402
 from game.trials.sushi_orders import RECIPES  # noqa: E402
@@ -86,8 +96,16 @@ def finish_dialogue(scene: Scene) -> list[str]:
     return shown
 
 
+def listen_to_great_cake(scene: CakesTrialScene) -> list[str]:
+    """Если после перестановки заговорил Тортище — дослушать его Enter, как игрок (первый ответ)."""
+    if scene.dialogue is not None and scene.dialogue.script is lines.GREAT_CAKE_TALK:
+        return finish_dialogue(scene)
+    return []
+
+
 def move_cursor(scene: CakesTrialScene, row: int) -> None:
-    """Стрелками вверх/вниз — до нужной строки доски."""
+    """Стрелками вверх/вниз — до нужной строки доски (сначала дослушав Тортища, если он говорит)."""
+    listen_to_great_cake(scene)
     for _ in range(2 * (CHECK_ROW + 1)):
         if scene.cursor == row:
             return
@@ -98,6 +116,7 @@ def move_cursor(scene: CakesTrialScene, row: int) -> None:
 def choose(scene: CakesTrialScene, row: int) -> None:
     move_cursor(scene, row)
     press_e(scene)
+    listen_to_great_cake(scene)  # первая перестановка — разговор с Тортищем
 
 
 def check_recipe(scene: CakesTrialScene) -> None:
@@ -740,6 +759,495 @@ class AppIntegrationTest(unittest.TestCase):
         # Зажатая стрелка: автоповтор не уводит курсор дальше одного шага.
         self.send(key(pygame.K_DOWN), key(pygame.K_DOWN), key(pygame.K_DOWN))
         self.assertEqual(trial.cursor, 2)
+
+
+# --- Тортище ---
+
+# Позы Тортища (псевдонимы poses манифеста great_cake) и их кадры — по манифесту, а не по номерам.
+GREAT_CAKE_FRAMES = {
+    "idle": "idle_front",
+    "wink": "wink_front",
+    "angry": "angry_shout",
+    "smug": "unimpressed",
+    "threaten": "angry_scepter",
+    "stern": "crossed_arms",
+}
+USED_GREAT_CAKE_POSES = {
+    *lines.GREAT_CAKE_POSES.values(),
+    lines.GREAT_CAKE_IDLE_POSE,
+    lines.GREAT_CAKE_WATCH_POSE,
+    lines.GREAT_CAKE_ESCAPE_POSE,
+}
+WINDOW = ViewTransform(pygame.Rect((0, 0), (960, 540)))
+
+
+def first_swap(scene: CakesTrialScene) -> None:
+    """Первая перестановка (строки 1 и 5) — без дослушивания: разговор с Тортищем остаётся открытым."""
+    move_cursor(scene, 0)
+    press_e(scene)
+    move_cursor(scene, 4)
+    press_e(scene)
+
+
+def talk(scene: CakesTrialScene, answer: int) -> dict[str, str]:
+    """Проходит разговор с Тортищем E, на вопросе — ↓ до ответа answer. Возвращает позы по репликам."""
+    poses = {}
+    for _ in range(4 * len(lines.GREAT_CAKE_TALK.nodes)):
+        dialogue = scene.dialogue
+        if dialogue is None or dialogue.script is not lines.GREAT_CAKE_TALK:
+            return poses
+        poses[dialogue.node.id] = scene.great_cake_pose
+        if dialogue.is_typing:
+            press_e(scene)  # дописать
+            continue
+        for _ in range(answer if dialogue.choices else 0):
+            press(scene, pygame.K_DOWN)
+        press_e(scene)
+    raise AssertionError(f"разговор с Тортищем не заканчивается: {poses}")
+
+
+def great_cake_commands(layer: HiResLayer) -> list[SpriteCommand]:
+    return [c for c in layer.commands if isinstance(c, SpriteCommand) and c.rect.midbottom == GREAT_CAKE_SPOT]
+
+
+def body(image: pygame.Surface, rect: pygame.Rect) -> pygame.Rect:
+    """Непрозрачная часть кадра image, растянутого на rect холста."""
+    scaled = pygame.transform.scale(image, rect.size)
+    return scaled.get_bounding_rect(min_alpha=40).move(rect.topleft)
+
+
+def strawberry_body(center: tuple[float, float]) -> pygame.Rect:
+    surface = pygame.Surface(config.LOGICAL_SIZE, pygame.SRCALPHA)
+    draw_strawberry(surface, center)
+    return surface.get_bounding_rect()
+
+
+class GreatCakeSpritesTest(TrialTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.sprites = load_character_sprites(CHARACTERS_DIR / "great_cake")
+
+    def test_loaded_through_the_manifest_with_the_approved_name(self) -> None:
+        sprites = self.scene.great_cake_sprites
+        self.assertIsNotNone(sprites)
+        self.assertEqual(sprites.id, "great_cake")
+        self.assertEqual(sprites.display_name, lines.GREAT_CAKE)  # «Тортище» в окне реплики
+        self.assertEqual(lines.GREAT_CAKE_TALK.nodes[lines.EVENT_CHOICE_ID].text, "Я не десерт. Я событие!")
+
+    def test_each_pose_is_its_own_manifest_frame(self) -> None:
+        self.assertLessEqual(USED_GREAT_CAKE_POSES, set(GREAT_CAKE_FRAMES))
+        for pose, frame_id in GREAT_CAKE_FRAMES.items():
+            with self.subTest(pose=pose):
+                self.assertEqual(self.sprites.poses[pose], frame_id)
+                frame = self.sprites.frame(frame_id)
+                self.scene.great_cake_pose = pose
+                source, image = self.scene._great_cake_frame()
+                self.assertIs(source, self.scene.great_cake_sprites.frame(frame_id).image)
+                on_disk = pygame.image.load(str(CHARACTERS_DIR / "great_cake" / frame.file))
+                self.assertEqual(pygame.image.tobytes(source, "RGBA"), pygame.image.tobytes(on_disk, "RGBA"))
+                expected = pygame.transform.scale(on_disk, (GREAT_CAKE_SIZE, GREAT_CAKE_SIZE))
+                self.assertEqual(pygame.image.tobytes(image, "RGBA"), pygame.image.tobytes(expected, "RGBA"))
+
+    def test_draft_walk_frames_are_never_used(self) -> None:
+        walking = {frame_id for name in ("walk_left", "walk_right") for frame_id in self.sprites.groups[name].frame_ids}
+        self.assertTrue(all(self.sprites.groups[name].draft for name in ("walk_left", "walk_right")))
+        used = {self.sprites.poses[pose] for pose in USED_GREAT_CAKE_POSES}
+        self.assertFalse(used & walking)
+
+    def test_missing_pose_falls_back_to_the_main_pose(self) -> None:
+        idle = self.sprites.frame("idle_front")
+        without_angry = {alias: frame for alias, frame in self.sprites.poses.items() if alias != "angry"}
+        # Первым — не основной кадр: так видно, что замена — именно поза idle, а не первый кадр.
+        profile = self.sprites.frame("profile_right")
+        reordered = (profile, *(frame for frame in self.sprites.frames if frame is not profile))
+        self.sprites = replace(self.sprites, frames=reordered)
+        self.scene.great_cake_sprites = replace(self.sprites, poses=without_angry)
+        self.scene._great_cake_frames.clear()
+        for pose in ("angry", "no_such_pose"):
+            with self.subTest(pose=pose):
+                self.scene.great_cake_pose = pose
+                source, _ = self.scene._great_cake_frame()
+                self.assertEqual(pygame.image.tobytes(source, "RGBA"), pygame.image.tobytes(idle.image, "RGBA"))
+                self.assertEqual(self.scene.great_cake_rect().midbottom, GREAT_CAKE_SPOT)
+        # Нет даже основной позы — первый кадр манифеста; испытание проходится до конца.
+        self.scene.great_cake_sprites = replace(self.sprites, poses={})
+        self.scene._great_cake_frames.clear()
+        self.scene.great_cake_pose = "angry"
+        self.assertIs(self.scene._great_cake_frame()[0], profile.image)
+        self.scene.draw(self.canvas, HiResLayer(strict=True))
+        play(self.scene)
+        self.assertTrue(self.scene.completed)
+        self.assertEqual(self.progress.completed, ("cakes",))
+
+    def test_broken_or_missing_manifest_shows_a_placeholder_and_the_trial_goes_on(self) -> None:
+        for case in ("нет кадра одной позы", "нет папки"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as root:
+                for char_id in ("alice", "chuchmek"):
+                    shutil.copytree(CHARACTERS_DIR / char_id, Path(root) / char_id)
+                if case == "нет кадра одной позы":
+                    shutil.copytree(CHARACTERS_DIR / "great_cake", Path(root) / "great_cake")
+                    (Path(root) / "great_cake" / self.sprites.frame("angry_shout").file).unlink()
+                progress = GameProgress()
+                scene = CakesTrialScene(progress, characters_dir=root)
+                self.assertIsNone(scene.great_cake_sprites)
+                self.assertIsNotNone(scene.chuchmek_sprites)  # остальные персонажи на месте
+                for pose in USED_GREAT_CAKE_POSES:
+                    scene.great_cake_pose = pose
+                    layer = HiResLayer(strict=True)
+                    scene.draw(self.canvas, layer)
+                    self.assertEqual(len(great_cake_commands(layer)), 1)  # временный манекен на подставке
+                play(scene)
+                self.assertTrue(scene.completed)
+                self.assertEqual(progress.completed, ("cakes",))
+
+
+class GreatCakeDrawingTest(TrialTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.sprites = load_character_sprites(CHARACTERS_DIR / "great_cake")
+
+    def draw_layer(self) -> HiResLayer:
+        layer = HiResLayer(strict=True)
+        self.scene.draw(self.canvas, layer)
+        return layer
+
+    def test_drawn_by_the_hires_layer_from_the_source_frame_without_mirroring(self) -> None:
+        frame = self.sprites.frame(GREAT_CAKE_FRAMES[self.scene.great_cake_pose]).image
+        layer = self.draw_layer()
+        (command,) = great_cake_commands(layer)
+        self.assertEqual(command.rect, self.scene.great_cake_rect())
+        self.assertEqual(command.rect.size, (GREAT_CAKE_SIZE, GREAT_CAKE_SIZE))
+        self.assertEqual(command.image.get_size(), (64, 64))
+        self.assertEqual(pygame.image.tobytes(command.image, "RGBA"), pygame.image.tobytes(frame, "RGBA"))
+        mirrored = pygame.transform.flip(frame, True, False)
+        self.assertNotEqual(pygame.image.tobytes(command.image, "RGBA"), pygame.image.tobytes(mirrored, "RGBA"))
+        # На холсте Тортища нет (только фон с подставкой), в окне — исходный кадр на своём месте.
+        above_plate = command.rect.clip(pygame.Rect(0, 0, WIDTH, GREAT_CAKE_SPOT[1] - 3))
+        self.assertEqual(pygame.image.tobytes(self.canvas.subsurface(above_plate), "RGB"),
+                         pygame.image.tobytes(self.scene._bakery_plain.subsurface(above_plate), "RGB"))
+        window = pygame.Surface(WINDOW.viewport.size)  # чёрное окно: виден ровно вклад слоя
+        layer.render(window, WINDOW)
+        place = WINDOW.rect(command.rect)
+        self.assertEqual(place.size, (3 * GREAT_CAKE_SIZE, 3 * GREAT_CAKE_SIZE))
+        expected = scale_sprite(frame, place.size)  # предумноженная альфа: на чёрном — сам цвет
+        body_pixels = [(x, y) for y in range(0, place.height, 5) for x in range(0, place.width, 5)
+                       if expected.get_at((x, y)).a >= 128]
+        self.assertGreater(len(body_pixels), 300)
+        for x, y in body_pixels:
+            self.assertEqual(window.get_at((place.x + x, place.y + y))[:3], expected.get_at((x, y))[:3])
+
+    def test_only_in_the_bakery(self) -> None:
+        to_pantry(self.scene)
+        self.assertEqual(great_cake_commands(self.draw_layer()), [])
+        catch_strawberry(self.scene)
+        finish_dialogue(self.scene)  # назад в кондитерскую на финальный разговор
+        self.assertEqual(len(great_cake_commands(self.draw_layer())), 1)
+
+    def test_size_place_and_feet_stay_the_same_for_every_pose(self) -> None:
+        rects = set()
+        for pose in GREAT_CAKE_FRAMES:
+            self.scene.great_cake_pose = pose
+            (command,) = great_cake_commands(self.draw_layer())
+            rects.add(tuple(command.rect))
+        self.assertEqual(rects, {tuple(self.scene.great_cake_rect())})
+        # Ноги во всех позах на одной строке кадра — на блюде, без скачков при смене позы.
+        feet = {self.sprites.frame(frame_id).image.get_bounding_rect(min_alpha=40).bottom
+                for frame_id in GREAT_CAKE_FRAMES.values()}
+        self.assertEqual(len(feet), 1)
+
+    def test_stays_in_place_through_the_whole_conversation(self) -> None:
+        finish_dialogue(self.scene)
+        first_swap(self.scene)
+        rects, poses = set(), set()
+        while self.scene.dialogue is not None:
+            (command,) = great_cake_commands(self.draw_layer())
+            rects.add(tuple(command.rect))
+            poses.add(self.scene.great_cake_pose)
+            press(self.scene, pygame.K_RETURN)
+        self.assertEqual(rects, {tuple(self.scene.great_cake_rect())})
+        self.assertGreaterEqual(len(poses), 4)  # реагирует на разговор, а не стоит одной картинкой
+
+    def test_bigger_than_alice(self) -> None:
+        alice = load_character_sprites(CHARACTERS_DIR / "alice").frame("idle_right").image
+        alice_height = body(alice, self.scene.alice.rect).height
+        for pose, frame_id in GREAT_CAKE_FRAMES.items():
+            with self.subTest(pose=pose):
+                height = body(self.sprites.frame(frame_id).image, self.scene.great_cake_rect()).height
+                self.assertGreaterEqual(height, 1.3 * alice_height)
+
+    def test_covers_no_board_interface_dialogue_table_strawberry_door_or_neighbours(self) -> None:
+        rect = self.scene.great_cake_rect()
+        self.assertGreaterEqual(rect.top, HUD_HEIGHT)  # не под верхней полосой
+        self.assertLessEqual(rect.right, WIDTH)
+        box = DialogueBox()
+        dialogue_areas = [box.layout(node, hires).area for script in lines.all_scripts()
+                          for node in script.nodes.values() for hires in (False, True)]
+        chuchmek = load_character_sprites(CHARACTERS_DIR / "chuchmek")
+        chuchmek_rect = pygame.Rect(0, 0, SPRITE_SIZE, SPRITE_SIZE)
+        chuchmek_rect.midbottom = CHUCHMEK_SPOT
+        chuchmek_poses = {*lines.CHUCHMEK_POSES.values(), lines.CHUCHMEK_IDLE_POSE, lines.CHUCHMEK_PANIC_POSE}
+        # Клубника на столе, весь её побег до края экрана и она же на вершине торта в финале.
+        scene = CakesTrialScene()
+        finish_dialogue(scene)
+        solve_recipe(scene)
+        finish_dialogue(scene)
+        strawberries = [strawberry_body(STRAWBERRY_ON_TABLE)]
+        for _ in range(30):
+            scene.escape_time += ESCAPE_SECONDS / 30
+            strawberries.append(strawberry_body(scene._escape_position()))
+        final = CakesTrialScene()
+        play(final, stop_before_final_end=True)
+        strawberries.append(strawberry_body(final.strawberry_position()))
+        for pose, frame_id in GREAT_CAKE_FRAMES.items():
+            cake = body(self.sprites.frame(frame_id).image, rect)
+            with self.subTest(pose=pose):
+                self.assertFalse(cake.colliderect(BOARD.inflate(4, 4)))  # доска с рамкой
+                self.assertFalse(cake.colliderect(TABLE_AREA))  # рабочий стол с тортом
+                self.assertFalse(cake.colliderect(PANTRY_DOOR))
+                self.assertFalse(cake.colliderect(self.scene.alice.rect))
+                self.assertEqual(cake.collidelist(dialogue_areas), -1)
+                self.assertEqual(cake.collidelist(strawberries), -1)
+                for chuchmek_pose in chuchmek_poses:
+                    self.assertFalse(cake.colliderect(body(chuchmek.frame(chuchmek_pose).image, chuchmek_rect)))
+        lowest = min(area.top for area in dialogue_areas)
+        self.assertLessEqual(GREAT_CAKE_SPOT[1], lowest)  # ноги выше любого окна реплики
+
+
+class GreatCakeTalkTest(TrialTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        finish_dialogue(self.scene)  # вступление Чучмека — без Тортища
+
+    def test_quiet_until_alice_first_changes_the_recipe(self) -> None:
+        self.assertEqual(self.scene.phase, ORDERING)
+        choose(self.scene, 0)
+        self.assertIsNone(self.scene.dialogue)  # взять этап — ещё не изменить рецепт
+        choose(self.scene, 0)
+        self.assertIsNone(self.scene.dialogue)
+        check_recipe(self.scene)
+        self.assertIsNot(self.scene.dialogue.script, lines.GREAT_CAKE_TALK)  # отказ — реплики Чучмека
+        self.assertEqual(self.scene.dialogue.node.speaker, CHUCHMEK)
+        finish_dialogue(self.scene)
+        first_swap(self.scene)
+        dialogue = self.scene.dialogue
+        self.assertIs(dialogue.script, lines.GREAT_CAKE_TALK)
+        self.assertEqual(dialogue.node.id, "g_halt")
+        self.assertEqual(dialogue.node.speaker, lines.GREAT_CAKE)
+        self.assertEqual(self.scene.phase, ORDERING)
+        self.assertEqual(self.scene.recipe.order, ("ingredients", "cool", "bake", "dough", "decorate"))  # обмен сделан
+        self.assertIsNone(self.scene.recipe.picked)
+        self.assertEqual(self.scene.great_cake_pose, "threaten")
+
+    def test_keys_in_the_talk_touch_neither_the_board_nor_alice(self) -> None:
+        first_swap(self.scene)
+        order, cursor = self.scene.recipe.order, self.scene.cursor
+        for code, scancode in ((pygame.K_UP, 0), (pygame.K_DOWN, 0), (pygame.K_LEFT, 0), (pygame.K_RIGHT, 0),
+                               (pygame.K_w, pygame.KSCAN_W), (pygame.K_a, pygame.KSCAN_A),
+                               (pygame.K_s, pygame.KSCAN_S), (pygame.K_d, pygame.KSCAN_D)):
+            self.scene.handle_event(key(code, scancode))
+            for _ in range(20):
+                self.scene.update(DT)
+            self.scene.handle_event(key(code, scancode, pygame.KEYUP))
+        self.assertEqual((self.scene.alice.x, self.scene.alice.y), ALICE_SPOT)
+        self.assertFalse(self.scene.alice.is_moving)
+        self.assertEqual((self.scene.recipe.order, self.scene.cursor), (order, cursor))
+        self.assertIs(self.scene.dialogue.script, lines.GREAT_CAKE_TALK)
+
+    def test_question_needs_e_or_enter_and_space_does_not_answer(self) -> None:
+        first_swap(self.scene)
+        while self.scene.dialogue.node.id != lines.EVENT_CHOICE_ID:
+            press(self.scene, pygame.K_SPACE)  # пробел листает обычные реплики
+        press(self.scene, pygame.K_SPACE)  # дописать вопрос
+        self.assertTrue(self.scene.dialogue.choices)
+        press(self.scene, pygame.K_SPACE)  # на вопросе пробел ничего не выбирает
+        self.assertEqual(self.scene.dialogue.node.id, lines.EVENT_CHOICE_ID)
+        press(self.scene, ord("ы"), pygame.KSCAN_S)  # S в русской раскладке — выбор ответа, а не Алиса
+        self.assertEqual(self.scene.dialogue.selected_index, 1)
+        press(self.scene, pygame.K_UP)
+        self.assertEqual(self.scene.dialogue.selected_index, 0)
+        self.assertEqual(self.scene.cursor, 4)
+        press(self.scene, pygame.K_RETURN)
+        self.assertEqual(self.scene.dialogue.node.id, "g_plate")
+
+    def test_answers_get_different_reactions_and_rejoin_without_touching_the_recipe(self) -> None:
+        own = {0: ("g_plate", "wink"), 1: ("g_normal", "threaten")}
+        outcomes = []
+        for answer, (reaction, pose) in own.items():
+            with self.subTest(answer=answer):
+                progress = GameProgress()
+                scene = CakesTrialScene(progress)
+                finish_dialogue(scene)
+                first_swap(scene)
+                swapped = repr(sorted(vars(scene.recipe).items()))
+                poses = talk(scene, answer)
+                self.assertIn(reaction, poses)
+                self.assertNotIn(own[1 - answer][0], poses)
+                self.assertEqual(poses[reaction], pose)
+                self.assertEqual(list(poses)[-1], "g_watch")  # общий конец разговора
+                self.assertEqual(poses["g_event"], "angry")
+                self.assertIsNone(scene.dialogue)
+                self.assertEqual(scene.phase, ORDERING)
+                self.assertEqual(repr(sorted(vars(scene.recipe).items())), swapped)  # ни этапов, ни проверок
+                self.assertEqual(progress.completed, ())
+                self.assertEqual(scene.great_cake_pose, lines.GREAT_CAKE_WATCH_POSE)  # дальше строго следит
+                scene.update(TOAST_SECONDS)
+                self.assertEqual(scene.status_text(), "Стрелки — выбрать этап   E — взять   Backspace — уйти")
+                for row in (1, 3):  # без помощника choose: он сам дослушал бы Тортища
+                    move_cursor(scene, row)
+                    press_e(scene)
+                self.assertEqual(scene.recipe.order, CORRECT_ORDER)
+                self.assertIsNone(scene.dialogue)  # второй раз Тортище не заговаривает
+                check_recipe(scene)
+                self.assertEqual(scene.phase, SUCCESS_PHASE)
+                finish_dialogue(scene)
+                path = []
+                for _ in range(10):  # клубника убегает так же, как и без Тортища
+                    scene.update(ESCAPE_SECONDS / 10)
+                    path.append(scene.strawberry_position())
+                scene.update(0.05)
+                self.assertIs(scene.dialogue.script, lines.ESCAPE)
+                outcomes.append((path, scene.recipe.order, scene.recipe.failed_checks))
+        self.assertEqual(outcomes[0], outcomes[1])
+
+    def test_cancel_in_the_talk_gives_no_fragment(self) -> None:
+        for node_id in ("g_halt", lines.EVENT_CHOICE_ID, "g_watch"):
+            with self.subTest(node=node_id):
+                progress = GameProgress()
+                manager = SceneManager()
+                manager.register(CAKES_SCENE, lambda: CakesTrialScene(progress))
+                hub = manager.push(HubScene(progress))
+                hub.alice.set_position(*PORTAL["cakes"])
+                hub.interact()
+                scene = manager.current
+                finish_dialogue(scene)
+                first_swap(scene)
+                while scene.dialogue.node.id != node_id:
+                    press(scene, pygame.K_RETURN)
+                press(scene, pygame.K_BACKSPACE)
+                self.assertIs(manager.current, hub)
+                self.assertEqual(progress.completed, ())
+                self.assertFalse(scene.completed)
+                self.assertIn("«Торты» прервано", hub.toast)
+
+    def test_poses_follow_the_whole_trial(self) -> None:
+        scene = CakesTrialScene()
+        self.assertEqual(scene.great_cake_pose, "smug")  # Чучмек «лично проверил рецепт»
+        finish_dialogue(scene)
+        self.assertEqual(scene.great_cake_pose, "idle")
+        check_recipe(scene)
+        self.assertEqual(scene.great_cake_pose, "smug")
+        finish_dialogue(scene)
+        first_swap(scene)
+        poses = talk(scene, 0)
+        self.assertEqual({node: poses[node] for node in ("g_halt", "g_finally", "g_event", "g_watch")},
+                         {"g_halt": "threaten", "g_finally": "smug", "g_event": "angry", "g_watch": "stern"})
+        choose(scene, 1)
+        choose(scene, 3)
+        self.assertEqual(scene.great_cake_pose, "stern")
+        check_recipe(scene)
+        press(scene, pygame.K_RETURN)
+        press(scene, pygame.K_RETURN)
+        self.assertEqual(scene.dialogue.node.id, "s_obvious")
+        self.assertEqual(scene.great_cake_pose, "wink")
+        finish_dialogue(scene)
+        self.assertEqual(scene.great_cake_pose, "angry")  # клубника убегает
+        scene.update(ESCAPE_SECONDS + 0.1)
+        self.assertEqual(scene.great_cake_pose, "angry")
+        finish_dialogue(scene)
+        catch_strawberry(scene)
+        finish_dialogue(scene)
+        self.assertEqual(scene.great_cake_pose, "idle")
+        while scene.dialogue.node.id != "f_fragment":
+            press(scene, pygame.K_RETURN)
+        self.assertEqual(scene.great_cake_pose, "wink")
+
+
+class GreatCakeAppTest(unittest.TestCase):
+    """Тортище в испытании, открытом через приложение: клавиши идут через App и ActionInput."""
+
+    def setUp(self) -> None:
+        pygame.display.init()
+        pygame.font.init()
+        self.app = App(dev_mode=True)
+
+    def tearDown(self) -> None:
+        pygame.quit()
+
+    def send(self, *events: pygame.event.Event) -> None:
+        for event in events:
+            pygame.event.post(event)
+        self.app._handle_events()
+
+    def press(self, code: int, scancode: int = 0) -> None:
+        self.send(key(code, scancode), key(code, scancode, pygame.KEYUP))
+
+    def open_hub(self) -> HubScene:
+        self.press(pygame.K_h, pygame.KSCAN_H)
+        return self.app.scenes.current
+
+    def enter_portal(self, hub: HubScene, trial_id: str) -> Scene:
+        hub.alice.set_position(*PORTAL[trial_id])
+        self.press(pygame.K_e, pygame.KSCAN_E)
+        return self.app.scenes.current
+
+    def to_ordering(self) -> CakesTrialScene:
+        trial = self.enter_portal(self.open_hub(), "cakes")
+        for _ in range(2 * len(lines.INTRO.nodes)):
+            if trial.phase == ORDERING:
+                break
+            self.press(pygame.K_e, pygame.KSCAN_E)
+        self.assertEqual(trial.phase, ORDERING)
+        return trial
+
+    def test_holding_e_does_not_skip_lines_or_answer_twice(self) -> None:
+        trial = self.to_ordering()
+        self.press(pygame.K_e, pygame.KSCAN_E)  # взять первый этап
+        for _ in range(4):
+            self.press(pygame.K_DOWN)
+        # Зажатая E: обмен и начало разговора — один раз, автоповтор не листает реплику.
+        self.send(*(key(pygame.K_e, pygame.KSCAN_E) for _ in range(4)))
+        self.assertIs(trial.dialogue.script, lines.GREAT_CAKE_TALK)
+        self.assertEqual(trial.dialogue.node.id, "g_halt")
+        self.assertTrue(trial.dialogue.is_typing)
+        self.send(key(pygame.K_e, pygame.KSCAN_E, pygame.KEYUP))
+        while trial.dialogue.node.id != lines.EVENT_CHOICE_ID:
+            self.press(pygame.K_RETURN)
+        self.press(pygame.K_RETURN)  # дописать вопрос
+        self.press(pygame.K_DOWN)
+        self.send(*(key(pygame.K_e, pygame.KSCAN_E) for _ in range(4)))  # ответ — один, реакция не пропущена
+        self.assertEqual(trial.dialogue.node.id, "g_normal")
+        self.assertTrue(trial.dialogue.is_typing)
+        self.send(key(pygame.K_e, pygame.KSCAN_E, pygame.KEYUP))
+        while trial.dialogue is not None:
+            self.press(pygame.K_RETURN)
+        self.assertEqual(trial.phase, ORDERING)
+        self.assertEqual(trial.recipe.order, ("ingredients", "cool", "bake", "dough", "decorate"))
+        self.press(pygame.K_UP)  # управление доской вернулось
+        self.assertEqual(trial.cursor, 3)
+
+    def test_replay_talks_again_but_gives_one_fragment(self) -> None:
+        hub = self.open_hub()
+        for answer in (0, 1):
+            trial = self.enter_portal(hub, "cakes")
+            self.assertFalse(trial.great_cake_met)
+            finish_dialogue(trial)
+            first_swap(trial)
+            self.assertIs(trial.dialogue.script, lines.GREAT_CAKE_TALK)
+            talk(trial, answer)
+            choose(trial, 1)
+            choose(trial, 3)
+            check_recipe(trial)
+            finish_dialogue(trial)
+            trial.update(ESCAPE_SECONDS + 0.1)
+            finish_dialogue(trial)
+            catch_strawberry(trial)
+            finish_dialogue(trial)
+            finish_dialogue(trial)
+            self.assertTrue(trial.completed)
+            self.assertEqual(trial.reward_given, answer == 0)
+            self.assertIs(self.app.scenes.current, hub)
+        self.assertEqual(self.app.progress.completed, ("cakes",))
+        self.assertEqual(hub.fragments_text(), "Фрагменты праздника: 1/3")
 
 
 if __name__ == "__main__":

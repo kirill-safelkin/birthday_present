@@ -67,6 +67,11 @@ CONVERSATIONS = {
     "торты": (
         cakes_dialogue.INTRO, cakes_dialogue.CHECK_CHOICE_ID, ("i_ready", "i_reversed", "i_backwards", "i_fix"),
     ),
+    "торты: Тортище": (
+        cakes_dialogue.GREAT_CAKE_TALK,
+        cakes_dialogue.EVENT_CHOICE_ID,
+        ("g_halt", "g_me", "g_finally", "g_who", cakes_dialogue.EVENT_CHOICE_ID, "g_watch"),
+    ),
     "финал": (
         final_dialogue.FINALE_TALK, final_dialogue.CREDIT_CHOICE_ID,
         ("f_restored", "f_documents", "f_commission", "f_verdict", "f_backside"),

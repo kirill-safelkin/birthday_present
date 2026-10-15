@@ -7,16 +7,21 @@
    лабиринте (раскладка — game/trials/cakes_maze.py), где ходит как на площади.
 Реплики — в game/story/cakes_dialogue.py.
 
-Этапы: вступление → рецепт → реакция на успех → побег клубники → поиск в кладовой →
-находка → финальный диалог у рабочего стола → награда. Фрагмент
-(GameProgress.complete("cakes")) выдаётся только после финальной реплики; отмена
-(Backspace) в любой момент до этого возвращает на площадь без награды.
+Этапы: вступление → рецепт (после первой перестановки — разговор с Тортищем) → реакция на
+успех → побег клубники → поиск в кладовой → находка → финальный диалог у рабочего стола →
+награда. Фрагмент (GameProgress.complete("cakes")) выдаётся только после финальной реплики;
+отмена (Backspace) в любой момент до этого возвращает на площадь без награды.
 Оформление временное: кондитерская и кладовая нарисованы геометрией.
 
-Со слоем высокого разрешения (game/graphics/hires.py) Алиса и Чучмек рисуются из исходных
-кадров 64×64, а надписи — шрифтом размера окна; перевёрнутые надписи (заголовок доски до
-исправления рецепта, таблички «ТОРТЫ» и «КЛАДОВАЯ») — тем же шрифтом, повёрнутым на 180°.
-Кондитерская, кладовая, торт и клубника остаются пиксельными.
+Тортище (манифест great_cake) — неподвижный NPC кондитерской: стоит на своей подставке над
+дверью кладовой, крупнее Алисы, и меняет позы (CharacterSprites.pose) по репликам. Заговаривает
+один раз — после первой перестановки этапов; рецепт, клубника и награда от него не зависят.
+Черновые группы ходьбы не используются, кадры не отражаются.
+
+Со слоем высокого разрешения (game/graphics/hires.py) Алиса, Чучмек и Тортище рисуются из
+исходных кадров 64×64, а надписи — шрифтом размера окна; перевёрнутые надписи (заголовок доски
+до исправления рецепта, таблички «ТОРТЫ» и «КЛАДОВАЯ») — тем же шрифтом, повёрнутым на 180°.
+Кондитерская, кладовая, подставка Тортища, торт и клубника остаются пиксельными.
 """
 
 from __future__ import annotations
@@ -83,6 +88,14 @@ FLOOR_TOP = 98  # где в кондитерской стена переходи
 ALICE_SPOT = (222, 106)  # у доски и рабочего стола; ноги выше окна реплики
 CHUCHMEK_SPOT = (298, 106)
 CHUCHMEK_DOOR = (22, 100)  # в дверях кладовой — за границей лабиринта
+# Тортище: кадр GREAT_CAKE_SIZE×GREAT_CAKE_SIZE, привязанный серединой нижнего края к GREAT_CAKE_SPOT,
+# — на золотой подставке над дверью кладовой, над головой Чучмека и правее стола с клубникой.
+# Голова не заходит под верхнюю полосу, ноги — выше любого окна реплики.
+GREAT_CAKE_SIZE = 44
+GREAT_CAKE_SPOT = (296, 68)
+GREAT_CAKE_PLATE = pygame.Rect(GREAT_CAKE_SPOT[0] - 18, GREAT_CAKE_SPOT[1] - 2, 36, 3)  # золотое блюдо под ногами
+GREAT_CAKE_SHELF = pygame.Rect(GREAT_CAKE_PLATE.x - 4, GREAT_CAKE_PLATE.bottom, WIDTH - GREAT_CAKE_PLATE.x + 4, 3)
+PANTRY_DOOR = pygame.Rect(WIDTH - 8, GREAT_CAKE_SHELF.bottom, 8, FLOOR_TOP - GREAT_CAKE_SHELF.bottom)  # под полкой
 TABLE = pygame.Rect(240, 88, 44, 12)  # рабочий стол с тортом
 CAKE_CENTER = (258, 86)
 STRAWBERRY_ON_TABLE = (277, 84)
@@ -121,6 +134,9 @@ PANTRY_FLOOR_COLORS = ((176, 132, 94), (164, 120, 84))
 PLANK_LINE_COLOR = (140, 100, 70)
 SIGN_COLOR = (236, 222, 190)
 SIGN_TEXT_COLOR = (90, 56, 48)
+GOLD_COLOR = (240, 200, 96)  # блюдо-подставка Тортища
+GOLD_EDGE_COLOR = (170, 120, 44)
+GREAT_CAKE_PLACEHOLDER_COLOR = (128, 32, 52)  # бордовая накидка — у манекена, если кадров нет
 
 # Надписи в разрешении окна (слой высокого разрешения); размер — в логических пикселях.
 TEXT_SIZE = 8  # интерфейс и доска, как на площади
@@ -131,7 +147,8 @@ CHALK_DIM_STYLE = TextStyle(TEXT_SIZE, CHALK_DIM_COLOR)
 SIGN_STYLE = TextStyle(6, SIGN_TEXT_COLOR)  # подвешенные таблички
 HUD_ROWS = (6.5, 17.5)  # середины двух строк верхней полосы
 BOARD_TITLE_MIDDLE = BOARD.y + 8  # середина заголовка доски — над первой строкой этапов
-SIGNS = {"bakery": ("ТОРТЫ", (296, 62)), "pantry": ("КЛАДОВАЯ", (170, 34))}
+# Табличка кондитерской висит между противнями: справа под потолком — Тортище.
+SIGNS = {"bakery": ("ТОРТЫ", (243, 34)), "pantry": ("КЛАДОВАЯ", (170, 34))}
 # Где рисуется рабочий стол: столешница с ножками и торт на ней.
 TABLE_AREA = pygame.Rect(TABLE.x, CAKE_CENTER[1] - 16, TABLE.width, TABLE.bottom + 8 - (CAKE_CENTER[1] - 16))
 
@@ -191,6 +208,10 @@ class CakesTrialScene(Scene):
         self.chuchmek_sprites = try_load_character_sprites(root / "chuchmek")
         self.chuchmek_pose = lines.CHUCHMEK_IDLE_POSE
         self._chuchmek_frames: dict[str, tuple[pygame.Surface, pygame.Surface]] = {}  # поза → (исходник, на холсте)
+        self.great_cake_sprites = try_load_character_sprites(root / "great_cake")
+        self.great_cake_pose = lines.GREAT_CAKE_IDLE_POSE
+        self._great_cake_frames: dict[str, tuple[pygame.Surface, pygame.Surface]] = {}
+        self.great_cake_met = False  # разговор с Тортищем уже был (один раз за прохождение)
 
         self.box = DialogueBox()
         for script in lines.all_scripts():
@@ -344,6 +365,11 @@ class CakesTrialScene(Scene):
         elif result is PickResult.SWAPPED:
             first, second = STEP_SHORT_NAMES[order[picked]], STEP_SHORT_NAMES[order[self.cursor]]
             self._show_toast(f"Поменяла местами: {first} и {second}")
+            if not self.great_cake_met:
+                # Алиса впервые изменила рецепт — Тортище требует объяснений. Обмен уже сделан,
+                # после разговора можно переставлять дальше с того же места.
+                self.great_cake_met = True
+                self._open_dialogue(lines.GREAT_CAKE_TALK)
 
     def _check(self) -> None:
         result = self.recipe.check()
@@ -369,12 +395,24 @@ class CakesTrialScene(Scene):
     def _open_dialogue(self, script: DialogueScript) -> None:
         self.alice.release_controls()  # во время реплик Алиса стоит
         self.dialogue = DialogueController(script)
+        self.great_cake_pose = self.great_cake_rest_pose()  # реплики без своей позы её не меняют
         self._sync_dialogue()
 
     def _sync_dialogue(self) -> None:
         node = self.dialogue.node if self.dialogue is not None else None
         if node is not None and node.id in lines.CHUCHMEK_POSES:
             self.chuchmek_pose = lines.CHUCHMEK_POSES[node.id]
+        if node is not None and node.id in lines.GREAT_CAKE_POSES:
+            self.great_cake_pose = lines.GREAT_CAKE_POSES[node.id]
+
+    def great_cake_rest_pose(self) -> str:
+        """Поза Тортища без реплик: строго следит за рецептом после разговора, сердится,
+        пока клубника убегает, а в остальное время просто величественно стоит."""
+        if self.phase == ESCAPE_PHASE:
+            return lines.GREAT_CAKE_ESCAPE_POSE
+        if self.phase == ORDERING and self.great_cake_met:
+            return lines.GREAT_CAKE_WATCH_POSE
+        return lines.GREAT_CAKE_IDLE_POSE
 
     def _dialogue_finished(self) -> None:
         """Реплика закрыта: следующий этап испытания."""
@@ -392,6 +430,8 @@ class CakesTrialScene(Scene):
             self._return_to_bakery()
         elif self.phase == FINAL_PHASE:
             self._complete()
+        if self.dialogue is None:
+            self.great_cake_pose = self.great_cake_rest_pose()  # уже для нового этапа
 
     def _enter_pantry(self) -> None:
         """Погоня: Алиса у двери кладовой, дальше — пешком по лабиринту."""
@@ -458,6 +498,8 @@ class CakesTrialScene(Scene):
             (chuchmek_spot[1], lambda: self._draw_chuchmek(surface, chuchmek_spot, hires)),
             (self.alice.y + 0.1, lambda: self._draw_alice(surface, hires)),
         ]
+        if self.area == BAKERY:  # в кладовую Тортище не ходит
+            drawables.append((GREAT_CAKE_SPOT[1], lambda: self._draw_great_cake(surface, hires)))
         strawberry = self.strawberry_position()
         if strawberry is not None:
             drawables.append((strawberry[1] + 5, lambda: self._draw_loose_strawberry(surface, strawberry, hires)))
@@ -531,6 +573,42 @@ class CakesTrialScene(Scene):
                 image = pygame.transform.scale(source, (SPRITE_SIZE, SPRITE_SIZE))
             self._chuchmek_frames[pose] = (source, image)
         return self._chuchmek_frames[pose]
+
+    def great_cake_rect(self) -> pygame.Rect:
+        """Где стоит Тортище на холсте: одно и то же место и размер при любой позе."""
+        width, height = self._great_cake_frame()[1].get_size()
+        return pygame.Rect(GREAT_CAKE_SPOT[0] - width // 2, GREAT_CAKE_SPOT[1] - height, width, height)
+
+    def _draw_great_cake(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        source, image = self._great_cake_frame()
+        rect = self.great_cake_rect()
+        if hires is not None:
+            hires.sprite(source, rect)  # исходный кадр 64×64 в окне, без отражения
+        else:
+            canvas.blit(image, rect)
+
+    def _great_cake_frame(self) -> tuple[pygame.Surface, pygame.Surface]:
+        """Поза Тортища: исходный кадр манифеста great_cake (без отражения) и он же на холсте.
+
+        Позу ищет CharacterSprites.pose (псевдоним из poses или id кадра). Если её нет —
+        основная поза idle, нет и её — первый кадр; без манифеста — временный манекен,
+        как у остальных персонажей. Испытание от этого не ломается."""
+        pose = self.great_cake_pose
+        if pose not in self._great_cake_frames:
+            sprites: CharacterSprites | None = self.great_cake_sprites
+            if sprites is None:
+                source = image = placeholder_animations(GREAT_CAKE_PLACEHOLDER_COLOR).default.frames[0]
+            else:
+                source = sprites.frames[0].image
+                for name in (pose, lines.GREAT_CAKE_IDLE_POSE):
+                    try:
+                        source = sprites.pose(name).image
+                        break
+                    except KeyError:
+                        continue
+                image = pygame.transform.scale(source, (GREAT_CAKE_SIZE, GREAT_CAKE_SIZE))
+            self._great_cake_frames[pose] = (source, image)
+        return self._great_cake_frames[pose]
 
     def row_rect(self, index: int) -> pygame.Rect:
         """Строка доски: этапы 0–4, а CHECK_ROW — кнопка проверки."""
@@ -663,15 +741,15 @@ class CakesTrialScene(Scene):
         # Доска с рецептом в деревянной раме.
         pygame.draw.rect(page, BOARD_FRAME_COLOR, BOARD.inflate(4, 4))
         pygame.draw.rect(page, BOARD_COLOR, BOARD)
-        # Противни на потолке (о них спрашивает Алиса) и венчик ручкой вниз.
-        for x, y in ((214, 40), (246, 46)):
+        # Противни на потолке (о них спрашивает Алиса) и венчик ручкой вниз — у самой доски.
+        for x, y in ((217, 40), (246, 46)):
             pygame.draw.line(page, TRAY_EDGE_COLOR, (x + 4, HUD_HEIGHT + 4), (x + 4, y))
             pygame.draw.line(page, TRAY_EDGE_COLOR, (x + 22, HUD_HEIGHT + 4), (x + 22, y))
             pygame.draw.rect(page, TRAY_COLOR, (x, y, 26, 4))
             pygame.draw.rect(page, TRAY_EDGE_COLOR, (x, y, 26, 4), 1)
-        pygame.draw.line(page, TRAY_EDGE_COLOR, (284, HUD_HEIGHT + 4), (284, 36))
-        pygame.draw.ellipse(page, TRAY_EDGE_COLOR, (279, 36, 11, 14), 1)
-        pygame.draw.line(page, TRAY_EDGE_COLOR, (284, 36), (284, 50))
+        pygame.draw.line(page, TRAY_EDGE_COLOR, (211, HUD_HEIGHT + 4), (211, 36))
+        pygame.draw.ellipse(page, TRAY_EDGE_COLOR, (206, 36, 11, 14), 1)
+        pygame.draw.line(page, TRAY_EDGE_COLOR, (211, 36), (211, 50))
         # Полка вверх ногами: банки висят под ней крышками вниз.
         pygame.draw.rect(page, TABLE_EDGE_COLOR, (206, 58, 54, 3))
         for k, color in enumerate(((236, 120, 140), (250, 214, 110), (180, 150, 230), (150, 210, 160))):
@@ -680,7 +758,13 @@ class CakesTrialScene(Scene):
             pygame.draw.rect(page, (120, 90, 80), (jar.x, jar.bottom - 2, jar.width, 2))
         self._upside_down_sign(page, *SIGNS["bakery"], labels)
         # Дверь в кладовую справа — туда сбежит клубника.
-        pygame.draw.rect(page, (150, 104, 70), (WIDTH - 8, 66, 8, FLOOR_TOP - 66))
+        pygame.draw.rect(page, (150, 104, 70), PANTRY_DOOR)
+        # Над дверью — полка с золотым блюдом Тортища. Единственная вещь здесь, которая не
+        # перевёрнута: на нём стоит сам Тортище (рисуется отдельно, как персонаж).
+        pygame.draw.rect(page, TABLE_COLOR, GREAT_CAKE_SHELF)
+        pygame.draw.rect(page, TABLE_EDGE_COLOR, GREAT_CAKE_SHELF, 1)
+        pygame.draw.ellipse(page, GOLD_COLOR, GREAT_CAKE_PLATE)
+        pygame.draw.ellipse(page, GOLD_EDGE_COLOR, GREAT_CAKE_PLATE, 1)
         # Внизу тоже всё наоборот: табурет ножками вверх, кастрюля дном вверх и мешок муки.
         stool = pygame.Rect(40, 146, 22, 5)
         pygame.draw.rect(page, TABLE_EDGE_COLOR, stool)

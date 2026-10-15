@@ -1,11 +1,18 @@
 """Реплики испытания тортов: вступление в перевёрнутой кондитерской, отказы и успех рецепта,
-побег клубники, находка в кладовой и финал. Только данные.
+разговор с Тортищем, побег клубники, находка в кладовой и финал. Только данные.
 
 Торт — сладкая часть праздничного плана. Во вступлении у Алисы выбор: Чучмек отвечает
 по-разному, а головоломка рецепта и побег клубники одни и те же при любом ответе.
 
+Тортище — живой торт-король кондитерской: считает себя не десертом, а главным событием
+праздника, рецептам Чучмека не доверяет, но хочет, чтобы праздник Алисы удался. Он стоит
+на своей подставке с самого начала и заговаривает один раз — когда Алиса впервые меняет
+рецепт (GREAT_CAKE_TALK). У Алисы выбор ответа: реакции разные, конец разговора общий,
+и ни ответ, ни сам разговор не меняют рецепт.
+
 Показывает их game/trials/cakes_scene.py через существующую систему диалогов.
-CHUCHMEK_POSES — какую позу (кадр chuchmek) принимает Чучмек на реплике.
+CHUCHMEK_POSES — какую позу (кадр chuchmek) принимает Чучмек на реплике;
+GREAT_CAKE_POSES — какую позу (псевдоним poses манифеста great_cake) принимает Тортище.
 """
 
 from __future__ import annotations
@@ -14,7 +21,9 @@ from game.dialogue.model import DialogueChoice, DialogueNode, DialogueScript
 from game.story.intro_dialogue import ALICE, CHUCHMEK
 from game.trials.cakes_puzzle import STEPS
 
+GREAT_CAKE = "Тортище"  # имя в окне реплики — display_name манифеста great_cake
 CHECK_CHOICE_ID = "i_sweet"  # выбор Алисы во вступлении
+EVENT_CHOICE_ID = "g_event"  # выбор Алисы в разговоре с Тортищем
 
 
 def _script(*nodes: DialogueNode) -> DialogueScript:
@@ -66,6 +75,47 @@ WRONG_HINTS = (
     "Тесто готово — значит, теперь коржи отправляются в духовку.",
     "Горячие коржи сначала остужают. Иначе крем просто растает.",
     "Крем и украшения — в самом конце, когда всё остальное готово.",
+)
+
+# Тортище — после первой перестановки этапов. Рецепт и доска остаются как есть.
+GREAT_CAKE_TALK = _script(
+    DialogueNode(
+        "g_halt",
+        GREAT_CAKE,
+        "Стоп! Прежде чем продолжить приготовление, я должен знать, кто отвечает за этот рецепт.",
+        next_id="g_me",
+    ),
+    DialogueNode("g_me", ALICE, "Пока что — я.", next_id="g_finally"),
+    DialogueNode(
+        "g_finally",
+        GREAT_CAKE,
+        "Хорошо. Наконец-то в этом помещении появился человек с чувством ответственности.",
+        next_id="g_who",
+    ),
+    DialogueNode("g_who", ALICE, "Спасибо. А ты… торт?", next_id=EVENT_CHOICE_ID),
+    DialogueNode(
+        EVENT_CHOICE_ID,
+        GREAT_CAKE,
+        "Я не десерт. Я событие!",
+        choices=[
+            DialogueChoice("Тебе сделать отдельную тарелку?", "g_plate"),
+            DialogueChoice("А можно просто нормально приготовить торт?", "g_normal"),
+        ],
+    ),
+    DialogueNode(
+        "g_plate", GREAT_CAKE, "Наконец-то разговор по существу. Самую большую. И ковровую дорожку до неё.",
+        next_id="g_watch",
+    ),
+    DialogueNode(
+        "g_normal", GREAT_CAKE, "Нормально?! Нормальными бывают бутерброды. Торт обязан быть торжественным!",
+        next_id="g_watch",
+    ),
+    DialogueNode(
+        "g_watch",
+        GREAT_CAKE,
+        "Продолжай, я прослежу. Рецептам Чучмека я не доверяю, а твой праздник должен удаться. "
+        "Хотя бы потому, что на нём буду я.",
+    ),
 )
 
 SUCCESS = _script(
@@ -129,6 +179,29 @@ CHUCHMEK_POSES = {
 CHUCHMEK_IDLE_POSE = "idle"
 CHUCHMEK_PANIC_POSE = "panicked"  # пока клубника убегает
 
+# Тортище говорит только в своём разговоре, а на чужих репликах отвечает позой. Реплики,
+# которых здесь нет, позу не меняют; после диалога он возвращается к позе этапа (см. сцену).
+GREAT_CAKE_POSES = {
+    "i_ready": "smug",  # Чучмек «лично проверил рецепт» — Тортище не верит
+    "i_backwards": "stern",
+    CHECK_CHOICE_ID: "idle",
+    "g_halt": "threaten",
+    "g_finally": "smug",
+    EVENT_CHOICE_ID: "angry",
+    "g_plate": "wink",
+    "g_normal": "threaten",
+    "g_watch": "stern",
+    "wrong_joke": "smug",
+    "s_obvious": "wink",  # рецепт исправлен — одобряет Алису
+    "e_escaped": "angry",
+    "e_where": "threaten",
+    "f_convince": "smug",
+    "f_fragment": "wink",
+}
+GREAT_CAKE_IDLE_POSE = "idle"
+GREAT_CAKE_WATCH_POSE = "stern"  # после разговора строго следит, как Алиса переставляет этапы
+GREAT_CAKE_ESCAPE_POSE = "angry"  # пока клубника убегает
+
 
 def wrong_order(attempt: int, mistake: int) -> DialogueScript:
     """Неверный рецепт: attempt — номер неудачной проверки с единицы, mistake — первая неверная позиция."""
@@ -140,7 +213,7 @@ def wrong_order(attempt: int, mistake: int) -> DialogueScript:
 
 def all_scripts() -> list[DialogueScript]:
     """Все сценарии испытания, включая собранные по ходу игры, — для проверки, что они помещаются на экран."""
-    scripts = [INTRO, SUCCESS, ESCAPE, FOUND, FINAL]
+    scripts = [INTRO, GREAT_CAKE_TALK, SUCCESS, ESCAPE, FOUND, FINAL]
     scripts += [
         wrong_order(attempt, mistake)
         for attempt in range(1, len(WRONG_JOKES) + 1)

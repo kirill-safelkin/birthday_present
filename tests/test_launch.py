@@ -19,6 +19,7 @@ from game.debug.animation_demo import AnimationDemo  # noqa: E402
 from game.debug.debug_screen import DebugScreen  # noqa: E402
 from game.debug.dialogue_demo import DialogueDemo  # noqa: E402
 from game.debug.sprite_gallery import SpriteGallery  # noqa: E402
+from game.story import cakes_dialogue  # noqa: E402
 from game.story import final_dialogue as text  # noqa: E402
 from game.story import final_scene  # noqa: E402
 from game.story.final_scene import DONE, FinalScene  # noqa: E402
@@ -222,6 +223,8 @@ class FullPlaythroughTest(LaunchTestCase):
             while cakes.cursor != row:
                 self.press(pygame.K_DOWN)
             self.press_e()
+            if cakes.dialogue is not None and cakes.dialogue.script is cakes_dialogue.GREAT_CAKE_TALK:
+                self.finish_dialogue(cakes)  # первая перестановка — разговор с Тортищем
         self.finish_dialogue(cakes)
         self.app._update(ESCAPE_SECONDS + 0.1)
         self.finish_dialogue(cakes)

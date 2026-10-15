@@ -34,6 +34,7 @@ from game.graphics.hires import (  # noqa: E402
     ViewTransform,
 )
 from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites  # noqa: E402
+from game.story import cakes_dialogue as cakes_text  # noqa: E402
 from game.story import final_dialogue as final_text  # noqa: E402
 from game.story.final_scene import (  # noqa: E402
     CREDIT_STYLES,
@@ -116,11 +117,18 @@ def play_forms(scene) -> None:
     finish_dialogue(scene)
 
 
-def play_cakes(scene) -> None:
-    finish_dialogue(scene)
+def solve_cakes_recipe(scene) -> None:
+    """Рецепт тортов двумя обменами и проверкой; после первой перестановки — разговор с Тортищем."""
     for row in (0, 4, 1, 3, cakes.CHECK_ROW):
         scene.cursor = row
         press_e(scene)
+        if scene.dialogue is not None and scene.dialogue.script is cakes_text.GREAT_CAKE_TALK:
+            finish_dialogue(scene)
+
+
+def play_cakes(scene) -> None:
+    finish_dialogue(scene)
+    solve_cakes_recipe(scene)
     finish_dialogue(scene)
     scene.update(cakes.ESCAPE_SECONDS + 0.1)
     finish_dialogue(scene)
@@ -352,9 +360,7 @@ class CharacterTest(SceneTestCase):
 
 def play_cakes_until_maze(scene) -> None:
     finish_dialogue(scene)
-    for row in (0, 4, 1, 3, cakes.CHECK_ROW):
-        scene.cursor = row
-        press_e(scene)
+    solve_cakes_recipe(scene)
     finish_dialogue(scene)
     scene.update(cakes.ESCAPE_SECONDS + 0.1)
     finish_dialogue(scene)
@@ -464,9 +470,7 @@ class UpsideDownTest(SceneTestCase):
         self.assertEqual(angles["КЛАДОВАЯ"], 180)
         solved = cakes.CakesTrialScene()
         finish_dialogue(solved)
-        for row in (0, 4, 1, 3, cakes.CHECK_ROW):
-            solved.cursor = row
-            press_e(solved)
+        solve_cakes_recipe(solved)
         layer, _ = self.draw(solved)
         angles = {c.text: c.angle for c in layer.commands if isinstance(c, TextCommand)}
         self.assertEqual(angles["РЕЦЕПТ ТОРТА"], 0)  # рецепт исправлен — заголовок встал ровно

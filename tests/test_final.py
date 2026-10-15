@@ -19,6 +19,7 @@ from game.core.app import App  # noqa: E402
 from game.core.scenes import Scene, SceneManager  # noqa: E402
 from game.dialogue.box import DialogueBox  # noqa: E402
 from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites  # noqa: E402
+from game.story import cakes_dialogue  # noqa: E402
 from game.story import final_dialogue as text  # noqa: E402
 from game.story.final_scene import (  # noqa: E402
     ALICE_POSITION,
@@ -537,6 +538,8 @@ def play_cakes(cakes: Scene) -> None:
     for row in (0, 4, 1, 3, CHECK_ROW):
         cakes.cursor = row
         press_e(cakes)
+        if cakes.dialogue is not None and cakes.dialogue.script is cakes_dialogue.GREAT_CAKE_TALK:
+            finish_dialogue(cakes)  # первая перестановка — разговор с Тортищем
     finish_dialogue(cakes)
     cakes.update(ESCAPE_SECONDS + 0.1)
     finish_dialogue(cakes)
