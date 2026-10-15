@@ -59,9 +59,10 @@ from game.world.hub import (  # noqa: E402
     SIGN_STYLE,
     SPAWN,
     STATUS_TOP,
-    TREES,
+    TREE_SPECS,
     HubScene,
 )
+from game.world import hub_scenery  # noqa: E402
 from game.world.progress import TRIALS, GameProgress  # noqa: E402
 
 WIDTH, HEIGHT = config.LOGICAL_SIZE
@@ -614,7 +615,9 @@ class HubHiResTest(PygameTestCase):
         hub.update(0.1)
         layer, canvas = self.draw(hub)
         sprites = self.sprites(layer)
-        self.assertEqual(len(sprites), 3)  # Алиса, Чучмек и Лео в корзинке — каждый по одному разу
+        # Алиса, Чучмек и Лео в корзинке — каждый по одному разу (остальные картинки — деревья, стол, предметы).
+        for person in (hub.alice.player.source, hub.leo_frames()[0]):
+            self.assertEqual(sum(command.image is person for command in sprites), 1)
         chuchmek_frame = load_character_sprites(CHARACTERS_DIR / "chuchmek").frame("idle").image
         by_rect = {command.rect.topleft: command for command in sprites}
         alice, chuchmek = by_rect[hub.alice.rect.topleft], by_rect[hub.chuchmek.rect.topleft]
@@ -638,18 +641,25 @@ class HubHiResTest(PygameTestCase):
         self.assertEqual((hub.alice.x, hub.alice.y), SPAWN)
 
     def test_tree_in_front_covers_alice_and_tree_behind_does_not(self) -> None:
-        hub = HubScene()
-        x, y = TREES[0]
-        hub.alice.set_position(x, y - 6)  # за стволом: крона дерева перед ней
-        layer, _ = self.draw(hub)
-        commands = layer.commands
-        alice = next(i for i, c in enumerate(commands) if isinstance(c, SpriteCommand) and c.rect == hub.alice.rect)
-        crown = (x, y - 14)
-        tree_patches = [i for i, c in enumerate(commands) if isinstance(c, PatchCommand) and c.rect.collidepoint(crown)]
-        self.assertTrue(tree_patches and tree_patches[0] > alice)
-        hub.alice.set_position(x, y + 14)  # перед деревом: дерево на холсте, под ней
-        layer, _ = self.draw(hub)
-        self.assertFalse([c for c in layer.commands if isinstance(c, PatchCommand) and c.rect.collidepoint(x, y - 14)])
+        # Деревья лежат в подробном фоне под персонажами; тот, кто стоит перед Алисой, рисуется поверх неё заново.
+        for trial_id, spec in TREE_SPECS.items():
+            with self.subTest(tree=trial_id):
+                hub = HubScene()
+                tree = {"sushi": hub_scenery.sushi_tree, "forms": hub_scenery.forms_tree,
+                        "cakes": hub_scenery.cakes_tree}[trial_id]().piece.image
+                backdrop = hub._backdrop.image
+                x, y = spec.cx, spec.ground
+                hub.alice.set_position(x + 36, y - 6)  # сбоку за деревом: его крона лежит поверх неё
+                layer, _ = self.draw(hub)
+                commands = layer.commands
+                self.assertTrue(commands[0].opaque and commands[0].image is backdrop)  # фон — первая команда
+                alice = next(i for i, c in enumerate(commands) if isinstance(c, SpriteCommand) and c.rect == hub.alice.rect)
+                covers = [i for i, c in enumerate(commands)
+                          if isinstance(c, SpriteCommand) and c.image is tree and c.clip == hub.alice.rect]
+                self.assertTrue(covers and covers[0] > alice)
+                hub.alice.set_position(x, y + 14)  # перед деревом (у входа): оно под ней, поверх ничего не рисуется
+                layer, _ = self.draw(hub)
+                self.assertFalse([c for c in layer.commands if isinstance(c, SpriteCommand) and c.image is tree])
 
     def test_dialogue_box_is_over_alice_and_texts_are_in_the_layer(self) -> None:
         hub = HubScene()
@@ -667,7 +677,7 @@ class HubHiResTest(PygameTestCase):
         self.assertIn(hub.fragments_text(), texts)
         self.assertIn("Чучмек", texts)
         for portal in PORTALS:
-            self.assertIn(portal.name, texts)
+            self.assertIn(portal.sign, texts)  # надпись на табличке дерева — в слое окна
 
     def test_status_and_hud_text_are_not_baked_into_the_canvas(self) -> None:
         hub = HubScene()
@@ -705,7 +715,7 @@ class HubHiResTest(PygameTestCase):
                     for portal in PORTALS:
                         plaque = hub.plaque_rect(portal, hires=True)
                         self.assertTrue(pygame.Rect(0, 0, WIDTH, HEIGHT).contains(plaque))
-                        self.assertLessEqual(sign.size(portal.name)[0], (plaque.width - 2) * scale)
+                        self.assertLessEqual(sign.size(portal.sign)[0], (plaque.width - 2) * scale)
 
     def test_strict_areas_everywhere_on_the_hub(self) -> None:
         progress = GameProgress()
@@ -820,6 +830,38 @@ class IntroHiResTest(PygameTestCase):
         self.assertLess(ERROR_H, HEIGHT)
 
 
+class OpaqueSpriteTest(PygameTestCase):
+    def test_opaque_sprite_looks_the_same_as_the_ordinary_one_but_is_drawn_plainly(self) -> None:
+        picture = pygame.Surface((160, 96), pygame.SRCALPHA)
+        for x in range(0, 160, 4):
+            for y in range(0, 96, 4):
+                picture.fill(((x * 7) % 256, (y * 11) % 256, (x + y) % 256, 255), (x, y, 4, 4))
+        for window in (WINDOWED, FULLSCREEN):
+            transform = transform_for(window)
+            results = []
+            for opaque in (False, True):
+                screen = pygame.Surface(window)
+                layer = HiResLayer()
+                layer.sprite(picture, pygame.Rect(40, 20, 80, 48), opaque=opaque)
+                layer.render(screen, transform)
+                results.append(pygame.image.tobytes(screen, "RGB"))
+            self.assertEqual(results[0], results[1], window)
+        scaled = layer.scaled_opaque(picture, (240, 144))
+        self.assertFalse(scaled.get_flags() & pygame.SRCALPHA)  # без альфа-канала: копируется быстро
+        self.assertIs(scaled, layer.scaled_opaque(picture, (240, 144)))  # и хранится
+
+    def test_opaque_flag_is_ignored_when_the_sprite_is_faded_or_rotated(self) -> None:
+        picture = pygame.Surface((8, 8))
+        picture.fill((200, 40, 40))
+        transform = transform_for(WINDOWED)
+        screen = pygame.Surface(WINDOWED)
+        screen.fill((0, 0, 0))
+        layer = HiResLayer()
+        layer.sprite(picture, pygame.Rect(0, 0, 8, 8), alpha=128, opaque=True)
+        layer.render(screen, transform)
+        self.assertLess(screen.get_at((6, 6))[0], 120)  # полупрозрачный кадр не превратился в сплошной
+
+
 class PlaceholderHiResTest(PygameTestCase):
     def test_scenes_without_sprites_draw_placeholders_through_the_layer(self) -> None:
         transform = transform_for(WINDOWED)
@@ -830,7 +872,8 @@ class PlaceholderHiResTest(PygameTestCase):
             hub = HubScene(characters_dir=Path(empty))
             hub.update(0.1)
             hub.draw(canvas, layer)
-            sprites = [c for c in layer.commands if isinstance(c, SpriteCommand)]
+            people = (hub.alice.player.source, hub.chuchmek.player.source)
+            sprites = [c for c in layer.commands if isinstance(c, SpriteCommand) and c.image in people]
             # Временные манекены — на тех же местах и того же размера, что и на холсте.
             expected = sorted([tuple(hub.alice.rect), tuple(hub.chuchmek.rect)])
             self.assertEqual(sorted(tuple(c.rect) for c in sprites), expected)

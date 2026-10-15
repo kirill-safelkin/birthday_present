@@ -147,6 +147,7 @@ class SpriteCommand:
     alpha: int = 255
     angle: float = 0.0  # наклон против часовой стрелки вокруг центра rect
     clip: pygame.Rect | None = None  # часть холста, вне которой кадра не видно
+    opaque: bool = False  # кадр целиком непрозрачный (фон сцены): выводится быстрым копированием
 
 
 @dataclass(frozen=True, eq=False)
@@ -218,6 +219,18 @@ class HiResLayer:
         self.commands.clear()
         self.covered.clear()
 
+    def backdrop_rows(self) -> tuple[int, int] | None:
+        """Строки холста (от, до), которые целиком закрыты первой командой — непрозрачным кадром во всю
+        ширину холста (подробный фон сцены), или None. Display.present() не увеличивает эти строки холста."""
+        first = self.commands[0] if self.commands else None
+        if not isinstance(first, SpriteCommand) or not first.opaque or first.angle or first.clip is not None:
+            return None
+        canvas_w, canvas_h = config.LOGICAL_SIZE
+        rect = first.rect
+        if rect.left > 0 or rect.right < canvas_w or rect.height <= 0:
+            return None
+        return max(0, rect.top), min(canvas_h, rect.bottom)
+
     def covers(self, area: pygame.Rect) -> bool:
         """Лежит ли уже в слое команда, которая может задеть прямоугольник холста area."""
         return area.collidelist(self.covered) >= 0
@@ -237,8 +250,13 @@ class HiResLayer:
         alpha: int = 255,
         angle: float = 0.0,
         clip: pygame.Rect | None = None,
+        opaque: bool = False,
     ) -> None:
-        """Кадр image, растянутый на прямоугольник холста rect (размер в окне — по трансформации)."""
+        """Кадр image, растянутый на прямоугольник холста rect (размер в окне — по трансформации).
+
+        opaque=True — кадр без прозрачных пикселей (подробный фон сцены, который кладётся под
+        персонажей): он увеличивается один раз и выводится обычным копированием, в разы быстрее
+        вывода с прозрачностью. Для такого кадра alpha и angle не используются."""
         if alpha <= 0:
             return
         rect = pygame.Rect(rect)
@@ -250,7 +268,7 @@ class HiResLayer:
             bounds.center = rect.center
         if clip is not None:
             bounds = bounds.clip(clip)
-        self._add(SpriteCommand(image, rect, min(255, alpha), angle, clip), bounds.inflate(2, 2))
+        self._add(SpriteCommand(image, rect, min(255, alpha), angle, clip, opaque), bounds.inflate(2, 2))
 
     def text(
         self,
@@ -411,6 +429,17 @@ class HiResLayer:
         """scale_sprite с кэшем: один кадр одного размера масштабируется один раз."""
         return _remember(self._sprites, (image, size), lambda: scale_sprite(image, size))
 
+    def scaled_opaque(self, image: pygame.Surface, size: tuple[int, int]) -> pygame.Surface:
+        """scale_sprite для непрозрачного кадра: результат без альфа-канала, с кэшем."""
+
+        def build() -> pygame.Surface:
+            scaled = scale_sprite(image, size)
+            plain = pygame.Surface(scaled.get_size())
+            plain.blit(scaled, (0, 0))  # альфа везде 255: цвета предумножения совпадают с обычными
+            return plain
+
+        return _remember(self._sprites, (image, size, "opaque"), build)
+
     def scaled_patch(self, surface: pygame.Surface, size: tuple[int, int]) -> pygame.Surface:
         """Заплатка, увеличенная ближайшим соседом, с кэшем по содержимому: окно реплики или полоса
         интерфейса рисуются заново каждый кадр, но меняются редко, а увеличение в полном экране
@@ -442,6 +471,9 @@ class HiResLayer:
     def _draw_sprite(self, target: pygame.Surface, transform: ViewTransform, command: SpriteCommand) -> None:
         rect = transform.rect(command.rect)
         if rect.width <= 0 or rect.height <= 0:
+            return
+        if command.opaque and not command.angle and command.alpha >= 255:
+            target.blit(self.scaled_opaque(command.image, rect.size), rect)
             return
         image = self.scaled_sprite(command.image, rect.size)
         if command.angle:
@@ -532,7 +564,7 @@ def _command_key(command: Command) -> tuple:
         return ("fill", command.color, tuple(command.rect) if command.rect is not None else None, command.alpha)
     if isinstance(command, SpriteCommand):
         clip = tuple(command.clip) if command.clip is not None else None
-        return ("sprite", command.image, tuple(command.rect), command.alpha, command.angle, clip)
+        return ("sprite", command.image, tuple(command.rect), command.alpha, command.angle, clip, command.opaque)
     if isinstance(command, PatchCommand):
         digest = hashlib.blake2b(pygame.image.tobytes(command.surface, "RGBA"), digest_size=16).digest()
         return ("patch", digest, tuple(command.rect))

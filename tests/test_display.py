@@ -82,6 +82,45 @@ class DisplayTest(unittest.TestCase):
                 self.assertEqual(tuple(screen.get_at((x, y)))[:3], expected, (x, y))
         self.assertEqual(tuple(screen.get_at((0, 3)))[:3], (0, 0, 0))
 
+    def test_opaque_backdrop_replaces_only_the_covered_canvas_rows(self) -> None:
+        # Подробный фон закрывает середину холста: её холст не увеличивается, а полосы сверху и снизу — как обычно.
+        canvas = self.display.canvas
+        for factor_size in (config.WINDOW_SIZE, (1920, 1200)):
+            pygame.display.set_mode(factor_size, pygame.RESIZABLE)
+            canvas.fill((10, 20, 30))
+            canvas.fill((200, 100, 50), (0, 0, 320, 12))
+            canvas.fill((50, 100, 200), (0, 168, 320, 12))
+            backdrop = pygame.Surface((640, 312))
+            backdrop.fill((1, 2, 3))
+            backdrop.fill((250, 250, 0), (0, 0, 2, 2))
+            self.display.hires.sprite(backdrop, pygame.Rect(0, 12, 320, 156), opaque=True)
+            self.assertEqual(self.display.hires.backdrop_rows(), (12, 168))
+            self.display.present()
+            screen = pygame.display.get_surface()
+            viewport = self.display.transform().viewport
+            scale = viewport.width // 320
+            self.assertEqual(tuple(screen.get_at((viewport.left + 5, viewport.top + 5)))[:3], (200, 100, 50))
+            self.assertEqual(tuple(screen.get_at((viewport.left + 5, viewport.top + 179 * scale)))[:3], (50, 100, 200))
+            self.assertEqual(tuple(screen.get_at((viewport.left + 3 * scale, viewport.top + 100 * scale)))[:3], (1, 2, 3))
+            # Слева вверху фона светлая клетка 2×2 пикселя картинки (одна клетка холста); соседняя — тёмная.
+            self.assertEqual(tuple(screen.get_at((viewport.left + 1, viewport.top + 12 * scale + 1)))[:3], (250, 250, 0))
+            self.assertEqual(tuple(screen.get_at((viewport.left + scale + 1, viewport.top + 12 * scale + 1)))[:3], (1, 2, 3))
+
+    def test_backdrop_rows_only_for_a_full_width_opaque_first_sprite(self) -> None:
+        layer = self.display.hires
+        picture = pygame.Surface((640, 312))
+        self.assertIsNone(layer.backdrop_rows())
+        layer.sprite(picture, pygame.Rect(0, 12, 320, 156))
+        self.assertIsNone(layer.backdrop_rows())  # непрозрачный флаг не задан
+        layer.clear()
+        layer.sprite(picture, pygame.Rect(10, 12, 300, 156), opaque=True)
+        self.assertIsNone(layer.backdrop_rows())  # не во всю ширину
+        layer.clear()
+        layer.fill((0, 0, 0), pygame.Rect(0, 0, 5, 5))
+        layer.sprite(picture, pygame.Rect(0, 12, 320, 156), opaque=True)
+        self.assertIsNone(layer.backdrop_rows())  # фон не первый: под ним что-то уже нарисовано
+        layer.clear()
+
     def test_present_adds_bars_for_non_16_9_window(self) -> None:
         # 1200×500: целый масштаб ×2, картинка 640×360 с полями со всех сторон.
         pygame.display.set_mode((1200, 500), pygame.RESIZABLE)

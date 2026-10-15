@@ -99,14 +99,16 @@ class Display:
             screen.fill(config.LETTERBOX_COLOR, bar)
 
         if viewport.width and viewport.height:
-            self.scale_canvas(screen.subsurface(viewport))
+            # Если сцена закрыла середину холста своим непрозрачным подробным фоном, увеличивать её
+            # холст там незачем: достаточно полос сверху и снизу.
+            self.scale_canvas(screen.subsurface(viewport), self.hires.backdrop_rows())
             # Персонажи и текст — той же трансформацией, что и холст: на свои места мира.
             self.hires.render(screen, transform)
         self.hires.clear()
 
         pygame.display.flip()
 
-    def scale_canvas(self, target: pygame.Surface) -> None:
+    def scale_canvas(self, target: pygame.Surface, skip: tuple[int, int] | None = None) -> None:
         """Увеличивает холст ближайшим соседом во всю поверхность target (область окна).
 
         transform.scale берёт ближайший пиксель без сглаживания (в отличие от
@@ -132,5 +134,15 @@ class Display:
                 for y in range(canvas_h)
                 for copy in range(factor)
             ]
-        pygame.transform.scale(self.canvas, (width, canvas_h), self._rows)
-        target.blits(self._row_blits, doreturn=False)
+        if skip is None:
+            pygame.transform.scale(self.canvas, (width, canvas_h), self._rows)
+            target.blits(self._row_blits, doreturn=False)
+            return
+        # Строки холста top…bottom закрыты фоном слоя окна: растягиваем и копируем только остальные.
+        top, bottom = skip
+        for first, last in ((0, top), (bottom, canvas_h)):
+            if last > first:
+                band = pygame.Rect(0, first, canvas_w, last - first)
+                pygame.transform.scale(self.canvas.subsurface(band), (width, last - first),
+                                       self._rows.subsurface(pygame.Rect(0, first, width, last - first)))
+                target.blits(self._row_blits[first * factor:last * factor], doreturn=False)

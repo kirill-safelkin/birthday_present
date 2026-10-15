@@ -34,7 +34,6 @@ from game.story.intro_scene import IntroScene  # noqa: E402
 from game.world.hub import (  # noqa: E402
     CHUCHMEK_POSITION,
     CHUCHMEK_RADIUS,
-    FLOWER_BEDS,
     GRASS_COLOR,
     GRASS_DARK_COLOR,
     HUB_SCENE,
@@ -45,7 +44,6 @@ from game.world.hub import (  # noqa: E402
     LEO_RADIUS,
     MOSAIC_CENTER,
     MOSAIC_RADIUS,
-    TREES,
     PORTALS,
     SPAWN,
     SPRITE_SIZE,
@@ -55,6 +53,7 @@ from game.world.hub import (  # noqa: E402
     WALK_SPEED,
     HubScene,
 )
+from game.world import hub_scenery  # noqa: E402
 from game.world.progress import GameProgress  # noqa: E402
 
 DT = 1 / 60
@@ -81,18 +80,47 @@ def press(hub: HubScene, code: int, scancode: int = 0) -> None:
     hub.handle_event(key(code, scancode, pygame.KEYUP))
 
 
+def walk_route(hub: HubScene, waypoints: list[tuple[int, int]]) -> None:
+    """Ведёт Алису клавишами по точкам поворота (по одной оси за раз), как игрок.
+
+    Площадь — не пустое поле: стол, деревья и предметы обходятся по этим маршрутам от точки появления."""
+    for target in waypoints:
+        for axis in (0, 1):
+            start = (hub.alice.x, hub.alice.y)[axis]
+            goal = target[axis]
+            if abs(goal - start) < 0.5:
+                continue
+            forward = goal > start
+            code = (pygame.K_RIGHT if forward else pygame.K_LEFT) if axis == 0 else (pygame.K_DOWN if forward else pygame.K_UP)
+            hub.handle_event(key(code))
+            for _ in range(3000):
+                before = (hub.alice.x, hub.alice.y)[axis]
+                hub.update(DT)
+                now = (hub.alice.x, hub.alice.y)[axis]
+                if ((now >= goal) if forward else (now <= goal)) or now == before:
+                    break
+            hub.handle_event(key(code, event_type=pygame.KEYUP))
+    hub.alice.release_controls()
+
+
+# Маршруты от точки появления до входов, Чучмека и Лео (точки поворота; подробности — tests/test_hub_scenery.py).
+ROUTE_TO = {
+    "sushi": [(44, 160), (44, 97)],
+    "cakes": [(276, 160), (276, 97)],
+    "forms": [(86, 160), (86, 85), (160, 85)],
+    "chuchmek": [(236, 160), (236, 104), (224, 104)],
+    "leo": [(86, 160), (86, 86), (LEO_POINT[0], 86)],
+}
+OPEN_SPOT = (270, 120)  # вокруг свободно на два десятка шагов во все стороны
+
+
 def walk_to_portal(hub: HubScene, trial_id: str) -> None:
-    """Доводит Алису от точки появления до портала клавишами, как игрок."""
-    if trial_id == "forms":
-        hold(hub, [pygame.K_UP], 3.0)
-        return
-    hold(hub, [pygame.K_UP], (SPAWN[1] - 95) / WALK_SPEED)
-    hold(hub, [pygame.K_LEFT if trial_id == "sushi" else pygame.K_RIGHT], 3.0)
+    """Доводит Алису от точки появления до дерева-входа клавишами, как игрок."""
+    walk_route(hub, ROUTE_TO[trial_id])
 
 
 def walk_to_chuchmek(hub: HubScene) -> None:
-    hold(hub, [pygame.K_UP], (SPAWN[1] - 100) / WALK_SPEED)
-    hold(hub, [pygame.K_RIGHT], (CHUCHMEK_POSITION[0] - SPAWN[0]) / WALK_SPEED)
+    walk_route(hub, ROUTE_TO["chuchmek"])
 
 
 class HubTestCase(unittest.TestCase):
@@ -171,13 +199,13 @@ class MovementTest(HubTestCase):
         for (code, scancode), direction, (sx, sy) in cases:
             with self.subTest(key=code):
                 hub = HubScene()
-                hub.alice.set_position(160, 106)  # середина площади: вокруг свободно
+                hub.alice.set_position(*OPEN_SPOT)  # вокруг свободно
                 hub.handle_event(key(code, scancode))
                 self.assertEqual(hub.alice.direction, direction)
                 self.assertEqual(hub.alice.state, WALK)
                 for _ in range(15):
                     hub.update(DT)
-                moved = (hub.alice.x - 160, hub.alice.y - 106)
+                moved = (hub.alice.x - OPEN_SPOT[0], hub.alice.y - OPEN_SPOT[1])
                 self.assertAlmostEqual(moved[0], sx * WALK_SPEED * 0.25)
                 self.assertAlmostEqual(moved[1], sy * WALK_SPEED * 0.25)
                 hub.handle_event(key(code, scancode, pygame.KEYUP))
@@ -188,18 +216,18 @@ class MovementTest(HubTestCase):
                 self.assertEqual((hub.alice.x, hub.alice.y), position)
 
     def test_diagonal_speed_is_the_same(self) -> None:
-        self.hub.alice.set_position(160, 106)
+        self.hub.alice.set_position(*OPEN_SPOT)
         self.hub.handle_event(key(pygame.K_UP))
         self.hub.handle_event(key(pygame.K_RIGHT))
         for _ in range(30):
             self.hub.update(DT)
-        self.assertAlmostEqual(math.dist((160, 106), (self.hub.alice.x, self.hub.alice.y)), WALK_SPEED * 0.5)
+        self.assertAlmostEqual(math.dist(OPEN_SPOT, (self.hub.alice.x, self.hub.alice.y)), WALK_SPEED * 0.5)
 
     def test_movement_does_not_depend_on_frame_rate(self) -> None:
         results = []
         for dt in (1 / 144, 1 / 60, 1 / 30, 0.1):
             hub = HubScene()
-            hold(hub, [pygame.K_UP, pygame.K_LEFT], 3.0, dt)  # упрётся в клумбу/портал и проскользит
+            hold(hub, [pygame.K_UP, pygame.K_LEFT], 3.0, dt)  # упрётся в дерево и проскользит
             results.append((hub.alice.x, hub.alice.y))
         for x, y in results:
             self.assertAlmostEqual(x, results[0][0], delta=1.0)
@@ -227,27 +255,30 @@ class MovementTest(HubTestCase):
                     self.assertLessEqual(rect.right, config.LOGICAL_SIZE[0])
 
     def test_obstacles_stop_alice(self) -> None:
-        self.hub.alice.set_position(80, 92)
+        sushi = PORTAL["sushi"].rect
+        self.hub.alice.set_position(sushi.right + 14, 70)
         hold(self.hub, [pygame.K_LEFT], 3.0)
-        self.assertAlmostEqual(self.hub.alice.x, PORTAL["sushi"].rect.right + 6)  # уперлась в портал
-        self.hub.alice.set_position(71, 170 - 40)  # над клумбой
-        hold(self.hub, [pygame.K_DOWN], 3.0)
-        self.assertAlmostEqual(self.hub.alice.y, 138)  # ноги на верхнем крае клумбы
+        self.assertAlmostEqual(self.hub.alice.x, sushi.right + 6)  # уперлась в крону и ствол дерева суши
+        table_bottom = max(rect.bottom for rect in hub_scenery.table().footprint)
+        self.hub.alice.set_position(160, 160)  # под столом мозаики
+        hold(self.hub, [pygame.K_UP], 3.0)
+        self.assertAlmostEqual(self.hub.alice.y, table_bottom + 6)  # упёрлась в основание стола
         self.hub.alice.set_position(214, 110)  # под Чучмеком
         hold(self.hub, [pygame.K_UP], 3.0)
         self.assertGreaterEqual(self.hub.alice.y - 6, 81 - 1e-6)  # сквозь Чучмека не проходит
 
     def test_diagonal_against_a_wall_slides_instead_of_sticking(self) -> None:
-        # Сбоку от портала суши: влево упирается, вверх скользит вдоль боковой грани.
-        self.hub.alice.set_position(46, 98)
+        # Сбоку от дерева суши: влево упирается, вверх скользит вдоль его края.
+        block = PORTAL["sushi"].rect
+        self.hub.alice.set_position(block.right + 8, 80)
         hold(self.hub, [pygame.K_LEFT, pygame.K_UP], 0.5)
-        self.assertEqual(self.hub.alice.x, PORTAL["sushi"].rect.right + 6)
-        self.assertLess(self.hub.alice.y, 98 - 15)  # за полсекунды заметно поднялась вдоль грани
-        # Под порталом: вверх упирается, влево скользит вдоль нижней грани.
-        self.hub.alice.set_position(46, 120)
+        self.assertEqual(self.hub.alice.x, block.right + 6)
+        self.assertLess(self.hub.alice.y, 80 - 15)  # за полсекунды заметно поднялась вдоль края
+        # Под деревом: вверх упирается, влево скользит вдоль его низа.
+        self.hub.alice.set_position(block.right - 6, block.bottom + 14)
         hold(self.hub, [pygame.K_LEFT, pygame.K_UP], 1.5)
-        self.assertEqual(self.hub.alice.y, PORTAL["sushi"].rect.bottom + 6)
-        self.assertLess(self.hub.alice.x, 30)
+        self.assertEqual(self.hub.alice.y, block.bottom + 6)
+        self.assertLess(self.hub.alice.x, block.left + 20)
         self.assertTrue(self.hub.collision.is_free(self.hub.alice.x, self.hub.alice.y))
 
     def test_keys_released_stop_movement(self) -> None:
@@ -276,26 +307,27 @@ class PortalTest(HubTestCase):
         self.assertIsNone(self.hub.active_trial)
         self.assertEqual(self.hub.status_text(), "Стрелки/WASD — идти   E — действие")
 
-    def test_portal_works_from_any_side_it_can_be_touched(self) -> None:
-        # Вплотную к порталу — сверху, снизу или сбоку — подсказка та же, что у дорожки.
+    def test_entrance_works_next_to_the_hole_and_not_at_the_far_side_of_the_tree(self) -> None:
+        # У отверстия — вход, а у кроны и ствола в стороне от него — ничего.
         for portal in PORTALS:
-            rect = portal.rect
-            spots = [(rect.centerx, rect.top), (rect.centerx, rect.bottom + 6),
-                     (rect.left - 6, rect.centery + 3), (rect.right + 6, rect.centery + 3)]
-            touched = 0
-            for x, y in spots:
-                if not self.hub.collision.is_free(x, y):
-                    continue  # с этой стороны к порталу не подойти (край площади или дорожка)
-                with self.subTest(trial=portal.id, spot=(x, y)):
-                    self.hub.alice.set_position(x, y)
+            x, y = portal.point
+            reach = portal.radius - 2
+            spots = [(x, y), (x - reach, y), (x + reach, y), (x, y + reach)]
+            with_prompt = 0
+            for sx, sy in spots:
+                if not self.hub.collision.is_free(sx, sy):
+                    continue
+                with self.subTest(trial=portal.id, spot=(sx, sy)):
+                    self.hub.alice.set_position(sx, sy)
                     target = self.hub.nearby()
                     self.assertIsNotNone(target)
                     self.assertEqual((target.kind, target.target), ("portal", portal.id))
-                    touched += 1
-            self.assertGreaterEqual(touched, 1)
-        portal = PORTALS[0]  # а в паре шагов от портала — ничего
-        self.hub.alice.set_position(portal.rect.centerx, portal.rect.top - 10)
-        self.assertIsNone(self.hub.nearby())
+                    with_prompt += 1
+            self.assertGreaterEqual(with_prompt, 3)
+            for far in ((portal.rect.left - 8, portal.rect.centery), (portal.rect.right + 8, portal.rect.centery)):
+                with self.subTest(trial=portal.id, far=far):
+                    self.hub.alice.set_position(*far)
+                    self.assertIsNone(self.hub.nearby())
 
     def test_interaction_radius(self) -> None:
         for portal in PORTALS:
@@ -510,8 +542,7 @@ class ChuchmekChoiceTest(HubTestCase):
 
 class LeoTest(HubTestCase):
     def walk_to_leo(self, hub: HubScene) -> None:
-        hold(hub, [pygame.K_UP], (SPAWN[1] - LEO_POINT[1]) / WALK_SPEED)
-        hold(hub, [pygame.K_LEFT], (SPAWN[0] - LEO_POINT[0]) / WALK_SPEED)
+        walk_route(hub, ROUTE_TO["leo"])
 
     def test_sprite_is_the_manifest_frame_scaled_by_nearest_neighbour(self) -> None:
         frame = load_character_sprites(CHARACTERS_DIR / "leo").frame(LEO_FRAME).image
@@ -544,20 +575,24 @@ class LeoTest(HubTestCase):
         self.assertTrue(self.hub.collision.is_free(*LEO_POSITION))  # корзинка — не препятствие
         self.assertTrue(self.hub.collision.is_free(*LEO_POINT))
 
-    def test_basket_stays_off_paths_portals_beds_trees_and_mosaic(self) -> None:
+    def test_basket_stays_off_paths_trees_signs_and_the_table(self) -> None:
         rect = self.hub.leo_rect().union(pygame.Rect(LEO_POSITION[0] - 17, LEO_POSITION[1] - 13, 34, 15))
         background = self.hub._background
         for x in range(rect.left, rect.right):
-            for y in range(rect.top, rect.bottom):  # только трава: ни дорожек, ни мозаики, ни клумб
+            for y in range(rect.top, rect.bottom):  # только трава: ни тропинок, ни площадки, ни цветов
                 self.assertIn(tuple(background.get_at((x, y)))[:3], (GRASS_COLOR, GRASS_DARK_COLOR), (x, y))
         for portal in PORTALS:
             self.assertFalse(rect.colliderect(portal.rect.inflate(8, 8)), portal.id)
             self.assertFalse(rect.colliderect(self.hub.plaque_rect(portal)), portal.id)
-        for bed in FLOWER_BEDS:
-            self.assertFalse(rect.colliderect(bed))
-        for x, y in TREES:
-            self.assertFalse(rect.colliderect(pygame.Rect(x - 10, y - 24, 21, 25)))
-        self.assertGreater(math.dist(LEO_POSITION, MOSAIC_CENTER), 28 + 10)  # за краем мозаичного круга
+            self.assertFalse(rect.colliderect(portal.door), portal.id)
+        for trial_id in TRIAL_SCENES:
+            tree = {"sushi": hub_scenery.sushi_tree, "forms": hub_scenery.forms_tree, "cakes": hub_scenery.cakes_tree}[trial_id]()
+            self.assertFalse(rect.colliderect(tree.spec.block), trial_id)
+        for prop_rect in hub_scenery.prop_obstacles():
+            self.assertFalse(rect.colliderect(prop_rect), prop_rect)
+        for part in hub_scenery.table().footprint:
+            self.assertFalse(rect.colliderect(part.inflate(8, 8)))
+        self.assertGreater(math.dist(LEO_POSITION, MOSAIC_CENTER), 28 + 10)  # далеко от стола мозаики
 
     def test_leo_zone_does_not_steal_other_targets(self) -> None:
         points = [portal.point for portal in PORTALS]
@@ -594,7 +629,7 @@ class LeoTest(HubTestCase):
 
     def test_alice_walks_past_the_basket_and_leo_does_not_move(self) -> None:
         hub = HubScene()
-        hub.alice.set_position(LEO_POSITION[0] - 30, LEO_POSITION[1] - 4)
+        hub.alice.set_position(LEO_POSITION[0] - 14, LEO_POSITION[1])
         rect = hub.leo_rect()
         hold(hub, [pygame.K_RIGHT], 60 / WALK_SPEED)  # прямо сквозь место корзинки
         self.assertGreater(hub.alice.x, LEO_POSITION[0] + 20)
@@ -629,11 +664,10 @@ class DrawingTest(HubTestCase):
         for text in statuses:
             self.assertLessEqual(font.size(text)[0], width - 8, text)
         self.assertLessEqual(font.size("Центральная площадь")[0] + font.size(self.hub.fragments_text())[0], width - 12)
-        for portal in PORTALS:
-            plaque = pygame.Rect((0, 0), font.size(portal.name)).inflate(6, 2)
-            plaque.center = portal.sign_center
-            self.assertTrue(pygame.Rect((0, 0), config.LOGICAL_SIZE).contains(plaque), portal.id)
-            self.assertGreaterEqual(plaque.top, HUD_HEIGHT)
+        for portal in PORTALS:  # надпись пиксельным шрифтом (без слоя окна) помещается на табличке дерева
+            self.assertLessEqual(font.size(portal.sign)[0] + 4, portal.sign_rect.width, portal.id)
+            self.assertTrue(pygame.Rect((0, 0), config.LOGICAL_SIZE).contains(portal.sign_rect), portal.id)
+            self.assertGreaterEqual(portal.sign_rect.top, HUD_HEIGHT)
 
 
 class Base(Scene):

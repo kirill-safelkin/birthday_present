@@ -1,28 +1,34 @@
-"""Центральная площадь: первая управляемая локация, откуда Алиса заходит в три испытания.
+"""Центральная площадь: волшебная лесная поляна, откуда Алиса заходит в три испытания.
 
-Оформление временное — геометрия, дорожки и подписи; настоящий дизайн появится позже.
+Каждое испытание — своё огромное дерево с тёмным отверстием в стволе: дерево суши слева,
+формуляров вверху и тортиков справа. Алиса подходит к отверстию снизу и жмёт E или Enter:
+рядом с входом (PORTALS[i].point) подсвечивается дупло и открывается испытание. Ствол и крона —
+препятствие (PORTALS[i].rect), но у входа остаётся свободный коврик.
 Используются существующие системы: Character (движение и анимации), CollisionMap
 (границы и препятствия), DialogueController/DialogueBox (реплики), SceneManager (переходы).
+Внешний вид нарисован кодом: земля — game/world/hub_ground.py, деревья, стол, мелкие предметы —
+game/world/hub_scenery.py; здесь их порядок, свечение, огоньки и взаимодействия.
 
-Портал открывает сцену испытания (TRIAL_SCENES) через менеджер, если она
-зарегистрирована; иначе Чучмек объясняет, что портал не готов. Фрагменты выдают сами
-испытания через общий GameProgress, площадь их только показывает и, вернувшись из
-испытания, сообщает итог.
+Вход открывает сцену испытания (TRIAL_SCENES) через менеджер, если она зарегистрирована;
+иначе Чучмек объясняет, что вход не готов. Фрагменты выдают сами испытания через общий
+GameProgress, площадь их только показывает и, вернувшись из испытания, сообщает итог.
 
-Мозаика в центре площади собирает фрагменты: у каждого пройденного испытания — свой
-символ в ней. Когда собраны все три, мозаика светится, и E рядом с ней открывает финал
-(FINALE_SCENE). Сам по себе третий фрагмент финал не запускает — только игрок.
+В центре стоит круглый стол мозаики: у каждого пройденного испытания на нём своя плитка-фрагмент
+(источник правды — GameProgress, а не отдельный счётчик), пустые гнёзда показывают, чего не хватает.
+Когда собраны все три, мозаика сияет, и E рядом со столом открывает финал (FINALE_SCENE).
+Сам по себе третий фрагмент финал не запускает — только игрок.
 
-Слева от мозаики, напротив Чучмека, в корзинке спит Лео — главный инспектор праздничного
-настроения. Он не ходит и не мешает: корзинка стоит на траве в стороне от дорожек, порталов
-и клумб и не является препятствием (коллизии площади те же, что без него). Рядом с ней E
-показывает одну короткую реплику и сразу возвращает управление; прогресс это не меняет.
+Слева от стола, напротив Чучмека, в корзинке спит Лео — главный инспектор праздничного
+настроения. Он не ходит и не мешает: корзинка стоит на траве в стороне от тропинок и деревьев
+и не является препятствием. Рядом с ней E показывает одну короткую реплику и сразу возвращает
+управление; прогресс это не меняет.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import pygame
@@ -37,13 +43,20 @@ from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
 from game.graphics.hires import HiResLayer, logical_target
 from game.graphics.sprite_manifest import CHARACTERS_DIR, try_load_character_sprites
 from game.story.hub_dialogue import CHUCHMEK_TALK, CHUCHMEK_TALK_AGAIN, PORTAL_NOT_READY, all_scripts, leo_script
+from game.world import hub_scenery
 from game.world.character import Character
 from game.world.collision import CollisionMap
+from game.world.hub_ground import (  # noqa: F401  (цвета земли нужны и тестам, и другим сценам)
+    GRASS_COLOR,
+    GRASS_DARK_COLOR,
+    render_ground,
+)
+from game.world.hub_scenery import MOSAIC_SLOTS, SLOT_SIZE, TABLE_CENTER, TREE_SPECS, WARM_LIGHT
 from game.world.progress import TRIAL_NAMES, TRIALS, GameProgress
 
 HUB_SCENE = "hub"  # имя площади в SceneManager
 FINALE_SCENE = "finale"  # последняя страница сказки: её открывает мозаика при всех фрагментах
-# Имена будущих сцен испытаний. Пока они не зарегистрированы, порталы закрыты.
+# Имена сцен испытаний. Пока сцена не зарегистрирована, вход закрыт.
 TRIAL_SCENES = {trial_id: f"trial_{trial_id}" for trial_id in TRIALS}
 
 WIDTH, HEIGHT = config.LOGICAL_SIZE
@@ -54,66 +67,55 @@ STATUS_TOP = 168  # нижняя полоса: подсказки; персон�
 # Где могут стоять ноги персонажа: между полосами интерфейса, и так, чтобы кадр шириной
 # SPRITE_SIZE не вылезал за края экрана (ноги уже кадра на SPRITE_SIZE/2 − 6 с каждой стороны).
 WALK_BOUNDS = pygame.Rect(10, 44, WIDTH - 20, STATUS_TOP - 4 - 44)
-SPAWN = (160, 158)  # точка появления Алисы — внизу площади
+SPAWN = (160, 160)  # точка появления Алисы — внизу площади
 TOAST_SECONDS = 3.0
 TOAST_PRIORITY_SECONDS = 2.0  # столько свежее сообщение (например, итог испытания) важнее подсказки у цели
-PORTAL_TOUCH = 6  # вплотную к порталу с любой стороны (по ногам Алисы) — тоже можно войти
-MOSAIC_CENTER = (160, 106)  # мозаика в центре площади
-MOSAIC_RADIUS = 12  # на таком расстоянии от центра (по ногам Алисы) с ней можно взаимодействовать
-# Гнёзда фрагментов в мозаике: каждый — со стороны своего портала.
-MOSAIC_SLOTS = {"sushi": (150, 108), "forms": (160, 98), "cakes": (170, 108)}
+MOSAIC_CENTER = (160, 140)  # где стоит Алиса, чтобы обратиться к столу мозаики (перед ним)
+MOSAIC_RADIUS = 12  # на таком расстоянии от этой точки (по ногам Алисы) с ней можно взаимодействовать
+FRAGMENT_POP_SECONDS = 1.4  # сколько искрится только что положенный на стол фрагмент
 
 
 @dataclass(frozen=True)
 class Portal:
-    """Вход в испытание: сам портал (препятствие), точка, у которой с ним можно взаимодействовать,
-    и табличка с названием."""
+    """Вход в испытание — дерево с отверстием в стволе.
+
+    rect — ствол и крона, препятствие для ног; door — отверстие (холст); point — где стоят ноги
+    Алисы у входа, а radius — с какого расстояния от этой точки он открывается; sign — надпись
+    на табличке (sign_rect — её место на холсте)."""
 
     id: str
     rect: pygame.Rect
+    door: pygame.Rect
     point: tuple[int, int]
     radius: int
-    sign_center: tuple[int, int]
-    color: config.Color
-    glow: config.Color
+    sign: str
+    sign_rect: pygame.Rect
 
     @property
     def name(self) -> str:
         return TRIAL_NAMES[self.id]
 
 
-PORTALS = (
-    Portal("sushi", pygame.Rect(8, 70, 30, 30), (48, 92), 16, (23, 62), (196, 72, 66), (250, 170, 150)),
-    Portal("forms", pygame.Rect(144, 14, 32, 30), (160, 54), 18, (114, 22), (88, 110, 160), (176, 196, 236)),
-    Portal("cakes", pygame.Rect(282, 70, 30, 30), (272, 92), 16, (297, 62), (214, 120, 170), (252, 196, 226)),
+PORTALS = tuple(
+    Portal(trial_id, spec.block, spec.door, spec.stand, spec.radius, spec.sign_text, spec.sign)
+    for trial_id, spec in TREE_SPECS.items()
 )
-CHUCHMEK_POSITION = (214, 80)  # недалеко от центра, выше дорожки к тортам
+CHUCHMEK_POSITION = (214, 80)  # недалеко от центра, выше тропинки к тортикам
 CHUCHMEK_RADIUS = 24
 CHUCHMEK_OBSTACLE = pygame.Rect(206, 74, 16, 7)
-# Лео в корзинке: середина её дна. Зеркально Чучмеку, на траве между дорожками к суши и к формулярам.
-LEO_POSITION = (108, 78)
+CHUCHMEK_AREA = pygame.Rect(198, 52, 32, 36)  # здесь земля — простая трава
+# Лео в корзинке: середина её дна. Зеркально Чучмеку, на траве между тропинками к суши и к формулярам.
+LEO_POSITION = (104, 84)
 # Откуда Алиса заглядывает в корзинку: справа, со стороны ног Лео (голова у кадра слева) —
-# так она его не заслоняет. Дотянуться можно и с края дорожки к суши.
-LEO_POINT = (134, 76)
+# так она его не заслоняет. Дотянуться можно и с края тропинки.
+LEO_POINT = (130, 86)
 LEO_RADIUS = 16
 LEO_FRAME = "sleep_blanket"  # «спит под одеялом» из манифеста leo: лежит, ему не нужна ходьба
 BASKET_BACK = pygame.Rect(LEO_POSITION[0] - 15, LEO_POSITION[1] - 12, 30, 9)  # проём корзинки
 BASKET_FRONT = pygame.Rect(LEO_POSITION[0] - 16, LEO_POSITION[1] - 7, 32, 8)  # передняя стенка поверх одеяла
-# Декорации: стволы деревьев и клумбы — препятствия в стороне от дорожек.
-TREES = ((62, 58), (258, 58))
-FLOWER_BEDS = (pygame.Rect(54, 138, 34, 12), pygame.Rect(232, 138, 34, 12))
+# Весь участок Лео — кадр и корзинка: на нём земля остаётся простой травой.
+LEO_AREA = pygame.Rect(LEO_POSITION[0] - 17, LEO_POSITION[1] - 34, 34, 36)
 
-GRASS_COLOR = (150, 186, 120)
-GRASS_DARK_COLOR = (136, 172, 108)
-PATH_COLOR = (222, 202, 160)
-PATH_EDGE_COLOR = (196, 172, 128)
-PLAZA_COLOR = (232, 216, 180)
-MOSAIC_COLOR = (206, 178, 134)
-SPAWN_COLOR = (246, 232, 196)
-BED_COLOR = (124, 92, 66)
-FLOWER_COLORS = ((232, 120, 140), (250, 214, 110), (180, 150, 230))
-TREE_TRUNK_COLOR = (120, 88, 62)
-TREE_LEAF_COLOR = (92, 140, 84)
 BASKET_COLOR = (196, 146, 92)
 BASKET_DARK_COLOR = (150, 104, 62)
 BASKET_INSIDE_COLOR = (238, 220, 196)
@@ -122,17 +124,26 @@ SLEEP_MARK_COLOR = (250, 250, 255)
 HUD_COLOR = (44, 38, 58)
 HUD_TEXT_COLOR = (240, 230, 206)
 HUD_ACCENT_COLOR = (250, 206, 108)
-SIGN_COLOR = (150, 110, 74)
-SIGN_EDGE_COLOR = (98, 70, 48)
 SIGN_TEXT_COLOR = (252, 240, 214)
-PORTAL_INNER_COLOR = (54, 46, 72)
 MARK_COLOR = (255, 236, 140)
+# Свет в дупле каждого дерева (цвет) и свечение собранной мозаики.
+DOOR_GLOW_COLORS = {"sushi": (255, 168, 110), "forms": (190, 212, 255), "cakes": (255, 186, 214)}
+MOSAIC_GOLD = (250, 206, 108)
 
 # Надписи в разрешении окна (слой высокого разрешения); размер — в логических пикселях.
 TEXT_SIZE = 8
 HUD_STYLE = TextStyle(TEXT_SIZE, HUD_TEXT_COLOR, background=HUD_COLOR)  # полосы вверху и внизу
 FRAGMENTS_STYLE = TextStyle(TEXT_SIZE, HUD_ACCENT_COLOR, background=HUD_COLOR)
-SIGN_STYLE = TextStyle(TEXT_SIZE, SIGN_TEXT_COLOR)
+# Вывески на деревьях: жирные буквы с тенью, чтобы читались и в окне 960×540, и на весь экран.
+SIGN_STYLE = TextStyle(TEXT_SIZE, SIGN_TEXT_COLOR, bold=True, shadow=(40, 24, 30), shadow_offset=0.5)
+
+# Светлячки: центр кружения (x, y), размах по осям, скорость и фаза.
+FIREFLIES = (
+    (26, 70, 10, 6, 0.55, 0.0), (68, 62, 9, 7, 0.45, 1.7), (40, 108, 12, 4, 0.5, 3.1), (86, 100, 8, 5, 0.6, 4.4),
+    (250, 68, 10, 6, 0.5, 0.9), (296, 64, 9, 7, 0.42, 2.5), (262, 108, 12, 4, 0.58, 4.0), (300, 112, 7, 5, 0.47, 5.2),
+    (140, 58, 8, 6, 0.5, 1.1), (184, 56, 9, 5, 0.44, 3.6), (118, 112, 6, 8, 0.52, 2.2), (204, 112, 6, 8, 0.46, 5.5),
+    (160, 138, 16, 4, 0.4, 0.4), (60, 148, 12, 6, 0.5, 3.3), (262, 148, 12, 6, 0.48, 1.9),
+)
 
 
 @dataclass(frozen=True)
@@ -159,8 +170,8 @@ class HubScene(Scene):
     def __init__(self, progress: GameProgress | None = None, characters_dir: str | Path = CHARACTERS_DIR) -> None:
         self.progress = progress if progress is not None else GameProgress()
         root = Path(characters_dir)
-        obstacles = [portal.rect for portal in PORTALS] + [CHUCHMEK_OBSTACLE] + list(FLOWER_BEDS)
-        obstacles += [pygame.Rect(x - 3, y - 4, 6, 4) for x, y in TREES]
+        obstacles = [portal.rect for portal in PORTALS] + [CHUCHMEK_OBSTACLE]
+        obstacles += list(hub_scenery.table().footprint) + hub_scenery.prop_obstacles()
         self.collision = CollisionMap(WALK_BOUNDS, obstacles)
 
         alice_sprites = try_load_character_sprites(root / "alice")
@@ -198,7 +209,10 @@ class HubScene(Scene):
         self._text_cache: dict[tuple[str, config.Color], pygame.Surface] = {}
         self._fonts = TextFonts()
         self.text_metrics = self._fonts.metrics(HUD_STYLE)  # все надписи площади одного размера
-        self._background = _render_background()
+        self._background = _ground()
+        self._backdrop = _backdrop()
+        self._seen_fragments = set(self.progress.completed)  # какие плитки уже лежат на столе
+        self._placed_at: dict[str, float] = {}  # когда на стол лёг свежий фрагмент (время площади)
         self._trial_in_progress: str | None = None  # испытание, в которое Алиса только что ушла
         self._trial_scene: Scene | None = None
         self._finale_scene: Scene | None = None  # открытый финал (не больше одного)
@@ -211,12 +225,9 @@ class HubScene(Scene):
         candidates: list[tuple[float, Interaction]] = []
         x, y = self.alice.x, self.alice.y
         for portal in PORTALS:
-            # У дорожки (point) — как раньше; а подойдя к порталу сбоку, сверху или снизу,
-            # Алиса тоже может войти: портал отзывается, когда она стоит к нему вплотную.
+            # Вход открывается у самого отверстия: на коврике под ним и в нескольких шагах от него.
             distance = math.dist((x, y), portal.point)
-            touch = _distance_to_rect((x, y), portal.rect)
-            if distance <= portal.radius or touch <= PORTAL_TOUCH:
-                distance = min(distance, touch)
+            if distance <= portal.radius:
                 done = " (пройдено)" if self.progress.is_completed(portal.id) else ""
                 prompt = f"{portal.name}{done}   E — войти"
                 candidates.append((distance, Interaction("portal", portal.id, prompt)))
@@ -365,6 +376,10 @@ class HubScene(Scene):
 
     def update(self, dt: float) -> None:
         self.time += dt
+        for trial_id in self.progress.completed:  # свежий фрагмент ложится на стол с искрами
+            if trial_id not in self._seen_fragments:
+                self._seen_fragments.add(trial_id)
+                self._placed_at[trial_id] = self.time
         if self.dialogue is not None:
             self.dialogue.update(dt)
         self.alice.update(dt)
@@ -377,26 +392,53 @@ class HubScene(Scene):
     # --- Отрисовка ---
 
     def draw(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
-        """Рисует площадь на холсте; со слоем hires персонажи и надписи уходят в него
-        (см. game/graphics/hires.py), а порядок слоёв остаётся тем же."""
+        """Рисует площадь на холсте; со слоем hires деревья, стол, предметы и персонажи уходят в него
+        картинками вдвое подробнее холста (см. game/graphics/hires.py), а порядок слоёв остаётся тем же:
+        всё, что стоит на земле, рисуется по линии земли — ближние к игроку поверх дальних."""
         surface.blit(self._background, (0, 0))
         target = self.nearby() if self.dialogue is None else None
-        self._draw_mosaic(surface, target)
-        # Всё, что стоит на площади, рисуется по высоте ног: ближние к игроку — поверх дальних.
-        drawables = [
-            (portal.rect.bottom, lambda p=portal: self._draw_portal(surface, p, target, hires)) for portal in PORTALS
-        ]
-        drawables += [(y, lambda t=(x, y): self._draw_tree(surface, t, hires)) for x, y in TREES]
-        drawables.append((self.chuchmek.y, lambda: self._draw_chuchmek(surface, target, hires)))
-        drawables.append((LEO_POSITION[1], lambda: self._draw_leo(surface, target, hires)))
-        drawables.append((self.alice.y + 0.1, lambda: self.alice.draw(surface, hires)))
-        for _, draw in sorted(drawables, key=lambda item: item[0]):
+        scenery = hub_scenery
+        # Каждая запись: (линия земли, порядок при равных линиях, что рисовать).
+        drawables: list[tuple[float, int, object]] = []
+        for portal in PORTALS:
+            drawables.append((TREE_SPECS[portal.id].ground, 0, lambda p=portal: self._draw_tree(surface, p, target, hires)))
+        drawables.append((scenery.table().base_y, 0, lambda: self._draw_table(surface, target, hires)))
+        for prop in scenery.props():
+            if prop.flat:
+                continue  # вшито в землю
+            drawables.append((prop.sort_y, 0, lambda p=prop: self._draw_prop(surface, p, hires)))
+        drawables.append((self.chuchmek.y, 0, lambda: self._draw_chuchmek(surface, target, hires)))
+        drawables.append((LEO_POSITION[1], 0, lambda: self._draw_leo(surface, target, hires)))
+        drawables.append((self.alice.y + 0.1, 0, lambda: self.alice.draw(surface, hires)))
+        if hires is not None:
+            hires.sprite(self._backdrop.image, self._backdrop.rect, opaque=True)  # земля, деревья и предметы
+            table = hub_scenery.table()
+            people = ((self.alice.y + 0.1, self.alice.rect), (self.chuchmek.y, self.chuchmek.rect),
+                      (LEO_POSITION[1], self.leo_rect()), (table.base_y, table.body.rect))
+            drawables += self._in_front_of(people, hires)
+            for index, spot in enumerate(FIREFLIES):
+                x, y, level = self._firefly(index, spot)
+                if level >= 2:  # самые тусклые вспышки не стоят отдельной картинки
+                    drawables.append((y, 0, lambda p=(x, y), v=level: scenery.firefly(v).draw(surface, hires, center=p)))
+        for _, _, draw in sorted(drawables, key=lambda item: item[:2]):
             draw()
         self._draw_hud(surface, hires)
         if self.dialogue is not None and not self.dialogue.is_finished:
             self.box.draw(surface, self.dialogue, hires)
         else:
             self._draw_status(surface, hires)
+
+    @staticmethod
+    def _in_front_of(people: tuple[tuple[float, pygame.Rect], ...], hires: HiResLayer) -> list[tuple[float, int, object]]:
+        """Неподвижное из фона, что стоит ближе к игроку, чем человек, и закрывает его, — рисуется
+        поверх него заново, но только в его границах (слой окна обрежет остальное)."""
+        redraws: list[tuple[float, int, object]] = []
+        for y, rect in people:
+            for sort_y, piece in hub_scenery.static_items():
+                if sort_y > y and piece.rect.colliderect(rect):
+                    # порядок -1: перед светом и надписью того же дерева, которые лежат на нём
+                    redraws.append((sort_y, -1, lambda p=piece, r=rect: hires.sprite(p.image, p.rect, clip=r)))
+        return redraws
 
     def _text(self, text: str, color: config.Color) -> pygame.Surface:
         key = (text, color)
@@ -405,73 +447,107 @@ class HubScene(Scene):
             image = self._text_cache[key] = render_text(self._font, text, color)
         return image
 
-    def plaque_rect(self, portal: Portal, hires: bool = False) -> pygame.Rect:
-        """Табличка с названием портала: по размеру надписи пиксельным шрифтом или шрифтом окна."""
-        if hires:
-            width, height = self.text_metrics.size(portal.name)
-            label = pygame.Rect(0, 0, math.ceil(width), math.ceil(height))
-        else:
-            label = self._text(portal.name, SIGN_TEXT_COLOR).get_rect()
-        label.center = portal.sign_center
-        return label.inflate(6, 2)
+    def _firefly(self, index: int, spot: tuple[float, float, float, float, float, float]) -> tuple[int, int, int]:
+        """Где светлячок сейчас и насколько ярок (0 — погас); зависит только от времени площади."""
+        x, y, dx, dy, speed, phase = spot
+        t = self.time * speed + phase
+        px = x + math.sin(t) * dx + math.sin(t * 2.3 + index) * dx * 0.2
+        py = y + math.cos(t * 0.8) * dy
+        glow = 0.5 + 0.5 * math.sin(self.time * speed * 2.6 + phase * 2.0)
+        return round(px), round(py), int(glow * glow * 3.99)
 
-    def _draw_portal(
-        self, canvas: pygame.Surface, portal: Portal, target: Interaction | None, hires: HiResLayer | None
-    ) -> None:
-        plaque = self.plaque_rect(portal, hires is not None)
-        # Портал с подсветкой, табличка и звёздочка у неё — вся графика портала.
-        area = portal.rect.inflate(8, 8).union(plaque.inflate(10, 10))
-        with logical_target(canvas, hires, area) as surface:
-            rect = portal.rect
-            near = target is not None and target.target == portal.id
-            pygame.draw.rect(surface, portal.color, rect, border_radius=6)
-            inner = rect.inflate(-8, -8)
-            pygame.draw.rect(surface, PORTAL_INNER_COLOR, inner, border_radius=4)
-            # Мерцание внутри портала: две полосы, бегущие сверху вниз.
-            for k in range(2):
-                y = inner.top + int((self.time * 10 + k * inner.height / 2) % inner.height)
-                pygame.draw.line(surface, portal.glow, (inner.left + 2, y), (inner.right - 3, y))
-            _draw_trial_icon(surface, portal.id, inner.center)
-            if near:
-                pulse = 1 + round(abs(math.sin(self.time * 5)))
-                pygame.draw.rect(surface, MARK_COLOR, rect.inflate(2 + pulse * 2, 2 + pulse * 2), 1, border_radius=7)
-            # Табличка с названием.
-            pygame.draw.rect(surface, SIGN_COLOR, plaque)
-            pygame.draw.rect(surface, SIGN_EDGE_COLOR, plaque, 1)
-            if hires is None:
-                label = self._text(portal.name, SIGN_TEXT_COLOR)
-                surface.blit(label, label.get_rect(center=plaque.center))
-            if self.progress.is_completed(portal.id):
-                # Испытание пройдено: золотая звёздочка у таблички.
-                x, y = plaque.right + 1, plaque.top
-                if x + 3 > WIDTH:
-                    x = plaque.left - 1
-                pygame.draw.polygon(surface, HUD_ACCENT_COLOR, [(x, y - 3), (x + 1, y - 1), (x + 3, y), (x + 1, y + 1),
-                                                                (x, y + 3), (x - 1, y + 1), (x - 3, y), (x - 1, y - 1)])
+    def plaque_rect(self, portal: Portal, hires: bool = False) -> pygame.Rect:
+        """Табличка с названием на дереве-входе: её место нарисовано вместе с деревом."""
+        return portal.sign_rect.copy()
+
+    def _draw_tree(self, canvas: pygame.Surface, portal: Portal, target: Interaction | None,
+                   hires: HiResLayer | None) -> None:
+        """Дерево-вход: само дерево, свет в дупле, огоньки на ветвях, табличка с надписью и отметки."""
+        art = {"sushi": hub_scenery.sushi_tree, "forms": hub_scenery.forms_tree, "cakes": hub_scenery.cakes_tree}[portal.id]()
+        if hires is None:  # со слоем окна дерево уже лежит в подробном фоне
+            art.piece.draw(canvas, None)
+        done = self.progress.is_completed(portal.id)
         if hires is not None:
-            hires.text(portal.name, SIGN_STYLE, plaque.center, anchor="center")
+            pulse = 0.5 + 0.5 * math.sin(self.time * 1.6 + portal.door.x)
+            glow_color = DOOR_GLOW_COLORS[portal.id] if not done else MOSAIC_GOLD
+            glow = hub_scenery.glow(13, glow_color, 120 if done else 84)
+            glow.draw(canvas, hires, alpha=round(150 + 105 * pulse), center=(portal.door.centerx, portal.door.centery + 3))
+            for index, (x, y, color, radius) in enumerate(art.lights):
+                flicker = 0.5 + 0.5 * math.sin(self.time * 2.1 + index * 1.9)
+                hub_scenery.glow(radius, color, 150).draw(canvas, hires, alpha=round(90 + 140 * flicker), center=(x, y))
+            for index, group in enumerate(art.garland):  # лампочки гирлянды мигают тремя группами по очереди
+                twinkle = 0.5 + 0.5 * math.sin(self.time * 1.7 + index * math.tau / 3)
+                group.draw(canvas, hires, alpha=round(60 + 195 * twinkle * twinkle))
+            near = target is not None and target.kind == "portal" and target.target == portal.id
+            if near:
+                hub_scenery.door_ring(portal.id).draw(canvas, hires, alpha=round(150 + 105 * abs(math.sin(self.time * 5))))
+            if done:
+                badge = hub_scenery.badge()
+                badge.draw(canvas, hires, center=(portal.sign_rect.right - 1, portal.sign_rect.top - 1))
+            hires.text(portal.sign, SIGN_STYLE, portal.sign_rect.center, anchor="center")
+        else:
+            label = self._text(portal.sign, SIGN_TEXT_COLOR)
+            canvas.blit(label, label.get_rect(center=portal.sign_rect.center))
+        if target is not None and target.kind == "portal" and target.target == portal.id:
+            # Ромбик над кроной: сюда можно войти.
+            x, y = portal.sign_rect.centerx, portal.sign_rect.top - 8 - round(abs(math.sin(self.time * 4)) * 2)
+            with logical_target(canvas, hires, pygame.Rect(x - 4, y - 4, 9, 9)) as surface:
+                pygame.draw.polygon(surface, MARK_COLOR, [(x, y - 3), (x + 3, y), (x, y + 3), (x - 3, y)])
+
+    def _draw_prop(self, canvas: pygame.Surface, prop: hub_scenery.Prop, hires: HiResLayer | None) -> None:
+        if hires is None:  # со слоем окна предмет уже лежит в подробном фоне
+            prop.piece.draw(canvas, None)
+            return
+        for index, (x, y) in enumerate(prop.glow):  # тёплый свет фонарей и холодный — кристаллов
+            flicker = 0.5 + 0.5 * math.sin(self.time * 3.1 + prop.foot[0] * 0.37 + index)
+            hub_scenery.glow(9, WARM_LIGHT, 96).draw(canvas, hires, alpha=round(120 + 100 * flicker), center=(x, y))
+
+    def _draw_table(self, canvas: pygame.Surface, target: Interaction | None, hires: HiResLayer | None) -> None:
+        """Стол мозаики: собранные плитки лежат на своих местах, пустые гнёзда ждут остальных."""
+        art = hub_scenery.table()
+        complete = self.progress.has_all_fragments
+        cx, cy = TABLE_CENTER
+        if hires is not None and complete:  # золотое сияние под столом, мерцающее
+            pulse = 0.5 + 0.5 * math.sin(self.time * 2.2)
+            hub_scenery.glow(52, MOSAIC_GOLD, 120).draw(canvas, hires, alpha=round(110 + 120 * pulse), center=(cx, cy + 10))
+        art.body.draw(canvas, hires)
+        for trial_id, (x, y) in MOSAIC_SLOTS.items():
+            if not self.progress.is_completed(trial_id):
+                continue
+            if hires is not None:  # едва заметный цветной отсвет вокруг собранного фрагмента
+                tint = hub_scenery.FRAGMENT_COLORS[trial_id]
+                hub_scenery.glow(SLOT_SIZE, tint, 80).draw(canvas, hires, alpha=150, center=(x, y))
+            art.fragments[trial_id].draw(canvas, hires)
+            age = self.time - self._placed_at.get(trial_id, -FRAGMENT_POP_SECONDS)
+            if hires is not None and 0 <= age < FRAGMENT_POP_SECONDS:
+                self._draw_pop(canvas, hires, (x, y), age / FRAGMENT_POP_SECONDS)
+        if complete:
+            if hires is not None:
+                shimmer = 0.5 + 0.5 * math.sin(self.time * 3.0)
+                art.inlay.draw(canvas, hires, alpha=round(170 + 85 * shimmer))
+                for k in range(5):  # искры бегут по краю доски
+                    angle = self.time * 0.9 + k * math.tau / 5
+                    spot = (cx + math.cos(angle) * 27, cy + 1 + math.sin(angle) * 11)
+                    twinkle = 0.5 + 0.5 * math.sin(self.time * 4 + k * 2.1)
+                    hub_scenery.sparkle((255, 230, 150), 3).draw(canvas, hires, alpha=round(120 + 135 * twinkle), center=spot)
+            else:
+                art.inlay.draw(canvas, None)
+        if target is not None and target.kind == "mosaic":
+            if hires is not None:
+                hub_scenery.table_ring().draw(canvas, hires, alpha=round(140 + 100 * abs(math.sin(self.time * 5))))
+            x, y = cx, cy - hub_scenery.TABLE_RY - 6 - round(abs(math.sin(self.time * 4)) * 2)
+            with logical_target(canvas, hires, pygame.Rect(x - 4, y - 4, 9, 9)) as surface:
+                pygame.draw.polygon(surface, MARK_COLOR, [(x, y - 3), (x + 3, y), (x, y + 3), (x - 3, y)])
 
     @staticmethod
-    def _draw_tree(canvas: pygame.Surface, base: tuple[int, int], hires: HiResLayer | None) -> None:
-        x, y = base
-        with logical_target(canvas, hires, pygame.Rect(x - 10, y - 24, 21, 25)) as surface:
-            _draw_tree(surface, base)
-
-    def _draw_mosaic(self, surface: pygame.Surface, target: Interaction | None) -> None:
-        """Символы собранных фрагментов в мозаике; при всех трёх — пульсирующее свечение."""
-        for trial_id, center in MOSAIC_SLOTS.items():
-            if self.progress.is_completed(trial_id):
-                _draw_fragment(surface, trial_id, center)
-        if self.progress.has_all_fragments:
-            x, y = MOSAIC_CENTER
-            pulse = abs(math.sin(self.time * 3))
-            pygame.draw.circle(surface, MARK_COLOR, (x, y), 15 + round(pulse * 2), 1)
-            pygame.draw.circle(surface, HUD_ACCENT_COLOR, (x, y), 12, 1)
-            for k in range(4):  # искры бегут по кругу
-                angle = self.time * 1.5 + k * math.pi / 2
-                surface.set_at((x + round(math.cos(angle) * 20), y + round(math.sin(angle) * 20)), MARK_COLOR)
-        if target is not None and target.kind == "mosaic":
-            pygame.draw.circle(surface, MARK_COLOR, MOSAIC_CENTER, 22, 1)
+    def _draw_pop(canvas: pygame.Surface, hires: HiResLayer, center: tuple[int, int], progress: float) -> None:
+        """Искры разлетаются от только что положенного фрагмента и гаснут."""
+        fade = 1 - progress
+        for k in range(6):
+            angle = k * math.tau / 6 + progress
+            reach = 4 + progress * 11
+            spot = (center[0] + math.cos(angle) * reach, center[1] + math.sin(angle) * reach * 0.7)
+            hub_scenery.sparkle((255, 236, 160), 2).draw(canvas, hires, alpha=round(255 * fade), center=spot)
 
     def _draw_chuchmek(self, canvas: pygame.Surface, target: Interaction | None, hires: HiResLayer | None) -> None:
         self.chuchmek.draw(canvas, hires)
@@ -558,78 +634,19 @@ class HubScene(Scene):
             hires.text(self.status_text(), HUD_STYLE, center, anchor="center")
 
 
-def _draw_trial_icon(surface: pygame.Surface, trial_id: str, center: tuple[int, int]) -> None:
-    """Простая геометрическая эмблема испытания внутри портала (не картинка и не эмодзи)."""
-    x, y = center
-    if trial_id == "sushi":  # ролл: рис, водоросль, начинка
-        pygame.draw.circle(surface, (250, 248, 240), (x, y), 6)
-        pygame.draw.circle(surface, (40, 60, 48), (x, y), 6, 1)
-        pygame.draw.circle(surface, (236, 120, 96), (x, y), 2)
-    elif trial_id == "forms":  # стопка бумаг со строчками
-        for offset in (2, 0):
-            pygame.draw.rect(surface, (244, 244, 236), (x - 5 + offset, y - 7 + offset, 10, 13))
-            pygame.draw.rect(surface, (120, 130, 150), (x - 5 + offset, y - 7 + offset, 10, 13), 1)
-        for row in range(3):
-            pygame.draw.line(surface, (120, 130, 150), (x - 2, y - 2 + row * 3), (x + 4, y - 2 + row * 3))
-    else:  # торт: два яруса и вишенка
-        pygame.draw.rect(surface, (248, 214, 228), (x - 7, y, 14, 6))
-        pygame.draw.rect(surface, (252, 238, 214), (x - 5, y - 5, 10, 5))
-        pygame.draw.circle(surface, (210, 40, 60), (x, y - 7), 2)
-
-
-def _distance_to_rect(point: tuple[float, float], rect: pygame.Rect) -> float:
-    x = min(max(point[0], rect.left), rect.right)
-    y = min(max(point[1], rect.top), rect.bottom)
-    return math.dist(point, (x, y))
-
-
-def _draw_fragment(surface: pygame.Surface, trial_id: str, center: tuple[int, int]) -> None:
-    """Маленький символ фрагмента в мозаике: ролл, документ с печатью, торт."""
-    x, y = center
-    if trial_id == "sushi":
-        pygame.draw.circle(surface, (40, 60, 48), (x, y), 3)
-        pygame.draw.circle(surface, (236, 120, 96), (x, y), 1)
-    elif trial_id == "forms":
-        pygame.draw.rect(surface, (244, 244, 236), (x - 2, y - 3, 5, 6))
-        surface.set_at((x + 1, y + 1), (196, 52, 60))
-    else:
-        pygame.draw.rect(surface, (248, 214, 228), (x - 3, y - 1, 7, 3))
-        surface.set_at((x, y - 2), (210, 40, 60))
-
-
-def _draw_tree(surface: pygame.Surface, base: tuple[int, int]) -> None:
-    x, y = base
-    pygame.draw.rect(surface, TREE_TRUNK_COLOR, (x - 2, y - 8, 4, 8))
-    pygame.draw.circle(surface, TREE_LEAF_COLOR, (x, y - 14), 9)
-    pygame.draw.circle(surface, GRASS_DARK_COLOR, (x - 3, y - 17), 3)
-
-
-def _render_background() -> pygame.Surface:
-    """Трава, дорожки к трём порталам и к точке появления, мозаика в центре, клумбы."""
-    page = pygame.Surface(config.LOGICAL_SIZE)
-    page.fill(GRASS_COLOR)
-    for x in range(4, WIDTH, 16):  # редкие тёмные травинки, чтобы было видно движение
-        for y in range(18 + (x // 16) % 2 * 8, STATUS_TOP, 16):
-            page.fill(GRASS_DARK_COLOR, (x, y, 2, 1))
-    paths = [
-        pygame.Rect(38, 86, 104, 14),  # к суши
-        pygame.Rect(178, 86, 104, 14),  # к тортам
-        pygame.Rect(152, 44, 16, 50),  # к формулярам
-        pygame.Rect(152, 120, 16, 44),  # к точке появления
-    ]
-    for path in paths:
-        pygame.draw.rect(page, PATH_COLOR, path)
-        pygame.draw.rect(page, PATH_EDGE_COLOR, path, 1)
-    pygame.draw.circle(page, PLAZA_COLOR, (160, 106), 28)
-    pygame.draw.circle(page, PATH_EDGE_COLOR, (160, 106), 28, 1)
-    pygame.draw.circle(page, MOSAIC_COLOR, (160, 106), 10, 2)
-    for angle in range(0, 360, 45):
-        dx, dy = math.cos(math.radians(angle)), math.sin(math.radians(angle))
-        page.fill(MOSAIC_COLOR, (160 + round(dx * 18) - 1, 106 + round(dy * 18) - 1, 3, 3))
-    pygame.draw.ellipse(page, SPAWN_COLOR, (148, 151, 24, 10))
-    pygame.draw.ellipse(page, PATH_EDGE_COLOR, (148, 151, 24, 10), 1)
-    for bed in FLOWER_BEDS:
-        pygame.draw.rect(page, BED_COLOR, bed, border_radius=3)
-        for index, x in enumerate(range(bed.left + 4, bed.right - 2, 6)):
-            page.fill(FLOWER_COLORS[index % 3], (x, bed.top + 3 + index % 2 * 4, 3, 3))
+@lru_cache(maxsize=1)
+def _ground() -> pygame.Surface:
+    """Земля площади: рисуется один раз и общая для всех площадей (её никто не меняет)."""
+    shadows = [(TREE_SPECS["sushi"].cx + 5, 90, 33, 7), (TREE_SPECS["cakes"].cx + 5, 90, 33, 7), (TREE_SPECS["forms"].cx + 4, 72, 28, 5),
+               (TABLE_CENTER[0] + 2, TABLE_CENTER[1] + 27, 44, 9)]
+    page = render_ground((LEO_AREA, CHUCHMEK_AREA), shadows, HUD_COLOR)
+    for prop in hub_scenery.props():
+        if prop.flat:  # грибы, папоротники и цветы у земли: уменьшенные до холста, как и сама земля
+            prop.piece.draw(page, None)
     return page
+
+
+@lru_cache(maxsize=1)
+def _backdrop() -> hub_scenery.Piece:
+    """Подробный фон для слоя высокого разрешения: общая картинка, как и земля."""
+    return hub_scenery.build_backdrop(_ground())

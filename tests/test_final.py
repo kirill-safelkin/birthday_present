@@ -46,6 +46,7 @@ from game.trials.cakes_scene import CHECK_ROW, ESCAPE_SECONDS  # noqa: E402
 from game.trials.forms_scene import CABINETS, GOOSE_POSITION, SLOT_XS, SLOT_Y  # noqa: E402
 from game.trials.sushi_orders import RECIPES  # noqa: E402
 from game.trials.sushi_scene import STATIONS, TABLE as SUSHI_TABLE  # noqa: E402
+from game.world import hub_scenery  # noqa: E402
 from game.world.hub import (  # noqa: E402
     FINALE_SCENE,
     MOSAIC_CENTER,
@@ -215,13 +216,19 @@ class HubMosaicTest(unittest.TestCase):
             _, hub = self.hub_with(*trials)
             hub.update(0.3)
             hub.draw(self.canvas)  # без ошибок при любом числе фрагментов
-        x, y = MOSAIC_CENTER
-        ring = {tuple(self.canvas.get_at((x + dx, y)))[:3] for dx in range(9, 14)}
-        self.assertIn((250, 206, 108), ring)  # золотое кольцо при 3/3
-        _, closed = self.hub_with("sushi", "forms")
-        closed.draw(self.canvas)
-        ring = {tuple(self.canvas.get_at((x + dx, y)))[:3] for dx in range(9, 14)}
-        self.assertNotIn((250, 206, 108), ring)  # при 2/3 мозаика не светится
+        # Золотая вставка (лучи между плитками) видна на столе только при 3/3.
+        gold = (255, 230, 150)
+
+        def has_gold(*trials: str) -> bool:
+            _, hub = self.hub_with(*trials)
+            hub.update(0.3)
+            hub.draw(self.canvas)
+            area = hub_scenery.table().body.rect
+            colors = {tuple(self.canvas.get_at((x, y)))[:3] for x in range(area.left, area.right) for y in range(area.top, area.bottom)}
+            return gold in colors
+
+        self.assertTrue(has_gold("sushi", "forms", "cakes"))  # золотая вставка при 3/3
+        self.assertFalse(has_gold("sushi", "forms"))  # при 2/3 мозаика не светится
 
 
 class FinaleTestCase(unittest.TestCase):
