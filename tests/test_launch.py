@@ -38,8 +38,8 @@ def key(code: int, scancode: int = 0, event_type: int = pygame.KEYDOWN) -> pygam
 
 
 # Ветки выборов, которые видит игрок за прохождение: первые ответы и вторые ответы.
-FIRST_ANSWER_LINES = {"d_self_appointed", "e_sushi", "s_recipe", "i_by_title", "i_check"}
-SECOND_ANSWER_LINES = {"d_down_to_business", "e_mushroom", "s_appetite", "i_meta", "i_ceiling"}
+FIRST_ANSWER_LINES = {"d_self_appointed", "e_rescue", "s_recipe", "i_simply", "r_snore", "i_check"}
+SECOND_ANSWER_LINES = {"d_down_to_business", "e_mushroom", "s_appetite", "i_expert", "r_oath_permit", "i_ceiling"}
 
 
 class LaunchTestCase(unittest.TestCase):
@@ -203,7 +203,7 @@ class FullPlaythroughTest(LaunchTestCase):
         forms = self.app.scenes.current
         self.finish_dialogue(forms)
         cabinet = {cabinet.section.id: cabinet.point for cabinet in CABINETS}
-        for section in ("holidays", "requests", "permits"):
+        for section in ("requests", "permits", "births"):
             forms.alice.set_position(*cabinet[section])
             self.press_e()
             self.finish_dialogue(forms)

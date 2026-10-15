@@ -104,7 +104,7 @@ def play_sushi(scene) -> None:
 def play_forms(scene) -> None:
     finish_dialogue(scene)
     cabinets = {cabinet.section.id: cabinet.point for cabinet in forms.CABINETS}
-    for section in ("holidays", "requests", "permits"):
+    for section in ("requests", "permits", "births"):
         scene.alice.set_position(*cabinets[section])
         press_e(scene)
         finish_dialogue(scene)
@@ -476,7 +476,7 @@ class LayerOrderTest(SceneTestCase):
 def play_forms_until_table(scene) -> None:
     finish_dialogue(scene)
     cabinets = {cabinet.section.id: cabinet.point for cabinet in forms.CABINETS}
-    for section in ("holidays", "requests", "permits"):
+    for section in ("requests", "permits", "births"):
         scene.alice.set_position(*cabinets[section])
         press_e(scene)
         finish_dialogue(scene)
@@ -595,7 +595,7 @@ class TextFitTest(SceneTestCase):
     def test_forms_texts(self) -> None:
         scene = forms.FormsTrialScene()
         long_names = [section.name for section in SECTIONS]
-        self.assertIn("Праздники, которые не состоялись", long_names)
+        self.assertIn("Заявки, которые ещё не стали заявлениями", long_names)
         statuses = [f"«{name}»   E — искать" for name in long_names]
         documents = list(DOCUMENT_NAMES.values())
         statuses += [f"Поменяла местами: {a} и {b}" for a in documents for b in documents]
@@ -609,13 +609,16 @@ class TextFitTest(SceneTestCase):
                     plaque = scene.cabinet_plaque(cabinet)
                     self.assert_fits(fonts, forms.PLAQUE_STYLE, cabinet.section.label, plaque.width - 2)
                 for abbreviation in forms.DOCUMENT_ABBREVIATIONS.values():
-                    self.assert_fits(fonts, forms.CARD_STYLES["application"], abbreviation, 17)  # до пометки вида
+                    self.assert_fits(fonts, forms.CARD_STYLES["form_request"], abbreviation, 17)  # до пометки вида
                 metrics = fonts.metrics(forms.HUD_STYLE)
-                task = metrics.width("Задача: разложи по порядку и сдай гусю")
+                task = metrics.width("Задача: сложи по порядку и сдай гусю")
                 held = max(metrics.width(f"В руках: {d}") for d in documents)
                 self.assertLess(task + held + 8, WIDTH)
-                order = "Стол: 1 Согласование → 2 Разрешение → 3 Заявление"
+                order = "Стол: " + " → ".join(f"{i + 1} {d}" for i, d in enumerate(documents))
                 self.assertLess(metrics.width(order) + 8, WIDTH)
+                for document, lines in forms.ISSUED_LINES.items():  # лист выданного документа над столом
+                    for text, style, (x, _) in scene.issued_layout(document):
+                        self.assertLessEqual(x + fonts.metrics(style).width(text), forms.ISSUED_SHEET.right - 18)
                 for text, x in forms.COUNTER_SIGNS:
                     self.assert_fits(fonts, forms.PLAQUE_STYLE, text, 150)
 

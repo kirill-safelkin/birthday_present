@@ -519,7 +519,7 @@ def play_sushi(sushi: Scene) -> None:
 def play_forms(forms: Scene) -> None:
     finish_dialogue(forms)
     cabinet = {cabinet.section.id: cabinet.point for cabinet in CABINETS}
-    for section in ("holidays", "requests", "permits"):
+    for section in ("requests", "permits", "births"):
         forms.alice.set_position(*cabinet[section])
         press_e(forms)
         finish_dialogue(forms)

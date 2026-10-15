@@ -1,18 +1,21 @@
-"""Испытание формуляров: архив гуся-инспектора, где Алиса ищет три документа и сдаёт их
-в правильном порядке.
+"""Испытание формуляров: архив гуся-инспектора, где Алиса оформляет документы Лео — находит
+три документа и сдаёт их в правильном порядке, чтобы сказочный архив зарегистрировал его
+рождение и признал гражданином Страны Чудес.
 
-Логика архива и стола подачи — в game/trials/forms_puzzle.py (без Pygame), реплики — в
-game/story/forms_dialogue.py. Здесь только сцена: движение Алисы (Character и
-CollisionMap, как на площади), шкафы-разделы, стол подачи с тремя местами, гусь и интерфейс.
+Логика архива, стола подачи и выдачи документов — в game/trials/forms_puzzle.py (без Pygame),
+реплики — в game/story/forms_dialogue.py. Здесь только сцена: движение Алисы (Character и
+CollisionMap, как на площади), шкафы-разделы, стол подачи с тремя местами, гусь, лист
+выданного документа и интерфейс.
 
-Этапы: вступление → поиск и раскладка документов → реакция гуся → финальная проверка →
-награда. Фрагмент (GameProgress.complete("forms")) выдаётся только после финальной
-реплики; отмена (Backspace) в любой момент до этого возвращает на площадь без награды.
-Оформление временное: архив нарисован геометрией.
+Этапы: вступление → поиск и раскладка документов → приём документов и разрешение на получение
+гражданства → гражданство Лео и финал → награда. Фрагмент (GameProgress.complete("forms"))
+выдаётся только после финальной реплики; отмена (Backspace) в любой момент до этого
+возвращает на площадь без награды. Оформление временное: архив нарисован геометрией.
 
 Со слоем высокого разрешения (game/graphics/hires.py) Алиса и гусь рисуются из исходных
 кадров 64×64, а надписи (таблички шкафов и барьера, карточки документов, интерфейс) —
-шрифтом размера окна; архив остаётся пиксельным.
+шрифтом размера окна; архив остаётся пиксельным. Лист выданного документа над столом —
+логическая графика, его надписи — тоже шрифтом окна.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ from game.story.forms_dialogue import (
     GOOSE_POSES,
     INSPECTION,
     INTRO,
+    ISSUE_NODES,
     all_scripts,
     goose_hint,
     goose_holding,
@@ -66,8 +70,8 @@ TRIAL_ID = "forms"
 # Этапы испытания.
 INTRO_PHASE = "intro"
 EXPLORE = "explore"  # поиск документов, раскладка на столе и сдача гусю
-REACTION = "reaction"
-FINAL_PHASE = "final"
+REACTION = "reaction"  # приём документов и разрешение на получение гражданства
+FINAL_PHASE = "final"  # гражданство Лео и фрагмент
 DONE = "done"
 
 WIDTH, HEIGHT = config.LOGICAL_SIZE
@@ -114,7 +118,15 @@ COUNTER_TOP_COLOR = (140, 100, 70)
 PAPER_COLOR = (248, 244, 230)
 PAPER_EDGE_COLOR = (170, 160, 140)
 SIGN_COLOR = (230, 220, 190)
-DOCUMENT_COLORS = {"application": (60, 90, 170), "approval": (120, 70, 150), "permission": (190, 50, 50)}
+DOCUMENT_COLORS = {"form_request": (60, 90, 170), "filing_permit": (190, 50, 50), "leo_application": (120, 70, 150)}
+STAMP_COLOR = (190, 50, 50)  # штемпельная подушка и печать на разрешении
+SEAL_COLOR = (214, 168, 60)  # золотая печать свидетельства
+SEAL_RIBBON_COLOR = (60, 110, 180)
+ISSUED_SHEET_COLOR = (250, 240, 214)
+ISSUED_TITLE_COLOR = (150, 40, 40)
+ISSUED_TEXT_COLOR = (70, 50, 40)
+BUNDLE_COLORS = ((176, 204, 236), (236, 196, 212))  # свёртки на полке «Рождений»
+BUNDLE_FACE_COLOR = (244, 214, 186)
 HUD_COLOR = (44, 38, 58)
 HUD_TEXT_COLOR = (240, 230, 206)
 HUD_ACCENT_COLOR = (250, 206, 108)
@@ -122,8 +134,17 @@ DONE_COLOR = (140, 220, 150)
 TODO_COLOR = (200, 196, 214)
 EMPTY_COLOR = (130, 124, 146)
 MARK_COLOR = (255, 236, 140)
-# Короткие надписи на карточках документов — бюрократические сокращения.
-DOCUMENT_ABBREVIATIONS = {"application": "ЗАЯВ", "approval": "СОГЛ", "permission": "РАЗР"}
+# Короткие надписи на карточках документов — канцелярские аббревиатуры полных названий:
+# Заявление на Выдачу Бланка Заявления, Разрешение на Подачу Заявления,
+# Заявление о Регистрации и Гражданстве Лео.
+DOCUMENT_ABBREVIATIONS = {"form_request": "ЗВБЗ", "filing_permit": "РПЗ", "leo_application": "ЗРГЛ"}
+# Лист выданного документа над столом подачи: заголовок и строки под ним.
+ISSUED_SHEET = pygame.Rect(86, 61, 148, 26)
+ISSUED_LINES = {
+    "citizenship_permit": ("РАЗРЕШЕНИЕ", "на получение гражданства Лео"),
+    "citizenship": ("СВИДЕТЕЛЬСТВО", "Рождение Лео зарегистрировано", "Лео — гражданин Страны Чудес"),
+}
+ISSUED_LINE_HEIGHT = 7
 COUNTER_SIGNS = (("ПРИЁМ ДОКУМЕНТОВ: ВЧЕРА", 80), ("ТИХО! ИДЁТ СОГЛАСОВАНИЕ", 240))
 
 # Надписи в разрешении окна (слой высокого разрешения); размер — в логических пикселях.
@@ -136,6 +157,8 @@ PLAQUE_STYLE = TextStyle(SMALL_SIZE, PLAQUE_TEXT_COLOR, background=PLAQUE_COLOR)
 COUNTER_SIGN_STYLE = TextStyle(SMALL_SIZE, PLAQUE_TEXT_COLOR)  # таблички барьера — впритык к надписи
 SLOT_NUMBER_STYLE = TextStyle(SMALL_SIZE, PAPER_COLOR)
 CARD_STYLES = {document: TextStyle(CARD_SIZE, color) for document, color in DOCUMENT_COLORS.items()}
+ISSUED_TITLE_STYLE = TextStyle(CARD_SIZE, ISSUED_TITLE_COLOR)
+ISSUED_TEXT_STYLE = TextStyle(CARD_SIZE, ISSUED_TEXT_COLOR)
 HUD_ROWS = (6.5, 17.5)  # середины двух строк верхней полосы
 # Где рисуется стол подачи: столешница, карточки, рамка у выбранного места и сияющая печать.
 TABLE_AREA = TABLE.inflate(4, 8)
@@ -238,11 +261,13 @@ class FormsTrialScene(Scene):
         puzzle = self.puzzle
         if self.phase == INTRO_PHASE:
             return "Архив формуляров"
+        if puzzle.citizen:
+            return "Лео — гражданин Страны Чудес"
         if puzzle.solved:
-            return "Документы приняты"
+            return "Документы Лео приняты"
         if not puzzle.all_found:
-            return f"Задача: найди документы {puzzle.found_count}/{len(DOCUMENTS)}"
-        return "Задача: разложи по порядку и сдай гусю"
+            return f"Задача: найди документы Лео {puzzle.found_count}/{len(DOCUMENTS)}"
+        return "Задача: сложи по порядку и сдай гусю"
 
     def held_text(self) -> str:
         held = self.puzzle.held
@@ -374,6 +399,8 @@ class FormsTrialScene(Scene):
         node = self.dialogue.node if self.dialogue is not None else None
         if node is not None and node.id in GOOSE_POSES:
             self.goose_pose = GOOSE_POSES[node.id]
+        if node is not None and node.id in ISSUE_NODES:
+            self.puzzle.issue(ISSUE_NODES[node.id])  # печать и лист документа — на этой реплике
 
     def _dialogue_finished(self) -> None:
         """Реплика закрыта: следующий этап испытания."""
@@ -385,9 +412,11 @@ class FormsTrialScene(Scene):
         if self.phase == INTRO_PHASE:
             self.phase = EXPLORE
         elif self.phase == REACTION:
+            self.puzzle.issue("citizenship_permit")  # уже выдано на реплике — повторно не выдаётся
             self.phase = FINAL_PHASE
             self._open_dialogue(FINAL)
         elif self.phase == FINAL_PHASE:
+            self.puzzle.issue("citizenship")
             self._complete()
 
     def _complete(self) -> None:
@@ -433,6 +462,8 @@ class FormsTrialScene(Scene):
         ]
         for _, draw in sorted(drawables, key=lambda item: item[0]):
             draw()
+        if self.puzzle.issued:
+            self._draw_issued(surface, self.puzzle.issued[-1], hires)
         self._draw_hud(surface, hires)
         if self.dialogue is not None and not self.dialogue.is_finished:
             self.box.draw(surface, self.dialogue, hires)
@@ -519,7 +550,7 @@ class FormsTrialScene(Scene):
             pygame.draw.rect(surface, PAPER_COLOR, (TABLE.x + 3, top.y + 6 - k * 2, 9, 3))
             pygame.draw.rect(surface, PAPER_EDGE_COLOR, (TABLE.x + 3, top.y + 6 - k * 2, 9, 3), 1)
         pygame.draw.rect(surface, (40, 40, 60), (TABLE.right - 15, top.y + 6, 10, 4))
-        pygame.draw.rect(surface, DOCUMENT_COLORS["permission"], (TABLE.right - 14, top.y + 7, 8, 2))
+        pygame.draw.rect(surface, STAMP_COLOR, (TABLE.right - 14, top.y + 7, 8, 2))
         pygame.draw.rect(surface, (90, 60, 40), (TABLE.right - 11, top.y + 1, 3, 4))
         pygame.draw.rect(surface, (40, 30, 26), (TABLE.right - 13, top.y + 4, 7, 2))
         for index, x in enumerate(SLOT_XS):
@@ -554,6 +585,43 @@ class FormsTrialScene(Scene):
             x, y = rect.centerx, rect.top - 4
             with logical_target(canvas, hires, pygame.Rect(x - 4, y - 4, 9, 9)) as surface:
                 pygame.draw.polygon(surface, MARK_COLOR, [(x, y - 3), (x + 3, y), (x, y + 3), (x - 3, y)])
+
+    def issued_layout(self, document: str) -> list[tuple[str, TextStyle, tuple[float, float]]]:
+        """Надписи листа выданного документа: (строка, стиль, середина левого края) — по центру листа
+        по высоте, слева от печати."""
+        lines = ISSUED_LINES[document]
+        top = ISSUED_SHEET.centery - (len(lines) - 1) * ISSUED_LINE_HEIGHT / 2
+        return [
+            (text, ISSUED_TITLE_STYLE if index == 0 else ISSUED_TEXT_STYLE,
+             (ISSUED_SHEET.x + 5, top + index * ISSUED_LINE_HEIGHT))
+            for index, text in enumerate(lines)
+        ]
+
+    def _draw_issued(self, canvas: pygame.Surface, document: str, hires: HiResLayer | None = None) -> None:
+        """Что гусь только что выдал: лист над столом подачи с печатью — красной на разрешении,
+        золотой с лентой на свидетельстве. Печать пульсирует, как свежая."""
+        with logical_target(canvas, hires, ISSUED_SHEET.inflate(2, 2)) as surface:
+            sheet = ISSUED_SHEET
+            pygame.draw.rect(surface, ISSUED_SHEET_COLOR, sheet)
+            pygame.draw.rect(surface, PAPER_EDGE_COLOR, sheet, 1)
+            seal = (sheet.right - 11, sheet.centery)
+            radius = 6 + round(abs(math.sin(self.time * 5)) * 0.6)
+            if document == "citizenship":
+                for dx in (-3, 2):  # ленточки под печатью
+                    end = (seal[0] + dx * 2, sheet.bottom - 2)
+                    pygame.draw.line(surface, SEAL_RIBBON_COLOR, (seal[0] + dx, seal[1]), end, 2)
+                pygame.draw.circle(surface, SEAL_COLOR, seal, radius)
+                pygame.draw.circle(surface, ISSUED_TITLE_COLOR, seal, radius - 3, 1)
+            else:
+                pygame.draw.circle(surface, STAMP_COLOR, seal, radius, 1)
+                pygame.draw.circle(surface, STAMP_COLOR, seal, radius - 3, 1)
+            if hires is None:
+                for text, style, (x, y) in self.issued_layout(document):
+                    image = self._text(text, style.color, small=True)
+                    surface.blit(image, image.get_rect(midleft=(x, round(y))))
+        if hires is not None:
+            for text, style, position in self.issued_layout(document):
+                hires.text(text, style, position, anchor="midleft")
 
     def _goose_image(self) -> pygame.Surface:
         """Поза гуся из манифеста goose_inspector, уменьшенная ближайшим соседом; без отражения."""
@@ -688,6 +756,11 @@ class FormsTrialScene(Scene):
             return
         for shelf, y in enumerate(range(rect.y + 21, rect.bottom, 9)):
             pygame.draw.line(page, SHELF_COLOR, (rect.x + 2, y), (rect.right - 3, y))
+            if section == "births" and shelf == 0:  # рождения, ожидающие регистрации, — свёртки на полке
+                for k, x in enumerate(range(rect.x + 5, rect.right - 8, 10)):
+                    pygame.draw.rect(page, BUNDLE_COLORS[k % 2], (x, y - 5, 8, 5))
+                    pygame.draw.rect(page, BUNDLE_FACE_COLOR, (x + 5, y - 4, 2, 2))
+                continue
             if section == "cakes" and shelf == 0:  # торты, признанные документами, — прямо на полке
                 for k, x in enumerate(range(rect.x + 6, rect.right - 8, 13)):
                     pygame.draw.rect(page, (236, 170, 190) if k % 2 else (200, 150, 100), (x, y - 6, 10, 6))
@@ -708,16 +781,17 @@ class FormsTrialScene(Scene):
 
 
 def draw_document_mark(surface: pygame.Surface, document: str, center: tuple[int, int]) -> None:
-    """Пометка вида документа: строки заявления, подпись согласования или печать разрешения."""
+    """Пометка вида документа: строки заявления на бланк, печать разрешения, сердечко заявления о Лео."""
     x, y = center
     color = DOCUMENT_COLORS[document]
-    if document == "application":
+    if document == "form_request":
         for dy in (-2, 0, 2):
             pygame.draw.line(surface, color, (x - 2, y + dy), (x + 1, y + dy))
-    elif document == "approval":
-        pygame.draw.lines(surface, color, False, [(x - 2, y + 1), (x - 1, y - 2), (x, y + 2), (x + 1, y - 1)])
-    else:
+    elif document == "filing_permit":
         pygame.draw.circle(surface, color, (x, y), 3, 1)
+    else:
+        pygame.draw.polygon(surface, color, [(x, y + 3), (x - 3, y), (x - 3, y - 2), (x - 2, y - 3), (x, y - 1),
+                                             (x + 2, y - 3), (x + 3, y - 2), (x + 3, y)])
 
 
 def draw_paper_stack(surface: pygame.Surface, rect: pygame.Rect) -> None:

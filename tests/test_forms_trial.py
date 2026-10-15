@@ -7,6 +7,7 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
+import itertools  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -17,6 +18,8 @@ import config  # noqa: E402
 from game.core.app import App  # noqa: E402
 from game.core.scenes import Scene, SceneManager  # noqa: E402
 from game.dialogue.box import DialogueBox  # noqa: E402
+from game.graphics.fonts import TextFonts  # noqa: E402
+from game.graphics.hires import HiResLayer, TextCommand  # noqa: E402
 from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites  # noqa: E402
 from game.story.forms_dialogue import (  # noqa: E402
     FINAL,
@@ -25,10 +28,12 @@ from game.story.forms_dialogue import (  # noqa: E402
     GOOSE_POSES,
     INSPECTION,
     INTRO,
+    OATH_CHOICE_ID,
+    REGISTER_CHOICE_ID,
     all_scripts,
 )
 from game.story.intro_dialogue import ALICE  # noqa: E402
-from game.trials.forms_puzzle import CORRECT_ORDER, DOCUMENT_NAMES, SECTIONS  # noqa: E402
+from game.trials.forms_puzzle import CORRECT_ORDER, DOCUMENT_NAMES, DOCUMENTS, SECTIONS  # noqa: E402
 from game.trials.forms_scene import (  # noqa: E402
     CABINETS,
     DONE,
@@ -36,8 +41,11 @@ from game.trials.forms_scene import (  # noqa: E402
     FINAL_PHASE,
     FORMS_SCENE,
     GOOSE_POSITION,
+    GOOSE_REACH,
     HUD_HEIGHT,
     INTRO_PHASE,
+    ISSUED_LINES,
+    ISSUED_SHEET,
     PAPER_COLOR,
     REACTION,
     SLOT_XS,
@@ -111,7 +119,8 @@ def use_slot(scene: FormsTrialScene, index: int) -> None:
 
 
 def arrange(scene: FormsTrialScene) -> None:
-    """Со «архивного» порядка (Согласование, Разрешение, Заявление) — на правильный, двумя обменами."""
+    """Со «архивного» порядка (разрешение на подачу, заявление о Лео, заявление на бланк) — на правильный,
+    двумя обменами."""
     use_slot(scene, 2)
     use_slot(scene, 0)
     use_slot(scene, 2)
@@ -124,14 +133,46 @@ def talk_to_goose(scene: FormsTrialScene) -> None:
 
 
 def play(scene: FormsTrialScene, stop_before_final_end: bool = False) -> None:
-    """Проходит испытание: вступление, поиск, раскладка, сдача, реакция, финальная проверка."""
+    """Проходит испытание: вступление, поиск, раскладка, сдача, приём и разрешение, гражданство."""
     finish_dialogue(scene)
     find_all(scene)
     arrange(scene)
     talk_to_goose(scene)
-    finish_dialogue(scene)  # реакция гуся
+    finish_dialogue(scene)  # приём документов и разрешение на получение гражданства
     if not stop_before_final_end:
-        finish_dialogue(scene)  # финальная проверка
+        finish_dialogue(scene)  # гражданство и фрагмент
+
+
+def until_node(scene: FormsTrialScene, node_id: str) -> None:
+    """Листает Enter до реплики node_id (на вопросе Enter выбирает первый ответ) и дописывает её."""
+    for _ in range(200):
+        if scene.dialogue.node.id == node_id:
+            scene.dialogue.update(30)
+            return
+        press(scene, pygame.K_RETURN)
+        if scene.dialogue.node.id != node_id and not scene.dialogue.is_typing:
+            press(scene, pygame.K_RETURN)
+    raise AssertionError(f"не дошли до реплики {node_id}")
+
+
+def answer(scene: FormsTrialScene, index: int) -> list[str]:
+    """Пролистывает текущий диалог; на вопросе — ↓ до ответа index и E. Возвращает показанные реплики."""
+    script = scene.dialogue.script
+    shown = []
+    for _ in range(200):
+        dialogue = scene.dialogue
+        if dialogue is None or dialogue.script is not script:
+            return shown
+        if not shown or shown[-1] != dialogue.node.id:
+            shown.append(dialogue.node.id)
+        if dialogue.is_typing:
+            press_e(scene)
+            continue
+        if dialogue.choices:
+            for _ in range(index):
+                press(scene, pygame.K_DOWN)
+        press_e(scene)
+    raise AssertionError(f"диалог не заканчивается: {shown}")
 
 
 def hold(scene: FormsTrialScene, codes: list[int], frames: int) -> None:
@@ -170,21 +211,27 @@ class IntroTest(TrialTestCase):
         shown = finish_dialogue(self.scene)
         lines = [(INTRO.nodes[node_id].speaker, INTRO.nodes[node_id].text) for node_id in shown]
         self.assertEqual(lines[:5], [
-            (GOOSE, "Стоять. Вход в архив разрешён при наличии разрешения на вход в архив."),
-            (ALICE, "Мне нужно разрешение на праздник."),
-            (GOOSE, "Тогда вы пришли по адресу. Здесь хранятся все разрешения, "
-                    "кроме тех, которые мы ещё не разрешили хранить."),
-            (ALICE, "И где искать моё?"),
-            (GOOSE, "В соответствующем отделе. Если бы я знал, где он, я бы уже давно его закрыл."),
+            (GOOSE, "Стойте. Для подготовки праздника необходимо проверить реестр участников."),
+            (ALICE, "Проверяйте. Лео уже здесь — спит в корзинке на площади."),
+            (GOOSE, "В реестре Страны Чудес Лео не значится: ни рождения, ни гражданства. "
+                    "Есть только отметка «сопит»."),
+            (GOOSE, "Присутствие не заменяет регистрацию. Регистрация не заменяет разрешение. "
+                    "А разрешение не заменяет разрешение на получение разрешения."),
+            (GOOSE, "Итак. С чем пожаловали?"),
         ])
+        # Задача и порядок процедуры — при любом ответе (Enter выбрал первый).
+        text = " ".join(INTRO.nodes[node_id].text for node_id in shown)
+        for words in ("заявление на выдачу бланка заявления", "разрешение на подачу заявления",
+                      "заявление о регистрации рождения и гражданстве Лео", "стол подачи", "сдавать — мне"):
+            self.assertIn(words, text)
         self.assertEqual(self.scene.phase, EXPLORE)
         self.assertEqual(self.scene.goose_pose, GOOSE_IDLE_POSE)
 
     def test_nothing_moves_or_is_searched_during_dialogue(self) -> None:
-        stand_at(self.scene, CABINET["holidays"].point)
+        stand_at(self.scene, CABINET["requests"].point)
         self.scene.handle_event(key(pygame.K_LEFT))
         self.scene.update(1.0)
-        self.assertEqual((self.scene.alice.x, self.scene.alice.y), CABINET["holidays"].point)
+        self.assertEqual((self.scene.alice.x, self.scene.alice.y), CABINET["requests"].point)
         self.scene.handle_event(key(pygame.K_LEFT, event_type=pygame.KEYUP))
         press_e(self.scene)  # E в реплике только листает её
         self.assertEqual(self.scene.puzzle.found, [])
@@ -197,27 +244,29 @@ class SearchTest(TrialTestCase):
         finish_dialogue(self.scene)
 
     def test_cabinet_gives_document_with_a_funny_line(self) -> None:
-        stand_at(self.scene, CABINET["holidays"].point)
-        self.assertEqual(self.scene.status_text(), "«Праздники, которые не состоялись»   E — искать")
+        stand_at(self.scene, CABINET["requests"].point)
+        self.assertEqual(self.scene.status_text(), "«Заявки, которые ещё не стали заявлениями»   E — искать")
         press_e(self.scene)
         self.assertEqual(self.scene.dialogue.node.speaker, ALICE)
-        self.assertIn("Заявление на проведение праздника", self.scene.dialogue.node.text)
-        self.assertIn("не состоялся", self.scene.dialogue.node.text)
+        self.assertIn("Заявление на выдачу бланка заявления", self.scene.dialogue.node.text)
+        self.assertIn("без бланка его не напишешь", self.scene.dialogue.node.text)
         finish_dialogue(self.scene)
-        self.assertEqual(self.scene.puzzle.order, (None, None, "application"))
-        self.assertEqual(self.scene.status_text(), "На столе подачи: Заявление (1/3)")
-        self.assertEqual(self.scene.task_text(), "Задача: найди документы 1/3")
-        self.assertEqual(self.scene.order_text(), "Стол: 1 — → 2 — → 3 Заявление")
+        self.assertEqual(self.scene.puzzle.order, (None, None, "form_request"))
+        self.assertEqual(self.scene.status_text(), "На столе подачи: Заявл. на бланк (1/3)")
+        self.assertEqual(self.scene.task_text(), "Задача: найди документы Лео 1/3")
+        self.assertEqual(self.scene.order_text(), "Стол: 1 — → 2 — → 3 Заявл. на бланк")
 
     def test_each_document_is_in_its_section(self) -> None:
         texts = {document: search(self.scene, SECTION_OF[document]) for document in CORRECT_ORDER}
-        self.assertIn("Заявление на проведение праздника", texts["application"])
-        self.assertIn("Согласование ответственного лица", texts["approval"])
-        self.assertIn("Разрешение на праздник", texts["permission"])
+        self.assertIn("Заявление на выдачу бланка заявления", texts["form_request"])
+        self.assertIn("Разрешение на подачу заявления", texts["filing_permit"])
+        self.assertIn("Заявление о регистрации рождения и гражданстве Лео", texts["leo_application"])
+        self.assertEqual(SECTION_OF,
+                         {"form_request": "requests", "filing_permit": "permits", "leo_application": "births"})
         self.assertTrue(self.scene.puzzle.all_found)
         self.assertEqual(self.scene.toast, "Все документы на столе — разложи их по порядку")
-        self.assertEqual(self.scene.task_text(), "Задача: разложи по порядку и сдай гусю")
-        self.assertEqual(self.scene.order_text(), "Стол: 1 Согласование → 2 Разрешение → 3 Заявление")
+        self.assertEqual(self.scene.task_text(), "Задача: сложи по порядку и сдай гусю")
+        self.assertEqual(self.scene.order_text(), "Стол: 1 Разр. на подачу → 2 Заявл. о Лео → 3 Заявл. на бланк")
 
     def test_wrong_shelf_is_a_joke_without_side_effects(self) -> None:
         jokes = [search(self.scene, "cakes") for _ in range(4)]
@@ -228,48 +277,59 @@ class SearchTest(TrialTestCase):
         self.assertEqual(self.scene.puzzle.found, [])
         self.assertEqual(self.scene.puzzle.order, (None, None, None))
         self.assertEqual(self.scene.phase, EXPLORE)
-        self.assertEqual(self.scene.task_text(), "Задача: найди документы 0/3")
+        self.assertEqual(self.scene.task_text(), "Задача: найди документы Лео 0/3")
         x = self.scene.alice.x
         hold(self.scene, [pygame.K_RIGHT], 20)  # управление вернулось
         self.assertGreater(self.scene.alice.x, x)
 
     def test_repeated_search_creates_no_extra_documents(self) -> None:
-        first = search(self.scene, "permits")
-        again = [search(self.scene, "permits") for _ in range(2)]
-        self.assertIn("Разрешение на праздник", first)
-        self.assertNotIn("Разрешение на праздник", again[0])  # там больше ничего нужного
-        self.assertEqual(self.scene.puzzle.found, ["permission"])
-        self.assertEqual(self.scene.puzzle.order.count("permission"), 1)
-        self.assertEqual(self.scene.task_text(), "Задача: найди документы 1/3")
+        first = search(self.scene, "births")
+        again = [search(self.scene, "births") for _ in range(2)]
+        self.assertIn("Заявление о регистрации рождения и гражданстве Лео", first)
+        self.assertNotIn("Заявление о регистрации", again[0])  # там больше ничего нужного
+        self.assertEqual(again[0], again[1])
+        self.assertEqual(self.scene.puzzle.found, ["leo_application"])
+        self.assertEqual(self.scene.puzzle.order.count("leo_application"), 1)
+        self.assertEqual(self.scene.task_text(), "Задача: найди документы Лео 1/3")
 
     def test_goose_hints_on_repeated_visits(self) -> None:
         talk_to_goose(self.scene)
-        self.assertIn("заявления", self.scene.dialogue.node.text)
+        hint = self.scene.dialogue.node.text
+        self.assertIn("заявления на выдачу бланка", hint)
+        self.assertIn("заявок, которые ещё не стали заявлениями", hint)  # где искать — только этот документ
+        self.assertNotIn("Лео", hint)  # и не весь порядок сразу
         self.assertEqual(self.scene.goose_pose, GOOSE_POSES["hint"])
         finish_dialogue(self.scene)
         talk_to_goose(self.scene)  # повторно — та же подсказка, ничего не сломалось
-        self.assertIn("заявления", self.scene.dialogue.node.text)
+        self.assertEqual(self.scene.dialogue.node.text, hint)
         finish_dialogue(self.scene)
-        search(self.scene, "holidays")
+        search(self.scene, "requests")
         stand_at(self.scene, GOOSE_SPOT)
         self.scene.update(2.0)  # сообщение о находке уже не важнее подсказки
         self.assertEqual(self.scene.status_text(), "Гусь-инспектор   E — спросить совета")
         press_e(self.scene)
-        self.assertIn("согласования", self.scene.dialogue.node.text)  # подсказка про следующий документ
+        self.assertIn("разрешения на подачу", self.scene.dialogue.node.text)  # подсказка про следующий документ
+        self.assertIn("среди других разрешений", self.scene.dialogue.node.text)
         finish_dialogue(self.scene)
-        self.assertEqual(self.scene.puzzle.failed_checks, 0)
+        search(self.scene, "permits")
+        talk_to_goose(self.scene)
+        self.assertIn("заявления о Лео", self.scene.dialogue.node.text)
+        self.assertIn("рождений, ожидающих регистрации", self.scene.dialogue.node.text)
+        finish_dialogue(self.scene)
+        self.assertEqual(self.scene.puzzle.failed_checks, 0)  # без всех трёх сдать нельзя — это не ошибка
+        self.assertFalse(self.scene.puzzle.solved)
         self.assertEqual(self.scene.phase, EXPLORE)
 
     def test_table_waits_for_all_documents(self) -> None:
-        search(self.scene, "holidays")
         search(self.scene, "requests")
+        search(self.scene, "permits")
         stand_at(self.scene, (SLOT_XS[0], SLOT_Y))
         self.scene.update(2.0)
         self.assertEqual(self.scene.status_text(), "Стол подачи   найдено документов: 2/3")
         press_e(self.scene)
         self.assertIsNone(self.scene.puzzle.held)
         self.assertEqual(self.scene.status_text(), "Сначала найди все документы: 2/3")
-        self.assertEqual(self.scene.puzzle.order, ("approval", None, "application"))
+        self.assertEqual(self.scene.puzzle.order, ("filing_permit", None, "form_request"))
 
 
 class TableTest(TrialTestCase):
@@ -282,23 +342,23 @@ class TableTest(TrialTestCase):
         stand_at(self.scene, (SLOT_XS[0], SLOT_Y))
         self.assertEqual(self.scene.status_text(), "Все документы на столе — разложи их по порядку")  # свежее
         self.scene.update(2.0)  # сообщение о находке уже не важнее подсказки
-        self.assertEqual(self.scene.status_text(), "Место 1: Согласование   E — взять")
+        self.assertEqual(self.scene.status_text(), "Место 1: Разр. на подачу   E — взять")
         press_e(self.scene)
-        self.assertEqual(self.scene.held_text(), "В руках: Согласование")
-        self.assertEqual(self.scene.status_text(), "Взяла: Согласование")
-        self.assertEqual(self.scene.order_text(), "Стол: 1 — → 2 Разрешение → 3 Заявление")
+        self.assertEqual(self.scene.held_text(), "В руках: Разр. на подачу")
+        self.assertEqual(self.scene.status_text(), "Взяла: Разр. на подачу")
+        self.assertEqual(self.scene.order_text(), "Стол: 1 — → 2 Заявл. о Лео → 3 Заявл. на бланк")
         self.scene.update(2.0)
         self.assertEqual(self.scene.status_text(), "Место 1   E — положить обратно")
         press_e(self.scene)
         self.assertEqual(self.scene.held_text(), "")
-        self.assertEqual(self.scene.status_text(), "Положила обратно: Согласование")
+        self.assertEqual(self.scene.status_text(), "Положила обратно: Разр. на подачу")
         use_slot(self.scene, 2)
         stand_at(self.scene, (SLOT_XS[0], SLOT_Y))
         self.scene.update(2.0)
-        self.assertEqual(self.scene.status_text(), "Место 1: Согласование   E — поменять местами")
+        self.assertEqual(self.scene.status_text(), "Место 1: Разр. на подачу   E — поменять местами")
         press_e(self.scene)
-        self.assertEqual(self.scene.status_text(), "Поменяла местами: Заявление и Согласование")
-        self.assertEqual(self.scene.order_text(), "Стол: 1 Заявление → 2 Разрешение → 3 Согласование")
+        self.assertEqual(self.scene.status_text(), "Поменяла местами: Заявл. на бланк и Разр. на подачу")
+        self.assertEqual(self.scene.order_text(), "Стол: 1 Заявл. на бланк → 2 Заявл. о Лео → 3 Разр. на подачу")
 
     def test_wrong_order_is_rejected_and_can_be_fixed(self) -> None:
         stand_at(self.scene, GOOSE_SPOT)
@@ -310,14 +370,15 @@ class TableTest(TrialTestCase):
         self.assertTrue(self.scene.dialogue.node.text.startswith("Отказано"))
         shown = finish_dialogue(self.scene)
         self.assertEqual(shown, ["reject_joke", "reject_hint"])
-        self.assertEqual(self.scene.puzzle.order, ("approval", "permission", "application"))  # стол не тронут
+        # Стол не тронут.
+        self.assertEqual(self.scene.puzzle.order, ("filing_permit", "leo_application", "form_request"))
         use_slot(self.scene, 2)
         use_slot(self.scene, 0)  # заявление — первым, остальное ещё перепутано
         talk_to_goose(self.scene)
         self.assertIn("Снова отказано", self.scene.dialogue.node.text)  # вторая попытка — другая шутка
         press(self.scene, pygame.K_RETURN)
         press(self.scene, pygame.K_RETURN)
-        self.assertIn("согласование идёт раньше разрешения", self.scene.dialogue.node.text)
+        self.assertIn("только с разрешением на подачу — оно второе", self.scene.dialogue.node.text)
         finish_dialogue(self.scene)
         self.assertEqual(self.scene.progress.fragments, 0)
         use_slot(self.scene, 2)
@@ -335,7 +396,7 @@ class TableTest(TrialTestCase):
         press_e(self.scene)
         self.assertIn("не документ, а намерение", self.scene.dialogue.node.text)
         finish_dialogue(self.scene)
-        self.assertEqual(self.scene.puzzle.held, "approval")
+        self.assertEqual(self.scene.puzzle.held, "filing_permit")
         self.assertEqual(self.scene.puzzle.failed_checks, 0)
         self.assertEqual(self.scene.phase, EXPLORE)
         use_slot(self.scene, 1)
@@ -344,7 +405,7 @@ class TableTest(TrialTestCase):
 
     def test_held_document_floats_above_alice(self) -> None:
         use_slot(self.scene, 0)
-        for spot in ((SLOT_XS[0], SLOT_Y), CABINET["permits"].point, (WALK_BOUNDS.right - 6, 100)):
+        for spot in ((SLOT_XS[0], SLOT_Y), CABINET["births"].point, (WALK_BOUNDS.right - 6, 100)):
             stand_at(self.scene, spot)
             self.scene.update(0.25)  # значок не «подпрыгивает»
             self.scene.draw(self.canvas)
@@ -358,16 +419,24 @@ class TableTest(TrialTestCase):
         talk_to_goose(self.scene)
         self.assertEqual(self.scene.goose_pose, "inspect")
         shown = finish_dialogue(self.scene)
-        self.assertEqual(shown, ["r_inspect", "r_stamp", "r_approve"])
+        self.assertEqual(shown, ["r_oath_intro", OATH_CHOICE_ID, "r_snore", "r_inspect", "r_registered", "r_almost",
+                                 "r_already", "r_different", "r_stamp", "r_approve"])
+        self.assertIn("Все три документа в правильном порядке", INSPECTION.nodes["r_inspect"].text)
+        self.assertIn("разрешение на получение гражданства", INSPECTION.nodes["r_almost"].text)
+        self.assertIn("разные печати", INSPECTION.nodes["r_different"].text)
         self.assertEqual(self.scene.phase, FINAL_PHASE)
         self.assertIs(self.scene.dialogue.script, FINAL)
-        self.assertEqual(self.scene.task_text(), "Документы приняты")
+        self.assertEqual(self.scene.puzzle.issued, ["citizenship_permit"])
+        self.assertEqual(self.scene.task_text(), "Документы Лео приняты")
         texts = [FINAL.nodes[node_id].text for node_id in finish_dialogue(self.scene)]
-        self.assertEqual(texts[:3], [
-            "Заявление подано, согласование получено, разрешение разрешено. Формально праздник существует.",
-            "А праздновать уже можно?",
-            "Не торопитесь. На это потребуется отдельное разрешение.",
-        ])
+        self.assertEqual(texts[0], "На основании разрешения на получение гражданства постановляю: "
+                                   "Лео признан гражданином Страны Чудес.")
+        self.assertIn("Рождение Лео зарегистрировано", texts[1])
+        self.assertEqual(texts[3], "Поздравляю Лео! Теперь можно отмечать день рождения?")
+        self.assertIn("за сон во время официальных мероприятий", texts[4])
+        self.assertIn("фрагмент праздничного плана", texts[-1])
+        self.assertTrue(self.scene.puzzle.citizen)
+        self.assertEqual(self.scene.task_text(), "Лео — гражданин Страны Чудес")
 
     def test_table_is_locked_after_acceptance(self) -> None:
         arrange(self.scene)
@@ -376,6 +445,112 @@ class TableTest(TrialTestCase):
         use_slot(self.scene, 0)
         self.assertIsNone(self.scene.puzzle.held)
         self.assertEqual(self.scene.puzzle.order, CORRECT_ORDER)
+
+
+class LeoProcedureTest(TrialTestCase):
+    """Сюжет формуляров: регистрация рождения Лео, разрешение на получение гражданства и гражданство."""
+
+    def test_intro_answers_have_own_lines_and_give_the_same_task(self) -> None:
+        branches = {0: ["i_simply", "i_not_rumour"], 1: ["i_expert"]}
+        for index, own in branches.items():
+            with self.subTest(answer=index):
+                progress = GameProgress()
+                scene = FormsTrialScene(progress)
+                shown = answer(scene, index)
+                question = shown.index(REGISTER_CHOICE_ID)
+                self.assertEqual(shown[question + 1:question + 1 + len(own)], own)
+                other = branches[1 - index]
+                self.assertFalse(set(other) & set(shown))  # чужая ветка не показана
+                self.assertEqual(shown[question + 1 + len(own):], ["i_first", "i_then", "i_procedure", "i_known",
+                                                                   "i_table", "i_order"])
+                self.assertEqual(scene.phase, EXPLORE)
+                self.assertEqual(scene.puzzle.found, [])  # ответ не находит документы за игрока
+                self.assertEqual(progress.completed, ())
+        nodes = INTRO.nodes
+        self.assertEqual([choice.text for choice in nodes[REGISTER_CHOICE_ID].choices],
+                         ["Мы просто хотим зарегистрировать Лео.", "А есть заявление на разрешение заявления?"])
+        self.assertIn("для архива — слух", nodes["i_simply"].text)  # присутствие — ещё не регистрация
+        self.assertIn("Именно такая бумага нам и нужна", nodes["i_expert"].text)
+
+    def test_oath_answers_change_only_the_goose_line(self) -> None:
+        results = {}
+        for index, own in ((0, "r_snore"), (1, "r_oath_permit")):
+            with self.subTest(answer=index):
+                scene = FormsTrialScene(GameProgress())
+                finish_dialogue(scene)
+                find_all(scene)
+                arrange(scene)
+                talk_to_goose(scene)
+                shown = answer(scene, index)
+                self.assertIn(own, shown)
+                self.assertNotIn({"r_snore": "r_oath_permit", "r_oath_permit": "r_snore"}[own], shown)
+                self.assertEqual(shown[shown.index(own) + 1:], ["r_inspect", "r_registered", "r_almost", "r_already",
+                                                                "r_different", "r_stamp", "r_approve"])
+                self.assertIs(scene.dialogue.script, FINAL)
+                results[index] = (scene.phase, scene.puzzle.order, list(scene.puzzle.issued), scene.progress.completed)
+        self.assertEqual(results[0], results[1])  # дальше — одно и то же
+
+    def test_permit_is_issued_with_a_stamp_then_citizenship_with_a_certificate(self) -> None:
+        scene = self.scene
+        finish_dialogue(scene)
+        find_all(scene)
+        arrange(scene)
+        talk_to_goose(scene)
+        until_node(scene, "r_different")
+        self.assertEqual(scene.puzzle.issued, [])  # пока только объясняет, что нужно ещё разрешение
+        self.assertEqual(self.sheet_texts(), [])
+        until_node(scene, "r_stamp")
+        self.assertEqual(scene.goose_pose, "stamp")
+        self.assertEqual(scene.puzzle.issued, ["citizenship_permit"])
+        self.assertEqual(self.sheet_texts(), list(ISSUED_LINES["citizenship_permit"]))
+        self.assertIn("Разрешение на получение гражданства Лео", scene.dialogue.node.text)
+        finish_dialogue(scene)
+        self.assertEqual(scene.dialogue.node.id, "f_decree")
+        self.assertFalse(scene.puzzle.citizen)
+        until_node(scene, "f_certificate")
+        self.assertTrue(scene.puzzle.citizen)
+        self.assertEqual(scene.goose_pose, "celebrate")
+        self.assertEqual(self.sheet_texts(), ["СВИДЕТЕЛЬСТВО", "Рождение Лео зарегистрировано",
+                                              "Лео — гражданин Страны Чудес"])
+        self.assertEqual(scene.task_text(), "Лео — гражданин Страны Чудес")
+        self.assertEqual(self.progress.fragments, 0)  # гражданство — ещё не награда
+        until_node(scene, "f_fragment")
+        self.assertEqual(self.progress.fragments, 0)
+        finish_dialogue(scene)
+        self.assertEqual(self.progress.completed, ("forms",))
+
+    def sheet_texts(self) -> list[str]:
+        layer = HiResLayer()
+        self.scene.draw(self.canvas, layer)
+        return [command.text for command in layer.commands if isinstance(command, TextCommand)
+                and ISSUED_SHEET.collidepoint(command.pos)]
+
+    def test_issued_sheet_fits_and_covers_nobody(self) -> None:
+        fonts = TextFonts()
+        for document, lines in ISSUED_LINES.items():
+            for text, style, (x, y) in self.scene.issued_layout(document):
+                with self.subTest(document=document, text=text):
+                    for width in (fonts.metrics(style).width(text), self.scene._small_font.size(text)[0]):
+                        self.assertLessEqual(x + width, ISSUED_SHEET.right - 18)  # левее печати
+                    self.assertTrue(ISSUED_SHEET.top + 2 <= y <= ISSUED_SHEET.bottom - 2)
+            self.assertLessEqual(len(lines), 3)
+        self.assertGreaterEqual(ISSUED_SHEET.top, HUD_HEIGHT)
+        box = DialogueBox()
+        lowest_box = min((box.layout(node).name_tab or box.layout(node).box).top
+                         for script in all_scripts() for node in script.nodes.values())
+        self.assertLessEqual(ISSUED_SHEET.bottom, lowest_box)  # окно реплики лист не закрывает
+        # Лист выдают, когда Алиса у гуся: где бы она ни стояла рядом с ним, лист её не закрывает.
+        goose = self.scene._goose_image().get_rect(midbottom=GOOSE_POSITION)
+        self.assertFalse(ISSUED_SHEET.colliderect(goose))
+        checked = 0
+        for x in range(GOOSE_POSITION[0] - GOOSE_REACH, GOOSE_POSITION[0] + GOOSE_REACH + 1):
+            for y in range(GOOSE_POSITION[1] - GOOSE_REACH, GOOSE_POSITION[1] + 1):
+                stand_at(self.scene, (x, y))
+                if self.scene.collision.is_free(x, y) and self.scene.nearby() is not None \
+                        and self.scene.nearby().kind == "goose":
+                    self.assertFalse(ISSUED_SHEET.colliderect(self.scene.alice.rect), (x, y))
+                    checked += 1
+        self.assertGreater(checked, 50)
 
 
 class RewardTest(TrialTestCase):
@@ -405,13 +580,21 @@ class RewardTest(TrialTestCase):
     def test_cancel_returns_to_hub_without_reward_at_any_stage(self) -> None:
         stages = {
             "вступление": lambda scene: None,
-            "исследование": lambda scene: (finish_dialogue(scene), search(scene, "holidays")),
-            "находка": lambda scene: (finish_dialogue(scene), stand_at(scene, CABINET["permits"].point),
+            "исследование": lambda scene: (finish_dialogue(scene), search(scene, "requests")),
+            "находка": lambda scene: (finish_dialogue(scene), stand_at(scene, CABINET["births"].point),
                                       press_e(scene)),
             "головоломка": lambda scene: (finish_dialogue(scene), find_all(scene), use_slot(scene, 2)),
             "отказ гуся": lambda scene: (finish_dialogue(scene), find_all(scene), talk_to_goose(scene)),
             "реакция": lambda scene: (finish_dialogue(scene), find_all(scene), arrange(scene), talk_to_goose(scene)),
+            "присяга": lambda scene: (finish_dialogue(scene), find_all(scene), arrange(scene), talk_to_goose(scene),
+                                      until_node(scene, OATH_CHOICE_ID)),
+            "разрешение на получение гражданства": lambda scene: (
+                finish_dialogue(scene), find_all(scene), arrange(scene), talk_to_goose(scene),
+                until_node(scene, "r_stamp")),
             "финальная проверка": lambda scene: play(scene, stop_before_final_end=True),
+            "гражданство": lambda scene: (play(scene, stop_before_final_end=True), until_node(scene, "f_certificate")),
+            "последняя реплика": lambda scene: (play(scene, stop_before_final_end=True),
+                                                until_node(scene, "f_fragment")),
         }
         for stage, prepare in stages.items():
             with self.subTest(stage=stage):
@@ -543,10 +726,17 @@ class LayoutTest(TrialTestCase):
         font = self.scene._font
         names = list(DOCUMENT_NAMES.values())
         widest_held = max(font.size(f"В руках: {name}")[0] for name in names)
-        for task in ("Задача: найди документы 2/3", "Задача: разложи по порядку и сдай гусю", "Документы приняты"):
+        for task in ("Задача: найди документы Лео 2/3", "Задача: сложи по порядку и сдай гусю", "Документы Лео приняты",
+                     "Лео — гражданин Страны Чудес"):
             self.assertLessEqual(font.size(task)[0] + widest_held, WIDTH - 16, task)
-        order = "Стол: 1 Согласование → 2 Согласование → 3 Согласование"
-        self.assertLessEqual(font.size(order)[0], WIDTH - 8)
+        # Строка стола — для каждой раскладки, которая бывает в игре: каждый документ лежит на столе
+        # один раз, в любом порядке, и одно место может быть пустым (документ в руках).
+        for order in itertools.permutations(DOCUMENTS):
+            for empty in (None, 0, 1, 2):
+                parts = [f"{index + 1} —" if index == empty else f"{index + 1} {DOCUMENT_NAMES[document]}"
+                         for index, document in enumerate(order)]
+                text = "Стол: " + " → ".join(parts)
+                self.assertLessEqual(font.size(text)[0], WIDTH - 8, text)
         statuses = ["Стрелки/WASD — идти   E — действие   Backspace — уйти", "Гусь-инспектор   E — спросить совета",
                     "Все документы на столе — разложи их по порядку", "Стол подачи   найдено документов: 2/3"]
         statuses += [f"«{section.name}»   E — искать" for section in SECTIONS]
@@ -705,14 +895,14 @@ class AppIntegrationTest(unittest.TestCase):
         trial = self.enter_portal(self.open_hub(), "forms")
         self.press(pygame.K_RETURN)
         self.press(pygame.K_RETURN)
-        self.assertEqual(trial.dialogue.node.id, "i_need")  # Enter листает вступление
+        self.assertEqual(trial.dialogue.node.id, "i_here")  # Enter листает вступление
         for _ in range(2 * len(INTRO.nodes)):  # каждая реплика: дописать и дальше
             self.press(pygame.K_e, pygame.KSCAN_E)
         self.assertIsNone(trial.dialogue)
         self.assertEqual(trial.phase, EXPLORE)
-        trial.alice.set_position(*CABINET["holidays"].point)
+        trial.alice.set_position(*CABINET["requests"].point)
         self.press(ord("у"), pygame.KSCAN_E)  # русская раскладка: та же физическая клавиша
-        self.assertEqual(trial.puzzle.found, ["application"])
+        self.assertEqual(trial.puzzle.found, ["form_request"])
         self.assertTrue(trial.dialogue.is_typing)
         # Зажатая E: первое нажатие дописывает реплику, автоповтор её не закрывает.
         self.send(key(pygame.K_e, pygame.KSCAN_E), key(pygame.K_e, pygame.KSCAN_E), key(pygame.K_e, pygame.KSCAN_E))

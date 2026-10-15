@@ -8,6 +8,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import hashlib  # noqa: E402
+import re  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -50,19 +51,24 @@ CONVERSATIONS = {
     "вступление: праздничный план": (
         intro_dialogue.PART_D_PLAN,
         intro_dialogue.ORGANIZER_CHOICE_ID,
-        ("d_yours", "d_plan", "d_pieces", "d_how", "d_parts", "d_sushi", "d_forms", "d_permit", "d_evil",
-         "d_cakes", "d_mosaic", "d_why_me", "d_tried", "d_only_you", "d_leo", "d_leo_job", "d_leo_smile"),
+        ("d_yours", "d_plan", "d_disaster", "d_pieces", "d_now", "d_trials", "d_mosaic", "d_inside", "d_intrigue",
+         "d_why_me", "d_tried", "d_only_you", "d_leo", "d_leo_job", "d_leo_smile"),
     ),
-    "вступление: с чего начать": (intro_dialogue.PART_E_CHOICE, intro_dialogue.CHOICE_ID, ("e_ready",)),
+    "вступление: последний вопрос": (intro_dialogue.PART_E_CHOICE, intro_dialogue.CHOICE_ID, ("e_ready",)),
     "площадь: первый разговор": (
-        hub_dialogue.CHUCHMEK_TALK, hub_dialogue.HUB_CHOICE_ID, ("h_welcome", hub_dialogue.HUB_JOIN_ID),
+        hub_dialogue.CHUCHMEK_TALK, hub_dialogue.HUB_CHOICE_ID, ("h_welcome", hub_dialogue.HUB_JOIN_ID, "h_mosaic"),
     ),
-    "площадь: снова": (hub_dialogue.CHUCHMEK_TALK_AGAIN, "h_again", (hub_dialogue.HUB_JOIN_ID,)),
+    "площадь: снова": (hub_dialogue.CHUCHMEK_TALK_AGAIN, "h_again", (hub_dialogue.HUB_JOIN_ID, "h_mosaic")),
     "суши": (
         sushi_dialogue.INTRO, sushi_dialogue.TRUST_CHOICE_ID, ("s_welcome", "s_tasty", "s_rules", "s_forgives"),
     ),
     "формуляры": (
-        forms_dialogue.INTRO, forms_dialogue.SEARCH_CHOICE_ID, ("i_need", "i_three", "i_table", "i_order"),
+        forms_dialogue.INTRO, forms_dialogue.REGISTER_CHOICE_ID,
+        ("i_stop", "i_registry", "i_first", "i_procedure", "i_table", "i_order"),
+    ),
+    "формуляры: приём документов": (
+        forms_dialogue.INSPECTION, forms_dialogue.OATH_CHOICE_ID,
+        ("r_oath_intro", "r_inspect", "r_almost", "r_different", "r_stamp", "r_approve"),
     ),
     "торты": (
         cakes_dialogue.INTRO, cakes_dialogue.CHECK_CHOICE_ID, ("i_ready", "i_reversed", "i_backwards", "i_fix"),
@@ -77,6 +83,14 @@ CONVERSATIONS = {
         ("f_restored", "f_documents", "f_commission", "f_verdict", "f_backside"),
     ),
 }
+# Что внутри испытаний: Чучмек не называет этого ни во вступлении, ни на площади — игрок узнаёт
+# в самом портале. Слова целиком или с окончаниями («кот», но не «который»).
+TRIAL_SPOILERS = re.compile(
+    r"\b(суши|ролл\w*|кот|кота|повар\w*|кухн\w*|формуляр\w*|архив\w*|гус\w*|регистрац\w*|гражданств\w*|"
+    r"бланк\w*|торт\w*|кондитер\w*|клубник\w*|рецепт\w*|вкусн\w*|официальн\w*|сладк\w*)\b",
+    re.IGNORECASE,
+)
+
 # Тексты письма, секрета подарка, реакции на F-17, титров и последнего экрана — как в коммите
 # до этого этапа (5bdfc28…f9e55d9). Сумма меняется только при правке самих текстов.
 LETTER_SHA256 = "fb2685c46c8af91e2d29cb0895982850769be76dfed72901cda9a9dfba0307aa"
@@ -160,29 +174,51 @@ class BirthdayGoalTest(unittest.TestCase):
         for path in paths(intro_dialogue.PART_D_PLAN):
             with self.subTest(path=path):
                 text = " ".join(intro_dialogue.PART_D_PLAN.nodes[node_id].text for node_id in path)
-                for words in ("твой день рождения", "организатор", "праздничный план", "три фрагмента плана",
-                              "вкусная, официальная и сладкая", "на мозаике посреди площади",
-                              "Открыть её сможешь только ты", "главным инспектором праздничного настроения"):
+                for words in ("твой день рождения", "готовит тебе праздник", "организатор", "праздничный план",
+                              "разлетелся на три фрагмента", "Три испытания — три фрагмента", "устроим твой праздник",
+                              "на мозаике посреди площади", "Открыть её сможешь только ты",
+                              "главным инспектором праздничного настроения", "сохранять интригу"):
                     self.assertIn(words, text)
                 self.assertTrue("назначил себя" in text or "Я сам" in text)  # организатор самоназначенный
+        # Ни новых целей, ни лишних фрагментов: только три.
+        whole = " ".join(node.text for script in intro_dialogue.all_scripts() for node in script.nodes.values())
+        self.assertNotRegex(whole.lower(), r"(четыр|пят)\w* (фрагмент|испытан)")
 
-    def test_each_fragment_is_its_own_part_of_the_celebration(self) -> None:
-        nodes = intro_dialogue.PART_D_PLAN.nodes
-        parts = {
-            "d_sushi": ("Вкусная часть", "угощение", "кот-повар", "суши"),
-            "d_forms": ("Официальная часть", "порядок", "разрешение на праздник", "гусь-инспектор", "архиве"),
-            "d_cakes": ("сладкая часть", "торт", "перевёрнутой кондитерской", "клубник"),
-        }
-        for node_id, words in parts.items():
-            for word in words:
-                self.assertIn(word, nodes[node_id].text, node_id)
-        # И сами испытания говорят о той же части праздника.
+    def test_trials_are_not_revealed_before_their_portals(self) -> None:
+        emerge = next(i for i, beat in enumerate(BEATS) if isinstance(beat, Cue) and beat.name == "chuchmek_emerges")
+        intro = [node for beat in BEATS[emerge:] if isinstance(beat, Lines) for node in beat.script.nodes.values()]
+        hub = list(hub_dialogue.CHUCHMEK_TALK.nodes.values())  # у неготовых порталов — свои сообщения
+        self.assertGreater(len(intro), 30)
+        for node in (*intro, *hub):
+            with self.subTest(node=node.id):
+                self.assertIsNone(TRIAL_SPOILERS.search(node.text), node.text)
+                for choice in node.choices or ():
+                    self.assertIsNone(TRIAL_SPOILERS.search(choice.text), choice.text)
+        self.assertIsNotNone(TRIAL_SPOILERS.search("Кот-повар, торт и гусь"))  # сам фильтр работает
+        self.assertIsNone(TRIAL_SPOILERS.search("который готовит праздник"))
+        # Что внутри, Алиса узнаёт в самих испытаниях.
         self.assertIn("вкусная часть праздника", sushi_dialogue.INTRO.nodes["s_tasty"].text)
         self.assertIn("вкусную часть праздника", sushi_dialogue.FINAL.nodes["f_fragment"].text)
-        self.assertIn("разрешение на праздник", forms_dialogue.INTRO.nodes["i_need"].text)
-        self.assertIn("Формально праздник существует", forms_dialogue.FINAL.nodes["f_exists"].text)
+        self.assertIn("Для подготовки праздника", forms_dialogue.INTRO.nodes["i_stop"].text)
+        self.assertIn("фрагмент праздничного плана", forms_dialogue.FINAL.nodes["f_fragment"].text)
         self.assertIn("Сладкая часть праздника", cakes_dialogue.INTRO.nodes[cakes_dialogue.CHECK_CHOICE_ID].text)
         self.assertIn("сладкую часть праздника", cakes_dialogue.FINAL.nodes["f_fragment"].text)
+
+    def test_forms_trial_registers_leo_in_wonderland(self) -> None:
+        intro = " ".join(node.text for node in forms_dialogue.INTRO.nodes.values())
+        for words in ("реестр участников", "Лео не значится", "ни рождения, ни гражданства",
+                      "Присутствие не заменяет регистрацию"):
+            self.assertIn(words, intro)
+        inspection = forms_dialogue.INSPECTION.nodes
+        self.assertIn("разрешение на получение гражданства", inspection["r_almost"].text)
+        self.assertIn("Разрешение на получение гражданства Лео", inspection["r_stamp"].text)
+        final = forms_dialogue.FINAL.nodes
+        self.assertIn("Лео признан гражданином Страны Чудес", final["f_decree"].text)
+        self.assertIn("Рождение Лео зарегистрировано", final["f_certificate"].text)
+        # Сказочная бюрократия, а не настоящие правила какой-либо страны.
+        everything = " ".join(node.text for script in forms_dialogue.all_scripts() for node in script.nodes.values())
+        for real in ("Герман", "немецк", "закон", "ведомств", "паспорт"):
+            self.assertNotIn(real, everything)
 
     def test_chuchmek_explains_why_alice_goes_herself(self) -> None:
         nodes = intro_dialogue.PART_D_PLAN.nodes
@@ -196,6 +232,7 @@ class BirthdayGoalTest(unittest.TestCase):
         mentions = [node for script in story_scripts() for node in script.nodes.values() if "Лео" in node.text]
         self.assertTrue(any(node.id == "d_leo" for node in mentions))  # вступление
         self.assertTrue(any(node.id == "h_leo" for node in mentions))  # площадь
+        self.assertTrue(any(node.id == "f_decree" for node in mentions))  # формуляры: его гражданство
         self.assertTrue(any(node.id == "f_verdict" for node in mentions))  # финал
         for line in hub_dialogue.LEO_LINES:
             self.assertTrue(line.startswith("Лео "))  # рассказчик о нём, а не он сам

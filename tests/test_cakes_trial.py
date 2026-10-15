@@ -918,7 +918,7 @@ def play_forms(forms: FormsTrialScene) -> None:
     """Формуляры: три находки, два обмена на столе, сдача гусю."""
     finish_dialogue(forms)
     cabinet = {cabinet.section.id: cabinet.point for cabinet in CABINETS}
-    for section in ("holidays", "requests", "permits"):
+    for section in ("requests", "permits", "births"):
         forms.alice.set_position(*cabinet[section])
         press_e(forms)
         finish_dialogue(forms)

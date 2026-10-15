@@ -372,8 +372,9 @@ class ChuchmekTest(HubTestCase):
             shown.append(self.hub.dialogue.node.id)
             press(self.hub, pygame.K_RETURN)
             press(self.hub, pygame.K_RETURN)
-        # Enter на вопросе выбирает первый ответ — совет о порталах; дальше общая реплика про мозаику.
-        self.assertEqual(shown, ["h_welcome", "h_why", "h_because", HUB_CHOICE_ID, "h_where", "h_hungry", HUB_JOIN_ID])
+        # Enter на вопросе выбирает первый ответ — «что за порталами»; дальше общее напоминание и мозаика.
+        self.assertEqual(shown, ["h_welcome", "h_why", "h_because", HUB_CHOICE_ID, "h_secret", "h_fair", HUB_JOIN_ID,
+                                 "h_mosaic"])
         x = self.hub.alice.x
         hold(self.hub, [pygame.K_LEFT], 0.5)  # управление вернулось
         self.assertLess(self.hub.alice.x, x)
@@ -386,10 +387,23 @@ class ChuchmekTest(HubTestCase):
             "Потому что если бы она была боковой, её пришлось бы искать.",
         ])
         choices = [choice.text for choice in CHUCHMEK_TALK.nodes[HUB_CHOICE_ID].choices]
-        self.assertEqual(choices, ["С какого испытания лучше начать?", "А что конкретно ты поручил Лео?"])
-        self.assertIn("Слева суши, справа торты", CHUCHMEK_TALK.nodes["h_where"].text)
+        self.assertEqual(choices, ["А что там, за порталами?", "А что конкретно ты поручил Лео?"])
+        self.assertIn("это будет уже не сюрприз, а инструктаж", CHUCHMEK_TALK.nodes["h_secret"].text)
+        self.assertIn("главный инспектор праздничного настроения", CHUCHMEK_TALK.nodes["h_leo"].text)
         self.assertIn("Если Лео улыбнётся — пункт плана утверждён", CHUCHMEK_TALK.nodes["h_leo"].text)
-        self.assertIn("мозаике", CHUCHMEK_TALK.nodes[HUB_JOIN_ID].text)  # общая реплика — про финал
+        # Общее напоминание: праздник не готов, три испытания, за каждое фрагмент, все три — к мозаике.
+        reminder = CHUCHMEK_TALK.nodes[HUB_JOIN_ID].text + " " + CHUCHMEK_TALK.nodes["h_mosaic"].text
+        for words in ("Праздник пока не собран", "три испытания", "за каждое — фрагмент", "мозаике",
+                      "Когда будут все три"):
+            self.assertIn(words, reminder)
+
+    def test_chuchmek_neither_waits_at_portals_nor_suggests_an_order(self) -> None:
+        for node in CHUCHMEK_TALK.nodes.values():
+            texts = [node.text, *(choice.text for choice in node.choices or ())]
+            for text in texts:
+                for hint in ("жду", "ждать", "сначала", "начни", "лучше начать", "слева", "справа", "сверху",
+                             "первым", "потом иди"):
+                    self.assertNotIn(hint, text.lower(), node.id)
 
     def test_alice_does_not_walk_during_dialogue(self) -> None:
         walk_to_chuchmek(self.hub)
@@ -442,8 +456,8 @@ def talk(hub: HubScene, answer: int) -> list[str]:
 class ChuchmekChoiceTest(HubTestCase):
     def test_both_answers_have_own_lines_and_join(self) -> None:
         expected = {
-            0: [HUB_CHOICE_ID, "h_where", "h_hungry", HUB_JOIN_ID],
-            1: [HUB_CHOICE_ID, "h_leo", "h_yawn", "h_commission", HUB_JOIN_ID],
+            0: [HUB_CHOICE_ID, "h_secret", "h_fair", HUB_JOIN_ID, "h_mosaic"],
+            1: [HUB_CHOICE_ID, "h_leo", "h_yawn", "h_commission", HUB_JOIN_ID, "h_mosaic"],
         }
         for answer, tail in expected.items():
             with self.subTest(answer=answer):
@@ -459,7 +473,9 @@ class ChuchmekChoiceTest(HubTestCase):
         self.assertIs(self.hub.dialogue.script, CHUCHMEK_TALK_AGAIN)
         self.assertEqual(self.hub.dialogue.node.id, "h_again")
         press(self.hub, pygame.K_BACKSPACE)
-        self.assertEqual(talk(self.hub, 1), ["h_again", "h_leo", "h_yawn", "h_commission", HUB_JOIN_ID])
+        self.assertEqual(talk(self.hub, 1), ["h_again", "h_leo", "h_yawn", "h_commission", HUB_JOIN_ID, "h_mosaic"])
+        # Повторный разговор при любом ответе кончается коротким напоминанием о цели.
+        self.assertEqual(talk(self.hub, 0), ["h_again", "h_secret", "h_fair", HUB_JOIN_ID, "h_mosaic"])
 
     def test_answers_change_nothing_but_the_lines(self) -> None:
         manager = SceneManager()
