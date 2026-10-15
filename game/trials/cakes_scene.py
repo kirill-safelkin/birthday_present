@@ -3,14 +3,18 @@
 Две части в одной сцене:
 1. Рецепт на доске перепутан задом наперёд — этапы переставляются стрелками и E/Enter
    (логика — game/trials/cakes_puzzle.py, без Pygame).
-2. После правильного рецепта клубника сбегает в кладовую, и Алиса ищет её в небольшом
-   лабиринте (раскладка — game/trials/cakes_maze.py), где ходит как на площади.
+2. После правильного рецепта клубника сбегает в кладовую — захламлённую комнату с книжными
+   стеллажами, расставленными вразброс (раскладка, столкновения и поиск пути —
+   game/trials/cakes_maze.py, своя для каждой погони). Клубника носится по ней со скоростью
+   Алисы, иногда останавливается сказать что-нибудь абсурдное (облачко над ней) и снова
+   убегает (game/trials/strawberry_chase.py). Алиса ходит как на площади и ловит её E/Enter,
+   только подойдя вплотную (CATCH_REACH) и не через стеллаж.
 Реплики — в game/story/cakes_dialogue.py.
 
 Этапы: вступление → рецепт (после первой перестановки — разговор с Тортищем) → реакция на
-успех → побег клубники → поиск в кладовой → находка → финальный диалог у рабочего стола →
-награда. Фрагмент (GameProgress.complete("cakes")) выдаётся только после финальной реплики;
-отмена (Backspace) в любой момент до этого возвращает на площадь без награды.
+успех → побег клубники → погоня в кладовой → поимка (реакция уже у рабочего стола) →
+финальный диалог → награда. Фрагмент (GameProgress.complete("cakes")) выдаётся только после
+финальной реплики; отмена (Backspace) в любой момент до этого возвращает на площадь без награды.
 Оформление временное: кондитерская и кладовая нарисованы геометрией.
 
 Тортище (манифест great_cake) — неподвижный NPC кондитерской: стоит на своей подставке над
@@ -21,12 +25,14 @@
 Со слоем высокого разрешения (game/graphics/hires.py) Алиса, Чучмек и Тортище рисуются из
 исходных кадров 64×64, а надписи — шрифтом размера окна; перевёрнутые надписи (заголовок доски
 до исправления рецепта, таблички «ТОРТЫ» и «КЛАДОВАЯ») — тем же шрифтом, повёрнутым на 180°.
-Кондитерская, кладовая, подставка Тортища, торт и клубника остаются пиксельными.
+Кондитерская, кладовая, подставка Тортища, торт и клубника остаются пиксельными, облачко
+реплики клубники — пиксельная рамка с текстом шрифта окна.
 """
 
 from __future__ import annotations
 
 import math
+import random
 from pathlib import Path
 
 import pygame
@@ -34,7 +40,7 @@ import pygame
 import config
 from game.core.input import Action, actions_for
 from game.core.scenes import Scene
-from game.dialogue.box import DialogueBox
+from game.dialogue.box import DialogueBox, wrap_text
 from game.dialogue.model import DialogueController, DialogueScript
 from game.graphics.animation import Direction
 from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
@@ -42,16 +48,9 @@ from game.graphics.hires import HiResLayer, logical_target
 from game.graphics.placeholder import placeholder_animations
 from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, try_load_character_sprites
 from game.story import cakes_dialogue as lines
-from game.trials.cakes_maze import (
-    MAZE_BOUNDS,
-    MAZE_START,
-    MAZE_WALLS,
-    STRAWBERRY_POSITION,
-    MazeWall,
-    maze_collision,
-    strawberry_in_reach,
-)
+from game.trials.cakes_maze import MAZE_BOUNDS, MAZE_START, PantryItem, PantryLayout, generate_layout, line_of_sight
 from game.trials.cakes_puzzle import STEP_NAMES, STEP_SHORT_NAMES, STEPS, CakeRecipe, CheckResult, PickResult
+from game.trials.strawberry_chase import CAUGHT, TALKING, StrawberryChase
 from game.world.character import Character
 from game.world.hub import TRIAL_SCENES
 from game.world.progress import GameProgress
@@ -64,8 +63,8 @@ INTRO_PHASE = "intro"
 ORDERING = "ordering"  # перестановка этапов рецепта
 SUCCESS_PHASE = "success"  # реакция Чучмека на правильный рецепт
 ESCAPE_PHASE = "escape"  # клубника убегает, затем реплики о побеге
-MAZE = "maze"  # поиск клубники в кладовой
-FOUND_PHASE = "found"  # клубника поймана — короткая реакция
+MAZE = "maze"  # погоня за клубникой в кладовой
+FOUND_PHASE = "found"  # клубника поймана — короткая реакция у рабочего стола
 FINAL_PHASE = "final"  # финальный диалог у рабочего стола
 DONE = "done"
 
@@ -103,6 +102,12 @@ ESCAPE_SECONDS = 1.4  # сколько клубника убегает до ре
 ESCAPE_FLOOR_Y = 116
 TOAST_SECONDS = 3.0
 TOAST_PRIORITY_SECONDS = 1.5  # столько свежее сообщение показывается вместо подсказки
+# Поймать клубнику можно, если точки под ногами Алисы и клубники не дальше CATCH_REACH и между
+# ними нет стеллажа (а не по ширине картинки).
+CATCH_REACH = 16
+STRAWBERRY_LIFT = 5  # середина ягоды выше точки под ногами: низ ягоды стоит на полу
+CHASE_TOAST = "Клубника сбежала! Поймай её: E — когда будешь рядом"
+FAR_TOAST = "Ещё не поймана — подойди к клубнике ближе"
 
 HUD_COLOR = (44, 38, 58)
 HUD_TEXT_COLOR = (240, 230, 206)
@@ -137,6 +142,17 @@ SIGN_TEXT_COLOR = (90, 56, 48)
 GOLD_COLOR = (240, 200, 96)  # блюдо-подставка Тортища
 GOLD_EDGE_COLOR = (170, 120, 44)
 GREAT_CAKE_PLACEHOLDER_COLOR = (128, 32, 52)  # бордовая накидка — у манекена, если кадров нет
+SPEECH_COLOR = (255, 250, 236)
+SPEECH_BORDER_COLOR = (90, 56, 48)
+SPEECH_TEXT_COLOR = (64, 36, 40)
+SHELF_WOOD_COLOR = (112, 74, 50)
+SHELF_TOP_COLOR = (164, 116, 78)
+SHELF_DARK_COLOR = (60, 40, 30)
+BOOK_COLORS = ((196, 72, 66), (88, 110, 160), (230, 190, 90), (120, 160, 110), (180, 120, 190), (236, 150, 170),
+               (240, 232, 214))
+PAGE_COLOR = (246, 238, 220)
+BOX_COLOR = (206, 164, 112)
+BOX_DARK_COLOR = (156, 118, 76)
 
 # Надписи в разрешении окна (слой высокого разрешения); размер — в логических пикселях.
 TEXT_SIZE = 8  # интерфейс и доска, как на площади
@@ -145,6 +161,10 @@ TASK_STYLE = TextStyle(TEXT_SIZE, HUD_ACCENT_COLOR, background=HUD_COLOR)
 CHALK_STYLE = TextStyle(TEXT_SIZE, CHALK_COLOR)
 CHALK_DIM_STYLE = TextStyle(TEXT_SIZE, CHALK_DIM_COLOR)
 SIGN_STYLE = TextStyle(6, SIGN_TEXT_COLOR)  # подвешенные таблички
+SPEECH_STYLE = TextStyle(7, SPEECH_TEXT_COLOR, background=SPEECH_COLOR)  # облачко реплики клубники
+SPEECH_MAX_WIDTH = 150  # ширина строки в облачке, логические пиксели
+SPEECH_PADDING = (5, 3)
+SPEECH_AREA = pygame.Rect(2, HUD_HEIGHT + 2, WIDTH - 4, STATUS_TOP - HUD_HEIGHT - 4)  # облачко — между полосами
 HUD_ROWS = (6.5, 17.5)  # середины двух строк верхней полосы
 BOARD_TITLE_MIDDLE = BOARD.y + 8  # середина заголовка доски — над первой строкой этапов
 # Табличка кондитерской висит между противнями: справа под потолком — Тортище.
@@ -191,11 +211,21 @@ class CakesTrialScene(Scene):
 
     supports_hires = True
 
-    def __init__(self, progress: GameProgress | None = None, characters_dir: str | Path = CHARACTERS_DIR) -> None:
+    def __init__(
+        self,
+        progress: GameProgress | None = None,
+        characters_dir: str | Path = CHARACTERS_DIR,
+        seed: int | None = None,
+    ) -> None:
+        """seed — случайность кладовой и клубники (None — каждый раз своя; тесты задают число)."""
         self.progress = progress if progress is not None else GameProgress()
         self.recipe = CakeRecipe()
         self.cursor = 0  # строка доски: этапы 0–4 и кнопка проверки
-        self.collision = maze_collision()
+        self.rng = random.Random(seed)
+        # Кладовая и клубника появляются, когда начинается погоня (_enter_pantry).
+        self.pantry: PantryLayout | None = None
+        self.collision = None
+        self.chase: StrawberryChase | None = None
         root = Path(characters_dir)
         alice_sprites = try_load_character_sprites(root / "alice")
         self.alice = Character(
@@ -232,27 +262,40 @@ class CakesTrialScene(Scene):
         self._fonts = TextFonts()
         self.text_metrics = self._fonts.metrics(HUD_STYLE)
         self.sign_metrics = self._fonts.metrics(SIGN_STYLE)
+        self.speech_metrics = self._fonts.metrics(SPEECH_STYLE)
         self._bakery = self._render_bakery()
-        self._pantry = self._render_pantry()
         # Без надписей на табличках: их рисует слой высокого разрешения.
         self._bakery_plain = self._render_bakery(labels=False)
-        self._pantry_plain = self._render_pantry(labels=False)
+        self._pantry: pygame.Surface | None = None
+        self._pantry_plain: pygame.Surface | None = None
         self._open_dialogue(lines.INTRO)
 
     # --- Состояние ---
 
     def near_strawberry(self) -> bool:
-        """Можно ли сейчас поймать клубнику: идёт поиск и Алиса в последнем закутке кладовой."""
-        return self.phase == MAZE and self.dialogue is None and strawberry_in_reach(self.alice.x, self.alice.y)
+        """Можно ли сейчас поймать клубнику: идёт погоня, ноги Алисы не дальше CATCH_REACH от ног
+        клубники и между ними нет стеллажа. Бежит клубника или болтает — неважно."""
+        chase = self.chase
+        if self.phase != MAZE or self.dialogue is not None or chase is None or chase.state == CAUGHT:
+            return False
+        feet = (self.alice.x, self.alice.y)
+        return math.dist(feet, chase.position) <= CATCH_REACH and line_of_sight(self.pantry.obstacles, feet,
+                                                                                 chase.position)
 
     def strawberry_position(self) -> tuple[float, float] | None:
-        """Где нарисовать клубнику (None — её не видно)."""
+        """Где нарисовать клубнику — середина ягоды (None — её не видно)."""
         if self.area == PANTRY:
-            return None if self.strawberry_found else STRAWBERRY_POSITION
+            if self.chase is None or self.chase.state == CAUGHT:
+                return None
+            x, y = self.chase.position
+            hop = abs(math.sin(self.time * 14)) * 2 if self.chase.is_moving else 0.0  # бежит вприпрыжку
+            return x, y - STRAWBERRY_LIFT - hop
         if self.phase in (INTRO_PHASE, ORDERING, SUCCESS_PHASE):
             return STRAWBERRY_ON_TABLE
         if self.phase == ESCAPE_PHASE:
             return self._escape_position()
+        if self.phase == FOUND_PHASE:
+            return None  # у Алисы над головой (см. _draw_alice)
         if self.strawberry_found:
             return CAKE_CENTER[0], CAKE_CENTER[1] - 11  # на вершине торта
         return None
@@ -278,8 +321,8 @@ class CakesTrialScene(Scene):
         if self.phase == ESCAPE_PHASE:
             return "Клубника сбежала!"
         if self.phase == MAZE:
-            return "Задача: найди сбежавшую клубнику"
-        return "Клубника найдена"
+            return "Задача: догони и поймай клубнику"
+        return "Клубника поймана"
 
     def part_text(self) -> str:
         if self.phase in (INTRO_PHASE, ORDERING, SUCCESS_PHASE):
@@ -310,7 +353,7 @@ class CakesTrialScene(Scene):
         if self.phase == MAZE:
             if self.near_strawberry():
                 return "Клубника   E — поймать"
-            return "Стрелки/WASD — идти   E — поймать клубнику   Backspace — уйти"
+            return "Стрелки/WASD — догнать   E — поймать рядом   Backspace — уйти"
         return None
 
     def status_text(self) -> str:
@@ -381,14 +424,19 @@ class CakesTrialScene(Scene):
             self._open_dialogue(lines.wrong_order(self.recipe.failed_checks, self.recipe.first_mistake()))
 
     def interact(self) -> bool:
-        """E или Enter в кладовой. True, если клубника поймана."""
+        """E или Enter в кладовой. True, если клубника поймана (ровно один раз).
+
+        Издалека — только сообщение: погоня идёт дальше, Алиса никуда не переносится."""
         if self.phase != MAZE:
             return False
         if not self.near_strawberry():
-            self._show_toast("Клубника не здесь — она в дальнем углу кладовой")
+            self._show_toast(FAR_TOAST)
+            return False
+        if not self.chase.catch():
             return False
         self.strawberry_found = True
         self.phase = FOUND_PHASE
+        self._back_to_table()  # реакция — уже у рабочего стола, где её видно над окном реплики
         self._open_dialogue(lines.FOUND)
         return True
 
@@ -427,31 +475,36 @@ class CakesTrialScene(Scene):
         elif self.phase == ESCAPE_PHASE:
             self._enter_pantry()
         elif self.phase == FOUND_PHASE:
-            self._return_to_bakery()
+            self.phase = FINAL_PHASE
+            self._open_dialogue(lines.FINAL)
         elif self.phase == FINAL_PHASE:
             self._complete()
         if self.dialogue is None:
             self.great_cake_pose = self.great_cake_rest_pose()  # уже для нового этапа
 
     def _enter_pantry(self) -> None:
-        """Погоня: Алиса у двери кладовой, дальше — пешком по лабиринту."""
+        """Погоня: новая раскладка кладовой, Алиса у двери, клубника — в дальней части комнаты."""
         self.phase = MAZE
         self.area = PANTRY
+        self.pantry = generate_layout(self.rng.randrange(1 << 30))
+        self.collision = self.pantry.collision()
+        self._pantry = self._render_pantry()
+        self._pantry_plain = self._render_pantry(labels=False)
         self.alice.release_controls()
         self.alice.set_position(*MAZE_START)
         self.alice.face(Direction.RIGHT)
         self.alice.collider = self.collision.move
-        self._show_toast("Кладовая: найди клубнику в дальнем углу")
+        self.chase = StrawberryChase(self.pantry, self.alice.speed, random.Random(self.rng.randrange(1 << 30)),
+                                     lines.STRAWBERRY_LINES, pursuer=MAZE_START)
+        self._show_toast(CHASE_TOAST)
 
-    def _return_to_bakery(self) -> None:
-        """Клубника поймана — назад к рабочему столу, на финальный разговор."""
-        self.phase = FINAL_PHASE
+    def _back_to_table(self) -> None:
+        """Клубника поймана — назад к рабочему столу: реакция, финальный разговор и награда там."""
         self.area = BAKERY
         self.alice.release_controls()
         self.alice.collider = None
         self.alice.set_position(*ALICE_SPOT)
         self.alice.face(Direction.RIGHT)
-        self._open_dialogue(lines.FINAL)
 
     def _complete(self) -> None:
         """Финальная реплика сказана: фрагмент (без повторов — это решает GameProgress) и назад."""
@@ -473,6 +526,8 @@ class CakesTrialScene(Scene):
             if self.escape_time >= ESCAPE_SECONDS:
                 self._open_dialogue(lines.ESCAPE)
         self.alice.update(dt)
+        if self.phase == MAZE and self.dialogue is None and self.chase is not None:
+            self.chase.update(dt, (self.alice.x, self.alice.y))  # убегает от того места, где Алиса сейчас
         if self._toast_time > 0:
             self._toast_time -= dt
             if self._toast_time <= 0:
@@ -505,6 +560,7 @@ class CakesTrialScene(Scene):
             drawables.append((strawberry[1] + 5, lambda: self._draw_loose_strawberry(surface, strawberry, hires)))
         for _, draw in sorted(drawables, key=lambda item: item[0]):
             draw()
+        self._draw_speech(surface, hires)  # облачко клубники — поверх героев, под интерфейсом
         self._draw_hud(surface, hires)
         if self.dialogue is not None and not self.dialogue.is_finished:
             self.box.draw(surface, self.dialogue, hires)
@@ -545,6 +601,60 @@ class CakesTrialScene(Scene):
                 if self.near_strawberry():
                     top = y - 13 - round(abs(math.sin(self.time * 4)) * 2)
                     pygame.draw.polygon(surface, MARK_COLOR, [(x, top - 3), (x + 3, top), (x, top + 3), (x - 3, top)])
+
+    def speech_bubble(self, hires: bool = False) -> tuple[pygame.Rect, list[str]] | None:
+        """Облачко реплики клубники: где оно на холсте и строки в нём (None — она молчит).
+
+        Над ягодой, а если там Алиса или край — под ней; всегда между полосами интерфейса.
+        Строки размечены шрифтом окна (hires=True) или пиксельным — для своего способа вывода."""
+        chase = self.chase
+        center = self.strawberry_position()
+        if self.area != PANTRY or chase is None or chase.state != TALKING or not chase.line or center is None:
+            return None
+        if hires:
+            text_lines = wrap_text(chase.line, self.speech_metrics, SPEECH_MAX_WIDTH)
+            width = max(math.ceil(self.speech_metrics.width(line)) for line in text_lines)
+            line_height = math.ceil(self.speech_metrics.height)
+        else:
+            text_lines = wrap_text(chase.line, self._small_font, SPEECH_MAX_WIDTH)
+            width = max(self._small_font.size(line)[0] for line in text_lines)
+            line_height = self._small_font.get_linesize()
+        size = (width + 2 * SPEECH_PADDING[0], len(text_lines) * line_height + 2 * SPEECH_PADDING[1])
+        x, y = round(center[0]), round(center[1])
+        berry = pygame.Rect(x - 6, y - 9, 13, 15)  # ягода с листиками
+        alice = self.alice.rect.inflate(-14, -4)  # сама Алиса, без пустых краёв кадра
+        above, below = pygame.Rect((0, 0), size), pygame.Rect((0, 0), size)
+        above.midbottom = (x, berry.top - 4)
+        below.midtop = (x, berry.bottom + 3)
+        options = [rect.clamp(SPEECH_AREA) for rect in (above, below)]
+        options.sort(key=lambda rect: (rect.colliderect(berry), _overlap(rect, alice)))
+        return options[0], text_lines
+
+    def _draw_speech(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        bubble = self.speech_bubble(hires is not None)
+        if bubble is None:
+            return
+        rect, text_lines = bubble
+        center = self.strawberry_position()
+        tip_x = min(max(round(center[0]), rect.left + 4), rect.right - 5)
+        if rect.bottom <= center[1]:  # облачко над ягодой — хвостик вниз
+            tail = [(tip_x - 3, rect.bottom - 1), (tip_x + 3, rect.bottom - 1), (tip_x, rect.bottom + 3)]
+        else:
+            tail = [(tip_x - 3, rect.top), (tip_x + 3, rect.top), (tip_x, rect.top - 4)]
+        with logical_target(canvas, hires, rect.inflate(2, 10)) as surface:
+            pygame.draw.polygon(surface, SPEECH_BORDER_COLOR, tail)
+            pygame.draw.rect(surface, SPEECH_COLOR, rect, border_radius=3)
+            pygame.draw.rect(surface, SPEECH_BORDER_COLOR, rect, 1, border_radius=3)
+            if hires is None:
+                line_height = self._small_font.get_linesize()
+                for row, line in enumerate(text_lines):
+                    surface.blit(self._text(line, SPEECH_TEXT_COLOR, small=True),
+                                 (rect.x + SPEECH_PADDING[0], rect.y + SPEECH_PADDING[1] + row * line_height))
+        if hires is not None:
+            line_height = math.ceil(self.speech_metrics.height)
+            for row, line in enumerate(text_lines):
+                middle = rect.y + SPEECH_PADDING[1] + row * line_height + line_height / 2
+                hires.text(line, SPEECH_STYLE, (rect.x + SPEECH_PADDING[0], middle), anchor="midleft")
 
     def _draw_chuchmek(self, canvas: pygame.Surface, spot: tuple[int, int], hires: HiResLayer | None = None) -> None:
         source, image = self._chuchmek_frame()
@@ -777,7 +887,8 @@ class CakesTrialScene(Scene):
         return page
 
     def _render_pantry(self, labels: bool = True) -> pygame.Surface:
-        """Кладовая: дощатый пол, задняя стена, дверь из кондитерской и стеллажи-«змейка».
+        """Кладовая-библиотека: дощатый пол, задняя стена с полками книг, дверь из кондитерской
+        и предметы раскладки — ровно по их основаниям (так видно, где можно пройти).
         labels=False — табличка без надписи: её рисует слой высокого разрешения."""
         page = pygame.Surface(config.LOGICAL_SIZE)
         page.fill(PANTRY_WALL_COLOR)
@@ -787,6 +898,12 @@ class CakesTrialScene(Scene):
                 pygame.draw.line(page, PLANK_LINE_COLOR, (x, y), (x, y + 6))
         for x in range(0, WIDTH, 16):  # стена из досок
             pygame.draw.line(page, (100, 68, 50), (x, HUD_HEIGHT), (x, MAZE_BOUNDS.top - 7))
+        # Полки с книгами на задней стене — по обе стороны от таблички.
+        sign = self.sign_rect(*SIGNS["pantry"], hires=not labels)
+        for left, right in ((MAZE_BOUNDS.left, sign.left - 6), (sign.right + 6, MAZE_BOUNDS.right)):
+            shelf = pygame.Rect(left, HUD_HEIGHT + 9, right - left, 9)
+            self._draw_spines(page, shelf.inflate(0, -2).move(0, -1), seed=left)
+            pygame.draw.rect(page, SHELF_WOOD_COLOR, (shelf.x, shelf.bottom - 2, shelf.width, 2))
         self._upside_down_sign(page, *SIGNS["pantry"], labels)
         # Дверной проём слева, откуда пришли Алиса и Чучмек: в нём видна розовая кондитерская.
         doorway = pygame.Rect(0, 58, MAZE_BOUNDS.left - 4, 50)
@@ -796,38 +913,82 @@ class CakesTrialScene(Scene):
         page.fill(PANTRY_WALL_COLOR, (0, doorway.bottom, doorway.right, 2))
         pygame.draw.line(page, (196, 150, 104), (doorway.right, doorway.top), (doorway.right, doorway.bottom))
         pygame.draw.line(page, (196, 150, 104), doorway.topleft, doorway.topright)
-        for wall in MAZE_WALLS:
-            self._draw_wall(page, wall)
+        if self.pantry is not None:
+            for item in self.pantry.decor:  # плоские листы на полу — под всем остальным
+                self._draw_item(page, item)
+            for item in self.pantry.items:
+                self._draw_item(page, item)
         return page
 
-    def _draw_wall(self, page: pygame.Surface, wall: MazeWall) -> None:
-        """Стеллаж лабиринта ровно по его основанию (так видно, где можно пройти)."""
-        rect = wall.rect
-        # Стеллажи у задней стены дотянуты до неё — щели между ними и стеной нет.
-        visual = rect
-        if rect.top == MAZE_BOUNDS.top:
-            visual = rect.union(pygame.Rect(rect.x, MAZE_BOUNDS.top - 8, rect.width, 1))
-        palette = {
-            "jars": ((130, 90, 64), (236, 120, 140)),
-            "sacks": ((200, 180, 140), (240, 232, 214)),
-            "trays": ((96, 96, 110), (176, 176, 190)),
-            "boxes": ((226, 150, 176), (252, 214, 228)),
-        }
-        dark, light = palette[wall.kind]
-        pygame.draw.rect(page, dark, visual)
-        for k, y in enumerate(range(visual.top + 3, visual.bottom - 4, 9)):
-            if wall.kind == "jars":  # полка с банками варенья
-                pygame.draw.line(page, (90, 60, 44), (visual.left, y + 7), (visual.right - 1, y + 7))
-                pygame.draw.rect(page, light if k % 2 else (250, 214, 110), (visual.left + 3, y + 1, 4, 6))
-                pygame.draw.rect(page, (180, 150, 230), (visual.left + 9, y + 2, 4, 5))
-            elif wall.kind == "sacks":  # мешки с мукой
-                pygame.draw.rect(page, light, (visual.left + 1 + k % 2, y, visual.width - 3, 8), border_radius=3)
-            elif wall.kind == "trays":  # стойка с противнями
-                pygame.draw.line(page, light, (visual.left + 1, y + 4), (visual.right - 2, y + 4))
-            else:  # коробки для тортов с лентой
-                box = pygame.Rect(visual.left + 1, y, visual.width - 2, 8)
-                pygame.draw.rect(page, light, box)
-                pygame.draw.line(page, STRAWBERRY_COLOR, (box.centerx, box.top), (box.centerx, box.bottom - 1))
-        pygame.draw.rect(page, (60, 40, 30), visual, 1)
-        pygame.draw.line(page, (60, 40, 30), (visual.left, visual.bottom - 3), (visual.right - 1, visual.bottom - 3))
+    def _draw_spines(self, page: pygame.Surface, area: pygame.Rect, seed: int) -> None:
+        """Ряд книжных корешков разной ширины и цвета; рисунок зависит только от seed."""
+        x = area.left
+        k = seed
+        while x < area.right:
+            k = (k * 1103515245 + 12345) & 0x7FFFFFFF
+            width = 2 + k % 3
+            height = area.height - (k >> 4) % 3
+            color = BOOK_COLORS[(k >> 8) % len(BOOK_COLORS)]
+            page.fill(color, (x, area.bottom - height, min(width, area.right - x), height))
+            x += width + ((k >> 12) % 4 == 0)
 
+    def _draw_item(self, page: pygame.Surface, item: PantryItem) -> None:
+        """Предмет кладовой по его основанию: стеллаж, стопка книг, коробки или листы на полу."""
+        rect = item.rect
+        seed = rect.x * 31 + rect.y * 17 + rect.width
+        if item.kind == "bookcase":  # спереди: две полки корешков, сверху — доска
+            visual = rect
+            if rect.top == MAZE_BOUNDS.top:  # у задней стены дотянут до неё — щели нет
+                visual = rect.union(pygame.Rect(rect.x, MAZE_BOUNDS.top - 8, rect.width, 1))
+            pygame.draw.rect(page, SHELF_WOOD_COLOR, visual)
+            page.fill(SHELF_TOP_COLOR, (visual.x, visual.y, visual.width, 3))
+            inner = pygame.Rect(visual.x + 2, visual.y + 4, visual.width - 4, visual.height - 6)
+            rows = 2 if inner.height >= 8 else 1
+            shelf_height = inner.height // rows
+            for row in range(rows):
+                band = pygame.Rect(inner.x, inner.y + row * shelf_height, inner.width, shelf_height - 1)
+                self._draw_spines(page, band, seed + row)
+            pygame.draw.rect(page, SHELF_DARK_COLOR, visual, 1)
+        elif item.kind == "tall_bookcase":  # боком, длинный в глубину: видны верхние обрезы книг
+            pygame.draw.rect(page, SHELF_WOOD_COLOR, rect)
+            page.fill(SHELF_TOP_COLOR, (rect.x, rect.y, rect.width, 3))
+            k = seed
+            for y in range(rect.y + 4, rect.bottom - 3, 3):
+                k = (k * 1103515245 + 12345) & 0x7FFFFFFF
+                page.fill(BOOK_COLORS[k % len(BOOK_COLORS)], (rect.x + 2, y, rect.width - 4 - (k >> 6) % 3, 2))
+            pygame.draw.rect(page, SHELF_DARK_COLOR, rect, 1)
+            pygame.draw.line(page, SHELF_DARK_COLOR, (rect.left, rect.bottom - 3), (rect.right - 1, rect.bottom - 3))
+        elif item.kind in ("books", "cookbooks"):  # стопка: книги лежат друг на друге
+            k = seed
+            y = rect.bottom
+            while y > rect.top:
+                k = (k * 1103515245 + 12345) & 0x7FFFFFFF
+                height = min(3 + k % 2, y - rect.top)
+                inset = (k >> 5) % 3
+                if item.kind == "cookbooks":
+                    color = ((236, 150, 170), (250, 214, 228), (240, 232, 214))[(k >> 9) % 3]
+                else:
+                    color = BOOK_COLORS[(k >> 9) % len(BOOK_COLORS)]
+                book = pygame.Rect(rect.x + inset, y - height, rect.width - 3 + (k >> 7) % 2 - inset, height)
+                page.fill(color, book)
+                page.fill(PAGE_COLOR, (book.right - 2, book.y + 1, 1, max(1, book.height - 1)))  # обрез страниц
+                y -= height
+            if item.kind == "cookbooks":  # на верхней — клубничка, это кулинарные книги
+                pygame.draw.circle(page, STRAWBERRY_COLOR, (rect.centerx - 1, rect.top + 2), 1)
+            pygame.draw.rect(page, SHELF_DARK_COLOR, rect, 1)
+        elif item.kind == "boxes":  # коробка с лентой и клапанами
+            pygame.draw.rect(page, BOX_COLOR, rect)
+            page.fill(BOX_DARK_COLOR, (rect.x, rect.bottom - 4, rect.width, 4))
+            pygame.draw.line(page, BOX_DARK_COLOR, (rect.centerx, rect.top), (rect.centerx, rect.bottom - 5))
+            pygame.draw.line(page, PAGE_COLOR, (rect.left + 2, rect.top + 3), (rect.right - 3, rect.top + 3))
+            pygame.draw.rect(page, SHELF_DARK_COLOR, rect, 1)
+        else:  # плоские листы рецептов на полу: по ним ходят
+            page.fill(PAGE_COLOR, rect)
+            for y in range(rect.y + 1, rect.bottom - 1, 2):
+                pygame.draw.line(page, (190, 176, 150), (rect.x + 1, y), (rect.right - 2, y))
+
+
+def _overlap(first: pygame.Rect, second: pygame.Rect) -> int:
+    """Площадь пересечения прямоугольников."""
+    clip = first.clip(second)
+    return clip.width * clip.height

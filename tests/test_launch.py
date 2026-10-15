@@ -24,7 +24,6 @@ from game.story import final_dialogue as text  # noqa: E402
 from game.story import final_scene  # noqa: E402
 from game.story.final_scene import DONE, FinalScene  # noqa: E402
 from game.story.intro_scene import IntroScene  # noqa: E402
-from game.trials.cakes_maze import MAZE_ROUTE  # noqa: E402
 from game.trials.cakes_scene import CHECK_ROW, ESCAPE_SECONDS  # noqa: E402
 from game.trials.forms_scene import CABINETS, GOOSE_POSITION, SLOT_XS, SLOT_Y  # noqa: E402
 from game.trials.sushi_orders import RECIPES  # noqa: E402
@@ -228,7 +227,7 @@ class FullPlaythroughTest(LaunchTestCase):
         self.finish_dialogue(cakes)
         self.app._update(ESCAPE_SECONDS + 0.1)
         self.finish_dialogue(cakes)
-        cakes.alice.set_position(*MAZE_ROUTE[-1])
+        cakes.alice.set_position(*cakes.chase.position)  # вплотную к клубнике, где бы она ни бегала
         self.press_e()
         self.finish_dialogue(cakes)
         self.finish_dialogue(cakes)

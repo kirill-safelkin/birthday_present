@@ -42,7 +42,6 @@ from game.story.final_scene import (  # noqa: E402
     FinalScene,
 )
 from game.story.intro_dialogue import ALICE, CHUCHMEK  # noqa: E402
-from game.trials.cakes_maze import MAZE_ROUTE  # noqa: E402
 from game.trials.cakes_scene import CHECK_ROW, ESCAPE_SECONDS  # noqa: E402
 from game.trials.forms_scene import CABINETS, GOOSE_POSITION, SLOT_XS, SLOT_Y  # noqa: E402
 from game.trials.sushi_orders import RECIPES  # noqa: E402
@@ -543,7 +542,7 @@ def play_cakes(cakes: Scene) -> None:
     finish_dialogue(cakes)
     cakes.update(ESCAPE_SECONDS + 0.1)
     finish_dialogue(cakes)
-    cakes.alice.set_position(*MAZE_ROUTE[-1])
+    cakes.alice.set_position(*cakes.chase.position)  # вплотную к клубнике, где бы она ни бегала
     press_e(cakes)
     finish_dialogue(cakes)
     finish_dialogue(cakes)

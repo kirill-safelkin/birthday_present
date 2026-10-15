@@ -12,6 +12,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import hashlib  # noqa: E402
+import math  # noqa: E402
 from dataclasses import replace  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
@@ -52,7 +53,6 @@ from game.story.intro_scene import IntroScene  # noqa: E402
 from game.trials import cakes_scene as cakes  # noqa: E402
 from game.trials import forms_scene as forms  # noqa: E402
 from game.trials import sushi_scene as sushi  # noqa: E402
-from game.trials.cakes_maze import MAZE_ROUTE, STRAWBERRY_POSITION, strawberry_in_reach  # noqa: E402
 from game.trials.cakes_puzzle import STEP_NAMES, STEP_SHORT_NAMES  # noqa: E402
 from game.trials.forms_puzzle import DOCUMENT_NAMES, SECTIONS  # noqa: E402
 from game.trials.sushi_orders import INGREDIENT_NAMES, RECIPES, SushiOrders  # noqa: E402
@@ -132,12 +132,36 @@ def play_cakes(scene) -> None:
     finish_dialogue(scene)
     scene.update(cakes.ESCAPE_SECONDS + 0.1)
     finish_dialogue(scene)
-    for point in MAZE_ROUTE:  # по проверенному маршруту, а не прыжком к ягоде
-        scene.alice.set_position(*point)
-        scene.update(1 / 30)
+    walk_to_strawberry(scene)
     press_e(scene)
     finish_dialogue(scene)
     finish_dialogue(scene)
+
+
+def walk_to_strawberry(scene) -> None:
+    """По проходимым точкам кладовой к бегущей клубнике (а не прыжком к ней), пока её можно поймать."""
+    nav = scene.pantry.nav()
+    for _ in range(400):
+        if scene.near_strawberry():
+            return
+        path = nav.find_path((scene.alice.x, scene.alice.y), scene.chase.position)
+        x, y = path[0]
+        step = min(1.0, 4 / max(1e-6, math.dist((x, y), (scene.alice.x, scene.alice.y))))
+        scene.alice.set_position(scene.alice.x + (x - scene.alice.x) * step, scene.alice.y + (y - scene.alice.y) * step)
+        scene.update(1 / 30)
+    raise AssertionError("не догнали клубнику")
+
+
+def beside_strawberry(scene) -> tuple[float, float]:
+    """Свободная точка рядом с клубникой, откуда её можно поймать (Алиса её не загораживает)."""
+    x, y = scene.chase.position
+    for dx, dy in ((-12, 0), (12, 0), (0, 10), (0, -10), (-8, 8), (8, 8)):
+        if scene.collision.is_free(x + dx, y + dy):
+            scene.alice.set_position(x + dx, y + dy)
+            if scene.near_strawberry():
+                return x + dx, y + dy
+    scene.alice.set_position(x, y)
+    return x, y
 
 
 def play_finale(scene) -> None:
@@ -350,7 +374,8 @@ class CharacterTest(SceneTestCase):
     def test_drawing_never_moves_anyone(self) -> None:
         scene = cakes.CakesTrialScene()
         play_cakes_until_maze(scene)
-        scene.alice.set_position(*MAZE_ROUTE[3])
+        nav = scene.pantry.nav()
+        scene.alice.set_position(*nav.point(sorted(nav.free)[len(nav.free) // 2]))
         before = (scene.alice.x, scene.alice.y, scene.alice.direction)
         for size in (WINDOWED, FULLSCREEN):
             layer, _ = self.draw(scene)
@@ -396,14 +421,14 @@ class LayerOrderTest(SceneTestCase):
     def test_cakes_strawberry_and_dialogue_order(self) -> None:
         scene = cakes.CakesTrialScene()
         play_cakes_until_maze(scene)
-        scene.alice.set_position(*MAZE_ROUTE[-1])  # в последнем закутке, откуда ягоду ловят
         scene.update(cakes.TOAST_PRIORITY_SECONDS + 0.1)  # свежее сообщение о кладовой уступило подсказке
+        beside_strawberry(scene)  # рядом с клубникой, где бы она ни бегала
         layer, _ = self.draw(scene)
         self.assertTrue(any(isinstance(c, SpriteCommand) and c.rect == scene.alice.rect for c in layer.commands))
         hint = [c.text for c in layer.commands if isinstance(c, TextCommand)]
         self.assertIn("Клубника   E — поймать", hint)
         press_e(scene)
-        for alice_feet in (MAZE_ROUTE[-1], (MAZE_ROUTE[-1][0], 150)):  # как в игре и ниже края окна
+        for alice_feet in (cakes.ALICE_SPOT, (cakes.ALICE_SPOT[0], 150)):  # как в игре и ниже края окна
             scene.alice.set_position(*alice_feet)
             layer, _ = self.draw(scene)
             self.assert_box_over_sprites(scene, layer)
@@ -507,8 +532,9 @@ class StrawberryTest(SceneTestCase):
         play_cakes_until_maze(scene)
         canvas = pygame.Surface(config.LOGICAL_SIZE)
         layer = HiResLayer(self.fonts, strict=True)
-        scene.alice.set_position(*MAZE_ROUTE[-1])
-        self.assertTrue(strawberry_in_reach(*MAZE_ROUTE[-1]))
+        beside_strawberry(scene)
+        self.assertTrue(scene.near_strawberry())
+        expected_center = scene.strawberry_position()
         scene.draw(canvas, layer)
         for size in (WINDOWED, FULLSCREEN):
             transform = transform_for(size)
@@ -517,7 +543,7 @@ class StrawberryTest(SceneTestCase):
             layer.render(screen, transform)
             red = pygame.mask.from_threshold(screen, cakes.STRAWBERRY_COLOR, (1, 1, 1, 255))
             body = max(red.get_bounding_rects(), key=lambda rect: rect.width * rect.height)
-            expected = transform.point(STRAWBERRY_POSITION)
+            expected = transform.point(expected_center)
             with self.subTest(window=size):
                 # Середина ягоды — в точке клубники с точностью до пары логических пикселей.
                 self.assertLessEqual(abs(body.centerx - expected[0]), 2 * transform.scale)
@@ -600,8 +626,8 @@ class TextFitTest(SceneTestCase):
         statuses = [f"Поменяла местами: {a} и {b}" for a in short for b in short]
         statuses += ["Стрелки — выбрать этап   E — взять   Backspace — уйти",
                      "E — проверить рецепт   Стрелки — к этапам",
-                     "Стрелки/WASD — идти   E — поймать клубнику   Backspace — уйти",
-                     "Клубника не здесь — она в дальнем углу кладовой", "Клубника   E — поймать"]
+                     "Стрелки/WASD — догнать   E — поймать рядом   Backspace — уйти",
+                     cakes.FAR_TOAST, cakes.CHASE_TOAST, "Клубника   E — поймать"]
         for name, fonts in self.variants().items():
             with self.subTest(font=name):
                 for step in STEP_NAMES.values():

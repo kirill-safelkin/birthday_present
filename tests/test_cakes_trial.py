@@ -7,6 +7,7 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
+import math  # noqa: E402
 import shutil  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
@@ -19,23 +20,27 @@ import config  # noqa: E402
 from game.core.app import App  # noqa: E402
 from game.core.scenes import Scene, SceneManager  # noqa: E402
 from game.dialogue.box import DialogueBox  # noqa: E402
-from game.graphics.hires import HiResLayer, SpriteCommand, ViewTransform, scale_sprite  # noqa: E402
+from game.graphics.hires import HiResLayer, SpriteCommand, TextCommand, ViewTransform, scale_sprite  # noqa: E402
 from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites  # noqa: E402
 from game.story import cakes_dialogue as lines  # noqa: E402
 from game.story.intro_dialogue import ALICE, CHUCHMEK  # noqa: E402
-from game.trials.cakes_maze import MAZE_BOUNDS, MAZE_ROUTE, MAZE_START, MAZE_WALLS, STRAWBERRY_POSITION  # noqa: E402
+from game.trials.cakes_maze import MAZE_BOUNDS, MAZE_START, generate_layout, line_of_sight  # noqa: E402
 from game.trials.cakes_puzzle import CORRECT_ORDER, START_ORDER, STEP_NAMES, STEP_SHORT_NAMES  # noqa: E402
+from game.trials.strawberry_chase import CAUGHT, RUNNING, TALKING  # noqa: E402
 from game.trials.cakes_scene import (  # noqa: E402
     ALICE_SPOT,
     BAKERY,
     BOARD,
     CAKES_SCENE,
+    CATCH_REACH,
+    CHASE_TOAST,
     CHECK_ROW,
     CHUCHMEK_DOOR,
     CHUCHMEK_SPOT,
     DONE,
     ESCAPE_PHASE,
     ESCAPE_SECONDS,
+    FAR_TOAST,
     FINAL_PHASE,
     FOUND_PHASE,
     GREAT_CAKE_SIZE,
@@ -46,6 +51,8 @@ from game.trials.cakes_scene import (  # noqa: E402
     ORDERING,
     PANTRY,
     PANTRY_DOOR,
+    SPEECH_AREA,
+    SPEECH_STYLE,
     SPRITE_SIZE,
     STATUS_TOP,
     STRAWBERRY_COLOR,
@@ -53,17 +60,20 @@ from game.trials.cakes_scene import (  # noqa: E402
     SUCCESS_PHASE,
     TABLE_AREA,
     TOAST_SECONDS,
+    WALK_SPEED,
     CakesTrialScene,
     draw_strawberry,
 )
 from game.trials.forms_scene import CABINETS, GOOSE_POSITION, SLOT_XS, SLOT_Y, FormsTrialScene  # noqa: E402
 from game.trials.sushi_orders import RECIPES  # noqa: E402
 from game.trials.sushi_scene import STATIONS, TABLE as SUSHI_TABLE, SushiTrialScene  # noqa: E402
+from game.world.collision import FOOT_SIZE  # noqa: E402
 from game.world.hub import PORTALS, TRIAL_SCENES, HubScene  # noqa: E402
 from game.world.progress import GameProgress  # noqa: E402
 
 DT = 1 / 60
 WIDTH = config.LOGICAL_SIZE[0]
+SEED = 2026  # раскладка кладовой и погоня в большинстве тестов — одни и те же
 PORTAL = {portal.id: portal.point for portal in PORTALS}
 # Два обмена превращают обратный порядок в правильный: 1 ↔ 5, затем 2 ↔ 4.
 SOLVING_PICKS = (0, 4, 1, 3)
@@ -138,30 +148,61 @@ def to_pantry(scene: CakesTrialScene) -> None:
     finish_dialogue(scene)  # «Клубника сбежала!»
 
 
-def walk_route(scene: CakesTrialScene) -> None:
-    """Проводит Алису по MAZE_ROUTE стрелками, как игрок."""
-    alice = scene.alice
-    for x, y in MAZE_ROUTE[1:]:
-        horizontal = abs(x - alice.x) > abs(y - alice.y)
-        if horizontal:
-            code = pygame.K_RIGHT if x > alice.x else pygame.K_LEFT
-        else:
-            code = pygame.K_DOWN if y > alice.y else pygame.K_UP
-        scene.handle_event(key(code))
-        for _ in range(600):
-            remaining = abs(x - alice.x) if horizontal else abs(y - alice.y)
-            if remaining <= 1.1:
+def chase_with_keys(scene: CakesTrialScene, limit: float = 90.0) -> float:
+    """Догоняет клубнику стрелками, как игрок: каждые 0,1 с смотрит, куда идти по пути к ней
+    (путь — только подсказка «игроку»; Алису двигают клавиши и столкновения сцены). Клубника
+    всё это время бегает сама. Возвращает, сколько секунд заняла погоня."""
+    alice, nav = scene.alice, scene.pantry.nav()
+    held: set[int] = set()
+    elapsed = 0.0
+
+    def hold_keys(wanted: set[int]) -> None:
+        for code in held - wanted:
+            scene.handle_event(key(code, event_type=pygame.KEYUP))
+        for code in wanted - held:
+            scene.handle_event(key(code))
+        held.clear()
+        held.update(wanted)
+
+    while elapsed < limit:
+        if scene.near_strawberry():
+            hold_keys(set())
+            return elapsed
+        path = nav.find_path((alice.x, alice.y), scene.chase.position) or []
+        wanted: set[int] = set()
+        for x, y in path[:2]:
+            dx, dy = x - alice.x, y - alice.y
+            if abs(dx) > 2:
+                wanted.add(pygame.K_RIGHT if dx > 0 else pygame.K_LEFT)
+            if abs(dy) > 2:
+                wanted.add(pygame.K_DOWN if dy > 0 else pygame.K_UP)
+            if wanted:
                 break
-            before = (alice.x, alice.y)
+        hold_keys(wanted)
+        for _ in range(6):
             scene.update(DT)
-            if (alice.x, alice.y) == before:
-                raise AssertionError(f"Алиса застряла в {before} по пути к {(x, y)}")
-        scene.handle_event(key(code, event_type=pygame.KEYUP))
+            elapsed += DT
+            if scene.near_strawberry():
+                break
+    hold_keys(set())
+    raise AssertionError(f"не догнали клубнику за {limit} с")
 
 
 def catch_strawberry(scene: CakesTrialScene) -> None:
-    scene.alice.set_position(*MAZE_ROUTE[-1])
+    """Вплотную к клубнике, где бы она ни бегала, и E (сама погоня — chase_with_keys)."""
+    scene.alice.set_position(*scene.chase.position)
     press_e(scene)
+
+
+def spot_beside(scene: CakesTrialScene, distance: float) -> tuple[float, float]:
+    """Свободная точка на расстоянии distance от клубники, откуда её видно (не через стеллаж)."""
+    x, y = scene.chase.position
+    for k in range(16):
+        angle = k * math.pi / 8
+        point = (x + distance * math.cos(angle), y + distance * math.sin(angle))
+        if scene.collision.is_free(*point) and line_of_sight(scene.pantry.obstacles, point, (x, y)):
+            return point
+    raise AssertionError("вокруг клубники нет свободного места")
 
 
 def play(scene: CakesTrialScene, stop_before_final_end: bool = False) -> None:
@@ -190,7 +231,7 @@ class TrialTestCase(unittest.TestCase):
         self.progress = GameProgress()
         self.manager = SceneManager()
         self.hub = self.manager.push(HubScene(self.progress))
-        self.scene = self.manager.push(CakesTrialScene(self.progress))
+        self.scene = self.manager.push(CakesTrialScene(self.progress, seed=SEED))
 
     def tearDown(self) -> None:
         pygame.quit()
@@ -353,7 +394,7 @@ class EscapeTest(TrialTestCase):
         self.assertIn("Найди её", texts[-1])  # явная подсказка, что делать дальше
         self.assertEqual(self.scene.phase, MAZE)
         self.assertEqual(self.scene.area, PANTRY)
-        self.assertEqual(self.scene.task_text(), "Задача: найди сбежавшую клубнику")
+        self.assertEqual(self.scene.task_text(), "Задача: догони и поймай клубнику")
         self.assertEqual(self.scene.part_text(), "Часть 2 из 2 — клубника")
         self.assertEqual((self.scene.alice.x, self.scene.alice.y), MAZE_START)
         self.assertEqual(self.progress.fragments, 0)
@@ -378,45 +419,138 @@ class MazeTest(TrialTestCase):
         super().setUp()
         to_pantry(self.scene)
 
-    def test_walk_the_maze_with_keys_and_catch_the_strawberry(self) -> None:
-        self.assertEqual(self.scene.status_text(), "Кладовая: найди клубнику в дальнем углу")
+    def test_chase_the_strawberry_with_keys_and_catch_it(self) -> None:
+        self.assertEqual(self.scene.status_text(), CHASE_TOAST)
+        self.assertEqual(CHASE_TOAST, "Клубника сбежала! Поймай её: E — когда будешь рядом")
         self.scene.update(2.0)
         self.assertEqual(self.scene.status_text(),
-                         "Стрелки/WASD — идти   E — поймать клубнику   Backspace — уйти")
-        walk_route(self.scene)
+                         "Стрелки/WASD — догнать   E — поймать рядом   Backspace — уйти")
+        seconds = chase_with_keys(self.scene)
+        self.assertGreater(seconds, 1.0)  # клубника не стоит и ждёт — её пришлось догонять
         self.assertTrue(self.scene.near_strawberry())
         self.assertEqual(self.scene.status_text(), "Клубника   E — поймать")
         press_e(self.scene)
         self.assertTrue(self.scene.strawberry_found)
+        self.assertEqual(self.scene.chase.state, CAUGHT)
         self.assertEqual(self.scene.phase, FOUND_PHASE)
         self.assertIs(self.scene.dialogue.script, lines.FOUND)
-        self.assertEqual(self.progress.fragments, 0)  # находка — ещё не награда
+        self.assertEqual(self.scene.dialogue.node.speaker, lines.STRAWBERRY)  # сначала реакция клубники
+        self.assertEqual(self.scene.area, BAKERY)  # и уже у рабочего стола
+        self.assertEqual(self.progress.fragments, 0)  # поимка — ещё не награда
 
-    def test_strawberry_cannot_be_caught_from_afar_or_through_a_wall(self) -> None:
-        last_wall = MAZE_WALLS[-1].rect
-        for spot in (MAZE_START, (last_wall.left - 6, STRAWBERRY_POSITION[1]), (232, 152)):
-            self.scene.alice.set_position(*spot)
-            self.assertTrue(self.scene.collision.is_free(*spot))
-            press_e(self.scene)
-            self.assertFalse(self.scene.strawberry_found, spot)
-            self.assertEqual(self.scene.phase, MAZE)
-            self.assertEqual(self.scene.status_text(), "Клубника не здесь — она в дальнем углу кладовой")
+    def test_strawberry_cannot_be_caught_from_afar_or_through_a_shelf(self) -> None:
+        scene = self.scene
+        for spot in (MAZE_START, spot_beside(scene, CATCH_REACH + 4)):
+            scene.alice.set_position(*spot)
+            self.assertTrue(scene.collision.is_free(*spot))
+            press_e(scene)
+            self.assertFalse(scene.strawberry_found, spot)
+            self.assertEqual(scene.phase, MAZE)
+            self.assertEqual(scene.status_text(), FAR_TOAST)
+            self.assertEqual((scene.alice.x, scene.alice.y), spot)  # E не переносит Алису к ягоде
+        # Через угол стеллажа: близко, но прямую загораживает стеллаж.
+        rect = scene.pantry.obstacles[0]
+        alice, berry = (rect.left - 6, rect.top + 3), (rect.left + 3, rect.top)
+        self.assertTrue(scene.collision.is_free(*alice) and scene.collision.is_free(*berry))
+        self.assertLessEqual(math.dist(alice, berry), CATCH_REACH)
+        scene.chase.x, scene.chase.y = berry
+        scene.alice.set_position(*alice)
+        self.assertFalse(scene.near_strawberry())
+        press_e(scene)
+        self.assertFalse(scene.strawberry_found)
+        self.assertEqual(scene.status_text(), FAR_TOAST)
+        # А без стеллажа между ними на том же расстоянии — можно.
+        scene.alice.set_position(*spot_beside(scene, math.dist(alice, berry)))
+        self.assertTrue(scene.near_strawberry())
+
+    def test_chase_goes_on_after_a_miss(self) -> None:
+        scene = self.scene
+        scene.alice.set_position(*MAZE_START)
+        for _ in range(3):
+            press_e(scene)
+        before = scene.chase.position
+        scene.update(0.5)
+        scene.update(0.5)
+        self.assertEqual(scene.phase, MAZE)
+        self.assertNotEqual(scene.chase.position, before)  # промах не останавливает и не сбрасывает погоню
+        self.assertNotEqual(scene.chase.state, CAUGHT)
+
+    def test_alice_walks_while_the_strawberry_talks(self) -> None:
+        scene = self.scene
+        for _ in range(round(6 / DT)):
+            if scene.chase.state == TALKING:
+                break
+            scene.update(DT)
+        self.assertEqual(scene.chase.state, TALKING)
+        self.assertIsNone(scene.dialogue)  # реплика клубники — облачко, а не окно диалога
+        self.assertIsNotNone(scene.speech_bubble())
+        berry, feet = scene.chase.position, (scene.alice.x, scene.alice.y)
+        scene.handle_event(key(pygame.K_DOWN))
+        for _ in range(20):
+            scene.update(DT)
+            if scene.chase.state != TALKING:
+                break
+            self.assertEqual(scene.chase.position, berry)  # стоит и говорит
+        scene.handle_event(key(pygame.K_DOWN, event_type=pygame.KEYUP))
+        self.assertGreater(scene.alice.y, feet[1])  # а Алиса идёт
+
+    def test_caught_while_talking_or_running(self) -> None:
+        for wanted in (TALKING, RUNNING):
+            with self.subTest(state=wanted):
+                scene = CakesTrialScene(GameProgress(), seed=SEED + 1)
+                to_pantry(scene)
+                for _ in range(round(8 / DT)):
+                    if scene.chase.state == wanted and (wanted == TALKING or scene.chase.is_moving):
+                        break
+                    scene.update(DT)
+                self.assertEqual(scene.chase.state, wanted)
+                scene.alice.set_position(*spot_beside(scene, CATCH_REACH - 2))
+                press_e(scene)
+                self.assertTrue(scene.strawberry_found)
+                self.assertEqual(scene.chase.state, CAUGHT)
+                self.assertIsNone(scene.chase.line)
+                self.assertIsNone(scene.speech_bubble())
+
+    def test_nothing_runs_or_talks_after_the_catch(self) -> None:
+        scene = self.scene
+        catch_strawberry(scene)
+        chase = scene.chase
+        frozen = (chase.position, chase.routes, chase.stops, list(chase.lines_said))
+        press_e(scene)  # второй раз не поймать
+        for _ in range(3):
+            scene.update(2.0)
+        self.assertEqual((chase.position, chase.routes, chase.stops, chase.lines_said), frozen)
+        self.assertEqual(scene.phase, FOUND_PHASE)
+        self.assertNotIn("Клубника   E — поймать", scene.status_text())
+
+    def test_strawberry_runs_at_alices_speed(self) -> None:
+        self.assertEqual(self.scene.chase.speed, self.scene.alice.speed)
+        self.assertEqual(self.scene.alice.speed, WALK_SPEED)  # скорость Алисы прежняя
 
     def test_walls_stop_alice(self) -> None:
-        first_wall = MAZE_WALLS[0].rect
-        self.scene.alice.set_position(MAZE_START[0], 100)
-        self.scene.handle_event(key(pygame.K_RIGHT))
+        scene = self.scene
+        for rect in scene.pantry.obstacles:
+            y = rect.bottom - 1
+            start = (rect.left - 6 - 30, y)
+            if all(scene.collision.is_free(start[0] + k, y) for k in range(31)):
+                break
+        else:
+            self.fail("нет стеллажа со свободным подходом слева")
+        scene.alice.set_position(*start)
+        scene.handle_event(key(pygame.K_RIGHT))
         for _ in range(5):
-            self.scene.update(0.5)  # крупные шаги тоже не «протаскивают» сквозь стеллаж
-        self.scene.handle_event(key(pygame.K_RIGHT, event_type=pygame.KEYUP))
-        self.assertAlmostEqual(self.scene.alice.x, first_wall.left - 6)
+            scene.update(0.5)  # крупные шаги тоже не «протаскивают» сквозь стеллаж
+        scene.handle_event(key(pygame.K_RIGHT, event_type=pygame.KEYUP))
+        self.assertAlmostEqual(scene.alice.x, rect.left - 6)
 
     def test_alice_stays_on_screen_and_off_the_walls(self) -> None:
         for keys in ([pygame.K_UP], [pygame.K_DOWN], [pygame.K_LEFT], [pygame.K_RIGHT, pygame.K_DOWN],
                      [pygame.K_RIGHT, pygame.K_UP]):
-            scene = CakesTrialScene()
+            scene = CakesTrialScene()  # каждый раз своя раскладка
             to_pantry(scene)
-            scene.alice.set_position(116, 110)
+            nav = scene.pantry.nav()
+            middle = min(nav.free, key=lambda cell: math.dist(nav.point(cell), (160, 110)))
+            scene.alice.set_position(*nav.point(middle))
             for code in keys:
                 scene.handle_event(key(code))
             for _ in range(300):
@@ -436,7 +570,7 @@ class MazeTest(TrialTestCase):
         self.assertGreaterEqual(y - 9, HUD_HEIGHT)
         around = {tuple(self.canvas.get_at((x + dx, y + dy)))[:3] for dx in range(-3, 4) for dy in range(-2, 3)}
         self.assertIn(STRAWBERRY_COLOR, around)
-        self.assertIsNone(self.scene.strawberry_position())  # в кладовой её больше нет
+        self.assertIsNone(self.scene.strawberry_position())  # она у Алисы над головой, а не на полу
 
 
 class RewardTest(TrialTestCase):
@@ -537,8 +671,8 @@ class LayoutTest(TrialTestCase):
         box = DialogueBox()
         lowest_box = min((box.layout(node).name_tab or box.layout(node).box).top
                          for script in lines.all_scripts() for node in script.nodes.values())
-        for y in (ALICE_SPOT[1], CHUCHMEK_SPOT[1], CHUCHMEK_DOOR[1], MAZE_START[1], MAZE_ROUTE[-1][1],
-                  STRAWBERRY_POSITION[1] + 5, BOARD.bottom):
+        # В кладовой окон реплик нет (см. test_no_dialogue_box_in_the_pantry): поймали — реакция у стола.
+        for y in (ALICE_SPOT[1], CHUCHMEK_SPOT[1], CHUCHMEK_DOOR[1], MAZE_START[1], BOARD.bottom):
             self.assertLessEqual(y, lowest_box)
 
     def test_pantry_keeps_alice_between_interface_strips(self) -> None:
@@ -549,15 +683,14 @@ class LayoutTest(TrialTestCase):
 
     def test_texts_fit_on_screen(self) -> None:
         font = self.scene._font
-        for phase_task in ("Задача: расставь этапы рецепта по порядку", "Задача: найди сбежавшую клубнику"):
+        for phase_task in ("Задача: расставь этапы рецепта по порядку", "Задача: догони и поймай клубнику"):
             self.assertLessEqual(font.size(phase_task)[0], WIDTH - 8)
         widest_held = max(font.size(f"Взят этап: {name}")[0] for name in STEP_SHORT_NAMES.values())
         self.assertLessEqual(font.size("Часть 2 из 2 — клубника")[0] + widest_held, WIDTH - 16)
         statuses = ["Стрелки — выбрать этап   E — взять   Backspace — уйти",
                     "Стрелки — куда поставить   E — поменять местами",
                     "E — положить обратно   Стрелки — с чем поменять", "E — проверить рецепт   Стрелки — к этапам",
-                    "Стрелки/WASD — идти   E — поймать клубнику   Backspace — уйти",
-                    "Клубника не здесь — она в дальнем углу кладовой", "Кладовая: найди клубнику в дальнем углу"]
+                    "Стрелки/WASD — догнать   E — поймать рядом   Backspace — уйти", FAR_TOAST, CHASE_TOAST]
         names = list(STEP_SHORT_NAMES.values())
         statuses += [f"Поменяла местами: {a} и {b}" for a in names for b in names]
         for text in statuses:
@@ -604,6 +737,117 @@ class LayoutTest(TrialTestCase):
             scene.draw(self.canvas)
             play(scene)
             self.assertTrue(scene.completed)
+
+
+class ChaseSceneTest(TrialTestCase):
+    """Погоня в сцене: когда начинается, одна геометрия на всё, облачко реплик, дальность поимки."""
+
+    def test_no_chase_until_the_recipe_is_fixed(self) -> None:
+        scene = self.scene
+        finish_dialogue(scene)
+        for _ in range(2):  # взять и положить обратно, подождать
+            choose(scene, 0)
+            scene.update(2.0)
+        self.assertIsNone(scene.chase)
+        self.assertIsNone(scene.pantry)
+        self.assertEqual(scene.strawberry_position(), STRAWBERRY_ON_TABLE)  # лежит на столе
+        self.assertFalse(scene.recipe.solved)  # и сам рецепт не решается
+        solve_recipe(scene)
+        self.assertIsNone(scene.chase)  # и при реакции на успех — ещё нет
+        finish_dialogue(scene)
+        scene.update(ESCAPE_SECONDS + 0.1)
+        self.assertIsNone(scene.chase)  # и пока клубника убегает со стола
+        finish_dialogue(scene)
+        self.assertIsNotNone(scene.chase)
+
+    def test_new_layout_each_run_same_with_the_same_seed_and_one_geometry(self) -> None:
+        def layout(seed):
+            scene = CakesTrialScene(GameProgress(), seed=seed)
+            to_pantry(scene)
+            return scene
+
+        first, again, other = layout(5), layout(5), layout(6)
+        items = [(i.kind, tuple(i.rect)) for i in first.pantry.items]
+        self.assertEqual(items, [(i.kind, tuple(i.rect)) for i in again.pantry.items])
+        self.assertNotEqual(items, [(i.kind, tuple(i.rect)) for i in other.pantry.items])
+        randoms = {tuple(tuple(r) for r in layout(None).pantry.obstacles) for _ in range(4)}
+        self.assertGreater(len(randoms), 1)  # без seed — каждый раз своя кладовая
+        # Рисование, столкновения Алисы, клубники и поиск пути — по одним и тем же прямоугольникам.
+        rects = [tuple(r) for r in first.pantry.obstacles]
+        self.assertEqual([tuple(r) for r in first.collision.obstacles], rects)
+        self.assertEqual([tuple(r) for r in first.chase.collision.obstacles], rects)
+        self.assertEqual([tuple(r) for r in first.pantry.nav().collision.obstacles], rects)
+        self.assertEqual(first.alice.collider, first.collision.move)
+        self.assertEqual(rects, [tuple(r) for r in generate_layout(first.pantry.seed).obstacles])
+
+    def test_no_dialogue_box_in_the_pantry(self) -> None:
+        scene = self.scene
+        to_pantry(scene)
+        for _ in range(round(20 / DT)):
+            scene.update(DT)
+            self.assertIsNone(scene.dialogue)  # окно реплики закрыло бы Алису внизу комнаты
+            self.assertEqual(scene.area, PANTRY)
+        catch_strawberry(scene)
+        self.assertEqual(scene.area, BAKERY)
+        self.assertIsNotNone(scene.dialogue)
+
+    def test_catch_reach_is_measured_between_feet(self) -> None:
+        scene = self.scene
+        to_pantry(scene)
+        scene.alice.set_position(*spot_beside(scene, CATCH_REACH))
+        self.assertTrue(scene.near_strawberry())
+        scene.alice.set_position(*spot_beside(scene, CATCH_REACH + 1))
+        self.assertFalse(scene.near_strawberry())
+        # «Рядом» — это действительно рядом: ноги почти касаются (ноги Алисы шириной 12 px).
+        self.assertLessEqual(CATCH_REACH, FOOT_SIZE[0] + 6)
+
+    def test_speech_bubble_is_readable_and_keeps_clear(self) -> None:
+        scene = self.scene
+        to_pantry(scene)
+        chase, nav = scene.chase, scene.pantry.nav()
+        spots = [nav.point(cell) for cell in sorted(nav.free)[::37]]
+        self.assertGreater(len(spots), 20)
+        for text in lines.STRAWBERRY_LINES:
+            for hires in (True, False):
+                chase.state, chase.line = TALKING, text
+                chase.x, chase.y = spots[0]
+                rect, text_lines = scene.speech_bubble(hires)
+                self.assertLessEqual(len(text_lines), 2, text)  # коротко: не больше двух строк
+                self.assertEqual(" ".join(text_lines), text)
+        for x, y in spots:
+            chase.x, chase.y = x, y
+            center = scene.strawberry_position()
+            berry = pygame.Rect(round(center[0]) - 6, round(center[1]) - 9, 13, 15)
+            for side in (-14, 14):
+                scene.alice.set_position(x + side, y)
+                for hires in (True, False):
+                    rect, _ = scene.speech_bubble(hires)
+                    with self.subTest(spot=(x, y), side=side, hires=hires):
+                        self.assertTrue(SPEECH_AREA.contains(rect))  # между полосами интерфейса
+                        self.assertFalse(rect.colliderect(berry))  # ягоду не закрывает
+                        if MAZE_BOUNDS.top + 30 <= y <= MAZE_BOUNDS.bottom - 30:  # не у самого края
+                            self.assertFalse(rect.colliderect(scene.alice.rect.inflate(-14, -4)))
+        chase.state, chase.line = RUNNING, None
+        self.assertIsNone(scene.speech_bubble())  # молчит — облачка нет
+
+    def test_speech_goes_through_the_hires_layer_without_double_sprites(self) -> None:
+        scene = self.scene
+        to_pantry(scene)
+        for _ in range(round(6 / DT)):
+            if scene.chase.state == TALKING:
+                break
+            scene.update(DT)
+        layer = HiResLayer(strict=True)
+        scene.draw(self.canvas, layer)
+        rect, text_lines = scene.speech_bubble(hires=True)
+        texts = [c for c in layer.commands if isinstance(c, TextCommand) and c.style == SPEECH_STYLE]
+        self.assertEqual([c.text for c in texts], text_lines)
+        for command in texts:
+            self.assertTrue(rect.collidepoint(command.pos))
+        sprites = [c for c in layer.commands if isinstance(c, SpriteCommand)]
+        self.assertEqual(len([c for c in sprites if c.rect == scene.alice.rect]), 1)
+        self.assertEqual(len(sprites), 2)  # Алиса и Чучмек в дверях — по одному разу
+        scene.draw(self.canvas)  # и без слоя — пиксельным шрифтом, без ошибок
 
 
 def play_sushi(sushi: SushiTrialScene) -> None:
@@ -696,7 +940,7 @@ class AppIntegrationTest(unittest.TestCase):
         self.assertEqual(hub.fragments_text(), "Фрагменты праздника: 2/3")
         cakes = self.enter_portal(hub, "cakes")
         to_pantry(cakes)
-        walk_route(cakes)  # кладовая — пешком по маршруту
+        chase_with_keys(cakes)  # кладовая — погоня стрелками
         press_e(cakes)
         finish_dialogue(cakes)
         finish_dialogue(cakes)
