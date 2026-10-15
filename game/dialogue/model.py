@@ -163,15 +163,19 @@ class DialogueController:
     def handle_event(self, event: pygame.event.Event) -> bool:
         """Обрабатывает нажатие клавиши. Возвращает True, если оно относится к диалогу.
 
-        Действие confirm (Enter, пробел) дописывает текст, продолжает или выбирает ответ;
-        move_up и move_down (стрелки, W/S) двигают выделение. Реагируем только на KEYDOWN:
-        одно физическое нажатие — один шаг диалога (автоповтор отсекает ActionInput).
+        Действие confirm (Enter, пробел) дописывает текст и продолжает диалог; move_up и
+        move_down (стрелки, W/S) двигают выделение. Вариант ответа выбирает только клавиша,
+        у которой есть и действие interact, — Enter (E сцены передают в confirm() сами).
+        Пробел на вопросе ничего не делает: быстрое пролистывание реплик пробелом не выберет
+        ответ вслепую и не проскочит ветку. Реагируем только на KEYDOWN: одно физическое
+        нажатие — один шаг диалога (автоповтор отсекает ActionInput).
         """
         if event.type != pygame.KEYDOWN or self.is_finished:
             return False
         actions = actions_for(event)
         if Action.CONFIRM in actions:
-            self.confirm()
+            if not self.choices or Action.INTERACT in actions:
+                self.confirm()
         elif Action.MOVE_UP in actions:
             self.move_selection(-1)
         elif Action.MOVE_DOWN in actions:
@@ -181,7 +185,9 @@ class DialogueController:
         return True
 
     def confirm(self) -> None:
-        """Enter или пробел: дописать текст, а если он уже виден — выбрать ответ или перейти дальше."""
+        """Дописать текст, а если он уже виден — выбрать выделенный ответ или перейти дальше.
+
+        Это шаг E или Enter; пробел сюда на вопросе не попадает (см. handle_event)."""
         node = self.node
         if node is None:
             return

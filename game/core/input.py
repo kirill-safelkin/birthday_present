@@ -24,7 +24,7 @@ class Action(str, Enum):
     MOVE_DOWN = "move_down"
     MOVE_LEFT = "move_left"
     MOVE_RIGHT = "move_right"
-    CONFIRM = "confirm"  # подтвердить: продолжить реплику, выбрать вариант
+    CONFIRM = "confirm"  # подтвердить: продолжить реплику (ответ в диалоге — только вместе с interact)
     INTERACT = "interact"  # действие с объектом или персонажем рядом
     CANCEL = "cancel"  # назад, закрыть вложенный экран
 

@@ -1,15 +1,18 @@
 """Реплики испытания суши: вступление, реакции на заказы, финал. Только данные.
 
+Суши — вкусная часть праздничного плана. Во вступлении у Алисы выбор (чему она доверяет
+на кухне): повар отвечает по-разному, а правила и заказы одни и те же при любом ответе.
 Показывает их game/trials/sushi_scene.py через существующую систему диалогов.
 CHEF_POSES — какую позу (кадр cat_chef) принимает кот-повар на реплике.
 """
 
 from __future__ import annotations
 
-from game.dialogue.model import DialogueNode, DialogueScript
+from game.dialogue.model import DialogueChoice, DialogueNode, DialogueScript
 from game.story.intro_dialogue import ALICE
 
 CHEF = "Кот-повар"
+TRUST_CHOICE_ID = "s_trust"  # выбор Алисы во вступлении
 
 
 def _script(*nodes: DialogueNode) -> DialogueScript:
@@ -21,7 +24,29 @@ INTRO = _script(
         "s_welcome", CHEF, "Добро пожаловать. На моей кухне всё подчиняется точности, чистоте и рису.", next_id="s_just"
     ),
     DialogueNode("s_just", ALICE, "А если я просто хочу приготовить суши?", next_id="s_suspicious"),
-    DialogueNode("s_suspicious", CHEF, "Это и есть самое подозрительное, что ты могла сказать.", next_id="s_rules"),
+    DialogueNode("s_suspicious", CHEF, "Это и есть самое подозрительное, что ты могла сказать.", next_id="s_tasty"),
+    DialogueNode(
+        "s_tasty",
+        CHEF,
+        "Чучмек предупредил: тебе нужна вкусная часть праздника. Её здесь не выдают, а заслуживают.",
+        next_id=TRUST_CHOICE_ID,
+    ),
+    DialogueNode(
+        TRUST_CHOICE_ID,
+        CHEF,
+        "Скажи честно: чему ты доверяешь на кухне?",
+        choices=[
+            DialogueChoice("Я доверяю рецепту.", "s_recipe"),
+            DialogueChoice("Я доверяю своему аппетиту.", "s_appetite"),
+        ],
+    ),
+    DialogueNode(
+        "s_recipe", CHEF, "Разумно. Рецепт не спорит, не опаздывает и не просит попробовать.", next_id="s_law"
+    ),
+    DialogueNode("s_law", CHEF, "Но помни: рецепт — это закон. А я — его суд.", next_id="s_rules"),
+    DialogueNode("s_appetite", CHEF, "Смело. Аппетит — плохой повар, но честный критик.", next_id="s_critic"),
+    DialogueNode("s_critic", ALICE, "Значит, он проследит за качеством.", next_id="s_rice_speaks"),
+    DialogueNode("s_rice_speaks", CHEF, "Пусть следит молча. На моей кухне говорит только рис.", next_id="s_rules"),
     DialogueNode(
         "s_rules",
         CHEF,
@@ -57,13 +82,19 @@ FINAL = _script(
     DialogueNode(
         "f_fragment",
         CHEF,
-        "Это значит, ты получаешь фрагмент праздника. И совет: не говори Чучмеку, где лежит соевый соус.",
+        "Это значит, ты получаешь вкусную часть праздника. И совет: не говори Чучмеку, где лежит соевый соус.",
     ),
 )
 
 CHEF_POSES = {
     "s_welcome": "stern_arms_crossed",
     "s_suspicious": "stern_side_pose",
+    "s_tasty": "idle_grumpy",
+    TRUST_CHOICE_ID: "stern_arms_crossed",
+    "s_recipe": "present_sushi",
+    "s_law": "stern_arms_crossed",
+    "s_appetite": "taste_sushi",
+    "s_rice_speaks": "stern_side_pose",
     "s_rules": "idle_grumpy",
     "s_forgives": "stern_arms_crossed",
     "r1_rice": "idle_grumpy",

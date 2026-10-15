@@ -1,5 +1,8 @@
 """Временное оформление диалога: окно внизу экрана с именем, текстом и вариантами ответа.
 
+Когда варианты ответа видны, на верхней рамке справа появляется табличка-подсказка
+«E — ответить»: ответ выбирают E или Enter, а пробел только листает реплики.
+
 Два способа вывода. На холсте (прежний путь, для сцен без слоя высокого разрешения) всё
 рисуется пиксельным шрифтом холста. Со слоем высокого разрешения (game/graphics/hires.py)
 рамка окна остаётся пиксельной и рисуется той же графикой, а имя, реплика и варианты —
@@ -30,6 +33,7 @@ CHOICES_GAP = 4  # между текстом реплики и варианта�
 CHOICE_INDENT = 10  # место слева от вариантов под стрелку выбора
 NAME_PADDING_X = 6
 NAME_PADDING_Y = 2
+CHOICE_HINT = "E — ответить"  # табличка справа на рамке, пока видны варианты ответа
 
 # Текст высокого разрешения: размер — в логических пикселях, как у FONT_SIZE.
 TEXT_SIZE = 9
@@ -38,6 +42,7 @@ TEXT_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_TEXT_COLOR, background=config.
 NAME_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_NAME_COLOR, bold=True, background=config.DIALOGUE_BOX_COLOR)
 CHOICE_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_CHOICE_COLOR, background=config.DIALOGUE_BOX_COLOR)
 SELECTED_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_SELECTED_COLOR, background=config.DIALOGUE_SELECTED_BG_COLOR)
+HINT_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_CHOICE_COLOR, background=config.DIALOGUE_BOX_COLOR)
 
 # Слово для переноса. Отдельно стоящее тире прилипает к предыдущему слову: по правилам русской
 # типографики строка не начинается с тире посреди фразы («Что это — / пока секрет», а не «— пока…»).
@@ -94,6 +99,13 @@ class DialogueLayout:
     choice_lines: list[list[str]]
     choices_top: int
     line_height: int
+    text_top: int  # где начинается первая строка реплики (обычно box.y + PADDING_Y)
+    hint_tab: pygame.Rect | None = None  # подсказка «E — ответить»; той же высоты, что табличка имени
+
+    @property
+    def area(self) -> pygame.Rect:
+        """Всё, что занимает окно на холсте: само окно и таблички на его рамке."""
+        return self.box.unionall([tab for tab in (self.name_tab, self.hint_tab) if tab is not None])
 
 
 class DialogueBox:
@@ -106,6 +118,7 @@ class DialogueBox:
         fonts = fonts if fonts is not None else TextFonts()
         self._text_metrics = fonts.metrics(TEXT_STYLE)
         self._name_metrics = fonts.metrics(NAME_STYLE)
+        self._hint_metrics = fonts.metrics(HINT_STYLE)
         # Строки высокого разрешения не теснее пиксельных: окно того же размера, текст — того же ритма.
         self.hires_line_height = max(self.line_height, math.ceil(self._text_metrics.height))
         self._layouts: dict[tuple[DialogueNode, bool], DialogueLayout] = {}
@@ -140,6 +153,10 @@ class DialogueBox:
             tab = layout.name_tab
             name = render_text(self._font, node.speaker, config.DIALOGUE_NAME_COLOR)
             surface.blit(name, (tab.x + NAME_PADDING_X, tab.y + NAME_PADDING_Y))
+        if layout.hint_tab is not None and dialogue.choices:
+            tab = layout.hint_tab
+            surface.blit(render_text(self._font, CHOICE_HINT, config.DIALOGUE_CHOICE_COLOR),
+                         (tab.x + NAME_PADDING_X, tab.y + NAME_PADDING_Y))
 
         # Строки размечены заранее, печать только открывает их символ за символом.
         visible = dialogue.visible_chars
@@ -147,7 +164,7 @@ class DialogueBox:
             if visible <= start:
                 break
             line = render_text(self._font, node.text[start : min(end, visible)], config.DIALOGUE_TEXT_COLOR)
-            surface.blit(line, (box.x + PADDING_X, box.y + PADDING_Y + row * self.line_height))
+            surface.blit(line, (box.x + PADDING_X, layout.text_top + row * self.line_height))
 
         if not dialogue.is_typing and dialogue.choices:
             x, y = box.x + PADDING_X + CHOICE_INDENT, layout.choices_top
@@ -166,20 +183,23 @@ class DialogueBox:
         высоты стоит в окне так же, как пиксельный."""
         layout = self.layout(node, hires=True)
         box, line_height = layout.box, layout.line_height
-        area = box.union(layout.name_tab) if layout.name_tab is not None else box
-        with hires.logical(surface, area) as panel:
+        with hires.logical(surface, layout.area) as panel:
             self._draw_frame(panel, layout, dialogue)
 
         if layout.name_tab is not None:
             tab = layout.name_tab
             hires.text(node.speaker, NAME_STYLE, (tab.x + NAME_PADDING_X, tab.y + NAME_PADDING_Y + line_height / 2),
                        anchor="midleft")
+        if layout.hint_tab is not None and dialogue.choices:
+            tab = layout.hint_tab
+            hires.text(CHOICE_HINT, HINT_STYLE, (tab.x + NAME_PADDING_X, tab.y + NAME_PADDING_Y + line_height / 2),
+                       anchor="midleft")
 
         visible = dialogue.visible_chars
         for row, (start, end) in enumerate(layout.text_spans):
             if visible <= start:
                 break
-            middle = box.y + PADDING_Y + row * line_height + line_height / 2
+            middle = layout.text_top + row * line_height + line_height / 2
             hires.text(node.text[start : min(end, visible)], TEXT_STYLE, (box.x + PADDING_X, middle), anchor="midleft")
 
         if not dialogue.is_typing and dialogue.choices:
@@ -198,15 +218,13 @@ class DialogueBox:
         pygame.draw.rect(surface, config.DIALOGUE_BORDER_COLOR, box, 1)
 
         if layout.name_tab is not None:
-            tab = layout.name_tab
-            pygame.draw.rect(surface, config.DIALOGUE_BOX_COLOR, tab)
-            pygame.draw.rect(surface, config.DIALOGUE_BORDER_COLOR, tab, 1)
-            # Убираем линию между табличкой и окном, чтобы они выглядели единым целым.
-            surface.fill(config.DIALOGUE_BOX_COLOR, (tab.x + 1, box.y, tab.width - 2, 1))
+            _draw_tab(surface, layout.name_tab, box)
 
         if dialogue.is_typing:
             return
         if dialogue.choices:
+            if layout.hint_tab is not None:
+                _draw_tab(surface, layout.hint_tab, box)
             self._draw_choice_marks(surface, layout, dialogue.selected_index)
         else:
             # Стрелка у нижней рамки справа, ниже строк текста: текст дописан, Enter продолжит диалог.
@@ -235,8 +253,17 @@ class DialogueBox:
         content_height = len(text_spans) * line_height
         if choice_lines:
             content_height += CHOICES_GAP + sum(len(lines) for lines in choice_lines) * line_height
-        box_height = max(MIN_ROWS * line_height, content_height) + 2 * PADDING_Y
+        min_height = MIN_ROWS * line_height
+        lift = 0  # на сколько текст поднят к верхней рамке
+        if min_height < content_height <= min_height + CHOICES_GAP:
+            # Вопрос в строку и два ответа выше обычной реплики только на отступ перед ответами.
+            # Его берём из полей окна (поровну сверху и снизу): окно той же высоты, что у обычной
+            # реплики, — не подпрыгивает, когда появляется вопрос, и не задевает персонажей.
+            lift = (content_height - min_height + 1) // 2
+            content_height = min_height
+        box_height = max(min_height, content_height) + 2 * PADDING_Y
         box = pygame.Rect(MARGIN, SCREEN_HEIGHT - MARGIN - box_height, SCREEN_WIDTH - 2 * MARGIN, box_height)
+        text_top = box.y + PADDING_Y - lift
 
         name_tab = None
         if node.speaker:
@@ -248,13 +275,32 @@ class DialogueBox:
             if name_tab.right > box.right - PADDING_X:
                 raise DialogueError(f"имя «{node.speaker}» в реплике «{node.id}» не помещается в окно диалога")
 
+        hint_tab = None
+        if choice_lines:
+            # Подсказка — такая же табличка, но справа: окно не становится выше.
+            hint_width = math.ceil((self._hint_metrics if hires else self._font).size(CHOICE_HINT)[0])
+            hint_tab = pygame.Rect(0, 0, hint_width + 2 * NAME_PADDING_X, line_height + 2 * NAME_PADDING_Y)
+            hint_tab.bottomright = (box.right - PADDING_X, box.y + 1)
+            if name_tab is not None and hint_tab.left < name_tab.right + PADDING_X:
+                raise DialogueError(f"имя «{node.speaker}» в реплике «{node.id}» не оставляет места для подсказки")
+
         top = name_tab.top if name_tab is not None else box.top
+        if hint_tab is not None:
+            top = min(top, hint_tab.top)
         if top < MARGIN:
             raise DialogueError(
                 f"реплика «{node.id}» не помещается на экран: сократите текст или разбейте его на несколько реплик"
             )
-        choices_top = box.y + PADDING_Y + len(text_spans) * line_height + CHOICES_GAP
-        return DialogueLayout(box, name_tab, text_spans, choice_lines, choices_top, line_height)
+        choices_top = text_top + len(text_spans) * line_height + CHOICES_GAP
+        return DialogueLayout(box, name_tab, text_spans, choice_lines, choices_top, line_height, text_top, hint_tab)
+
+
+def _draw_tab(surface: pygame.Surface, tab: pygame.Rect, box: pygame.Rect) -> None:
+    """Табличка на верхней рамке окна (имя или подсказка)."""
+    pygame.draw.rect(surface, config.DIALOGUE_BOX_COLOR, tab)
+    pygame.draw.rect(surface, config.DIALOGUE_BORDER_COLOR, tab, 1)
+    # Убираем линию между табличкой и окном, чтобы они выглядели единым целым.
+    surface.fill(config.DIALOGUE_BOX_COLOR, (tab.x + 1, box.y, tab.width - 2, 1))
 
 
 def _draw_arrow_right(surface: pygame.Surface, color: config.Color, x: int, y: int) -> None:

@@ -1,17 +1,22 @@
 """Реплики испытания формуляров: вступление, находки в архиве, подсказки и отказы гуся,
 реакция на правильный порядок и финальная проверка. Только данные.
 
+Формуляры — официальная часть праздничного плана: порядок и разрешение на праздник.
+Во вступлении Алиса выбирает, как искать документы: гусь оценивает ответ по-разному,
+но правила поиска одни и те же, и ни один ответ не находит документы за игрока.
+
 Показывает их game/trials/forms_scene.py через существующую систему диалогов.
 GOOSE_POSES — какую позу (кадр goose_inspector) принимает гусь на реплике.
 """
 
 from __future__ import annotations
 
-from game.dialogue.model import DialogueNode, DialogueScript
+from game.dialogue.model import DialogueChoice, DialogueNode, DialogueScript
 from game.story.intro_dialogue import ALICE
 from game.trials.forms_puzzle import DOCUMENTS, SECTIONS, SearchResult
 
 GOOSE = "Гусь-инспектор"
+SEARCH_CHOICE_ID = "i_how"  # выбор Алисы во вступлении
 
 
 def _script(*nodes: DialogueNode) -> DialogueScript:
@@ -34,8 +39,29 @@ INTRO = _script(
         "i_department",
         GOOSE,
         "В соответствующем отделе. Если бы я знал, где он, я бы уже давно его закрыл.",
-        next_id="i_three",
+        next_id=SEARCH_CHOICE_ID,
     ),
+    DialogueNode(
+        SEARCH_CHOICE_ID,
+        GOOSE,
+        "Итак. Как будете искать?",
+        choices=[
+            DialogueChoice("Давайте искать по названию.", "i_by_title"),
+            DialogueChoice("А есть формуляр на поиск формуляров?", "i_meta"),
+        ],
+    ),
+    DialogueNode(
+        "i_by_title",
+        GOOSE,
+        "По названию? Дерзко. Названия у нас и правда пишут на корешках. Иногда даже правильные.",
+        next_id="i_sometimes",
+    ),
+    DialogueNode("i_sometimes", ALICE, "Иногда?", next_id="i_three"),
+    DialogueNode(
+        "i_meta", GOOSE, "Был. Но его потеряли, когда искали формуляр на поиск формуляров.", next_id="i_just_look"
+    ),
+    DialogueNode("i_just_look", ALICE, "Тогда я, пожалуй, просто поищу.", next_id="i_unofficial"),
+    DialogueNode("i_unofficial", GOOSE, "Самоуправство. Одобряю. Неофициально.", next_id="i_three"),
     DialogueNode(
         "i_three",
         GOOSE,
@@ -138,6 +164,10 @@ GOOSE_POSES = {
     "i_stop": "reject",
     "i_address": "talk",
     "i_department": "question",
+    SEARCH_CHOICE_ID: "inspect",
+    "i_by_title": "read",
+    "i_meta": "write",
+    "i_unofficial": "approve",
     "i_three": "talk",
     "i_table": "read",
     "i_order": "inspect",

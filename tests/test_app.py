@@ -194,6 +194,46 @@ class AppEventsTest(unittest.TestCase):
         self.assertEqual(dialogue.node.id, "start")  # реплика не пролистана повтором
         self.assertFalse(dialogue.is_typing)
 
+    def open_demo_question(self) -> None:
+        """Демо-диалог до напечатанного вопроса: «start» и «rumour» — дописать и дальше, вопрос — дописать."""
+        press(pygame.K_d, pygame.KSCAN_D)
+        post_keys(*[pygame.K_SPACE] * 5)
+
+    def test_space_does_not_answer_the_question(self) -> None:
+        self.open_demo_question()
+        post_keys(pygame.K_SPACE, pygame.K_SPACE, pygame.K_SPACE)  # пробел только листает реплики
+        press(pygame.K_ESCAPE)
+        self.app.run()
+        dialogue = self.app.screen.dialogue
+        self.assertEqual(dialogue.node.id, QUESTION_ID)
+        self.assertTrue(dialogue.choices)
+        self.assertEqual(dialogue.answers, {})
+
+    def test_held_enter_answers_the_question_once(self) -> None:
+        self.open_demo_question()
+        press(pygame.K_DOWN)  # «Почему у тебя на шляпе крошки?»
+        pygame.event.post(key_down(pygame.K_RETURN))  # ответ
+        pygame.event.post(key_down(pygame.K_RETURN))  # автоповтор зажатого Enter
+        pygame.event.post(key_down(pygame.K_RETURN))
+        press(pygame.K_ESCAPE)
+        self.app.run()
+        dialogue = self.app.screen.dialogue
+        self.assertEqual(dialogue.node.id, "crumbs")  # одна ветка, следующая реплика не пролистана
+        self.assertTrue(dialogue.is_typing)
+        self.assertEqual(list(dialogue.answers), [QUESTION_ID])
+
+    def test_lost_focus_on_a_question_does_not_stick_the_keys(self) -> None:
+        self.open_demo_question()
+        pygame.event.post(key_down(pygame.K_DOWN))  # стрелку зажали…
+        pygame.event.post(pygame.event.Event(pygame.WINDOWFOCUSLOST))  # …и окно потеряло фокус
+        pygame.event.post(key_down(pygame.K_DOWN))  # вернулись и нажали снова — это новое нажатие
+        pygame.event.post(key_up(pygame.K_DOWN))
+        press(pygame.K_RETURN)
+        press(pygame.K_ESCAPE)
+        self.app.run()
+        dialogue = self.app.screen.dialogue
+        self.assertEqual(dialogue.answers[QUESTION_ID].next_id, "competence")  # оба нажатия ↓ засчитаны
+
     def test_held_f11_toggles_fullscreen_once(self) -> None:
         pygame.event.post(key_down(pygame.K_F11))
         pygame.event.post(key_down(pygame.K_F11))  # автоповтор

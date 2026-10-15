@@ -2,13 +2,14 @@
 настоящего подарка, титры и последний экран. Только данные.
 
 Показывает их game/story/final_scene.py. Письмо и секрет подарка — слова мужа Алисе,
-поэтому они не реплики персонажей в окне диалога, а отдельные страницы-письма.
-CHUCHMEK_POSES и ALICE_POSES — позы (кадры манифестов) на репликах.
+поэтому они не реплики персонажей в окне диалога, а отдельные страницы-письма. В них нет
+ни выборов, ни реплик Лео: выбор есть только в разговоре с Чучмеком до письма.
+CHUCHMEK_POSES, ALICE_POSES и LEO_POSES — позы (кадры манифестов) на репликах.
 """
 
 from __future__ import annotations
 
-from game.dialogue.model import DialogueNode, DialogueScript
+from game.dialogue.model import DialogueChoice, DialogueNode, DialogueScript
 from game.story.intro_dialogue import ALICE, CHUCHMEK
 
 
@@ -16,14 +17,53 @@ def _script(*nodes: DialogueNode) -> DialogueScript:
     return DialogueScript(nodes[0].id, nodes)
 
 
+# Выбор Алисы в финальном разговоре: обе ветки ведут к одной реплике — к обороту страницы.
+CREDIT_CHOICE_ID = "f_credit"
+
 # Чучмек торжественно объявляет, что сказка восстановлена, — и выясняет, что не знает,
-# чем она должна заканчиваться. Последняя реплика передаёт слово письму.
+# чем она должна заканчиваться. Тогда он даёт слово комиссии — Лео, главному инспектору
+# праздничного настроения. Последняя реплика передаёт слово письму.
 FINALE_TALK = _script(
     DialogueNode("f_restored", CHUCHMEK, "Поздравляю! Мы восстановили последнюю страницу.", next_id="f_ending"),
     DialogueNode("f_ending", ALICE, "И чем заканчивается сказка?", next_id="f_usually"),
     DialogueNode("f_usually", CHUCHMEK, "Обычно свадьбой, королевством или моралью.", next_id="f_ours"),
     DialogueNode("f_ours", ALICE, "А наша?", next_id="f_documents"),
-    DialogueNode("f_documents", CHUCHMEK, "Я рассчитывал, что это будет прописано в документах.", next_id="f_backside"),
+    DialogueNode(
+        "f_documents", CHUCHMEK, "Я рассчитывал, что это будет прописано в документах.", next_id="f_commission"
+    ),
+    DialogueNode(
+        "f_commission",
+        CHUCHMEK,
+        "Тогда слово комиссии! Главный инспектор праздничного настроения, ваше заключение?",
+        next_id="f_verdict",
+    ),
+    DialogueNode(
+        "f_verdict",
+        CHUCHMEK,
+        "Лео смеётся. Комиссия постановила единогласно: поводов улыбнуться достаточно.",
+        next_id=CREDIT_CHOICE_ID,
+    ),
+    DialogueNode(
+        CREDIT_CHOICE_ID,
+        CHUCHMEK,
+        "Признай, организатор справился блестяще.",
+        choices=[
+            DialogueChoice("Мы справились. Все вместе.", "f_together"),
+            DialogueChoice("Особенно с перевёрнутым тортом.", "f_upside_down"),
+        ],
+    ),
+    DialogueNode(
+        "f_together",
+        CHUCHMEK,
+        "Все вместе. Включая клубнику. Хотя она до сих пор не подписала акт.",
+        next_id="f_backside",
+    ),
+    DialogueNode(
+        "f_upside_down",
+        CHUCHMEK,
+        "Это был смелый дизайнерский ход. Комиссия его не оценила, но я горжусь.",
+        next_id="f_backside",
+    ),
     DialogueNode(
         "f_backside",
         CHUCHMEK,
@@ -83,13 +123,27 @@ CHUCHMEK_POSES = {
     "f_restored": "talk_excited",
     "f_usually": "clipboard_confident",
     "f_documents": "confused",
+    "f_commission": "clipboard_confident",
+    "f_verdict": "talk_excited",
+    CREDIT_CHOICE_ID: "smug_wink",
+    "f_together": "talk_gesture",
+    "f_upside_down": "wink",
     "f_backside": "curious_glance",
     "g_appeal": "clipboard_confident",
 }
 ALICE_POSES = {
     "f_ending": "talk_down_1",
     "f_ours": "talk_down_2",
+    "f_verdict": "happy_down_1",
 }
+# Лео не говорит и ничего не решает: он сидит на покрывале и просто реагирует, как малыш.
+LEO_POSES = {
+    "f_commission": "surprised",
+    "f_verdict": "laugh",
+    CREDIT_CHOICE_ID: "laugh",
+}
+LEO_IDLE_POSE = "sit_idle"
+LEO_PAUSE_POSE = "arms_up"  # тишина после письма: тянет руки — праздник
 
 
 def all_scripts() -> list[DialogueScript]:

@@ -11,7 +11,11 @@
 этого возвращает на площадь — прогресс не трогается, мозаика по-прежнему светится.
 Все паузы и анимации идут по dt, без ожиданий и своих циклов.
 
-Со слоем высокого разрешения (game/graphics/hires.py) Алиса и Чучмек рисуются из исходных
+На странице вместе с Алисой и Чучмеком — Лео: он сидит на мягком покрывале между Алисой
+и подставкой с фрагментами. Он не говорит и не ходит — только меняет позы из своего манифеста
+(удивляется, смеётся), когда Чучмек даёт слово «комиссии». В письмо и секрет подарка он не вмешивается.
+
+Со слоем высокого разрешения (game/graphics/hires.py) Алиса, Чучмек и Лео рисуются из исходных
 кадров 64×64, а все надписи — письмо, секрет подарка, штамп, титры, последний экран и
 подсказки — шрифтом размера окна. Письмо для этого переносится по метрикам того же шрифта
 (своя раскладка, те же листы и те же границы строк); страница и символы остаются пиксельными.
@@ -54,6 +58,9 @@ WIDTH, HEIGHT = config.LOGICAL_SIZE
 SPRITE_SIZE = 48  # как во вступлении: страница книги, персонажи крупнее, чем на площади
 ALICE_POSITION = (104, 108)  # точки под ногами; выше любого окна реплики
 CHUCHMEK_POSITION = (218, 108)
+LEO_POSITION = (134, 108)  # на покрывале рядом с Алисой, у подставки с фрагментами
+LEO_SIZE = 32  # малыш меньше взрослых: как персонажи на площади
+BLANKET = pygame.Rect(LEO_POSITION[0] - 17, LEO_POSITION[1] - 6, 34, 9)
 # Где собираются три фрагмента: суши, документ с печатью, торт.
 SYMBOL_POSITIONS = {"sushi": (136, 64), "forms": (160, 52), "cakes": (184, 64)}
 FRAGMENT_STARTS = {"sushi": (-12, 90), "forms": (160, -14), "cakes": (WIDTH + 12, 90)}
@@ -89,6 +96,8 @@ GLOW_COLOR = (255, 236, 140)
 FLAG_COLORS = ((232, 120, 140), (250, 214, 110), (150, 200, 230), (170, 220, 150), (200, 160, 230))
 FRAGMENT_COLORS = {"sushi": (250, 170, 150), "forms": (176, 196, 236), "cakes": (252, 196, 226)}
 STAMP_COLOR = (196, 52, 60)
+BLANKET_COLOR = (186, 206, 240)
+BLANKET_EDGE_COLOR = (132, 156, 204)
 CREDITS_SMALL_COLOR = (196, 186, 214)
 
 # Надписи в разрешении окна (слой высокого разрешения); размеры — в логических пикселях.
@@ -150,8 +159,10 @@ class FinalScene(Scene):
         root = Path(characters_dir)
         self.alice_sprites = try_load_character_sprites(root / "alice")
         self.chuchmek_sprites = try_load_character_sprites(root / "chuchmek")
+        self.leo_sprites = try_load_character_sprites(root / "leo")
         self.alice_pose = "idle_right"
         self.chuchmek_pose = "idle"
+        self.leo_pose = text.LEO_IDLE_POSE
         self._frames: dict[tuple[str, str], tuple[pygame.Surface, pygame.Surface]] = {}  # (исходник, на холсте)
 
         self.box = DialogueBox()
@@ -267,6 +278,7 @@ class FinalScene(Scene):
         self._set_phase(PAUSE)
         self.alice_pose = "happy_down_2"
         self.chuchmek_pose = "wink"
+        self.leo_pose = text.LEO_PAUSE_POSE
 
     def _open_dialogue(self, script: DialogueScript) -> None:
         self.dialogue = DialogueController(script)
@@ -280,6 +292,7 @@ class FinalScene(Scene):
             self.shown.append(node.id)
         self.chuchmek_pose = text.CHUCHMEK_POSES.get(node.id, "idle")
         self.alice_pose = text.ALICE_POSES.get(node.id, "idle_right")
+        self.leo_pose = text.LEO_POSES.get(node.id, text.LEO_IDLE_POSE)
 
     def _dialogue_finished(self) -> None:
         self.dialogue = None
@@ -290,6 +303,7 @@ class FinalScene(Scene):
             self.shown.append("letter_0")
             self.alice_pose = "idle_down"
             self.chuchmek_pose = "idle"
+            self.leo_pose = text.LEO_IDLE_POSE
         elif self.phase == GIFT_REACTION:
             self._set_phase(CREDITS)
 
@@ -332,7 +346,9 @@ class FinalScene(Scene):
         self._draw_symbols(surface)
         if hires is not None:  # подпись ленточки — часть страницы, под героями
             hires.text("Последняя страница", RIBBON_STYLE, self.ribbon_rect(hires=True).center, anchor="center")
+        self._draw_blanket(surface)
         self._draw_actor(surface, "chuchmek", CHUCHMEK_POSITION, hires)
+        self._draw_actor(surface, "leo", LEO_POSITION, hires)
         self._draw_actor(surface, "alice", ALICE_POSITION, hires)
         if self.phase == ARRIVAL:
             # Страница «проявляется» из белого листа.
@@ -400,15 +416,19 @@ class FinalScene(Scene):
         }
 
     def _actor_image(self, who: str) -> pygame.Surface:
-        """Поза из манифеста, уменьшенная ближайшим соседом до 48×48; кадры никогда не отражаются."""
+        """Поза из манифеста, уменьшенная ближайшим соседом до 48×48 (Лео — до 32×32);
+        кадры никогда не отражаются."""
         return self._actor_frame(who)[1]
 
     def _actor_frame(self, who: str) -> tuple[pygame.Surface, pygame.Surface]:
-        """Поза из манифеста: исходный кадр (без отражения) и он же на холсте 48×48."""
-        pose = self.alice_pose if who == "alice" else self.chuchmek_pose
+        """Поза из манифеста: исходный кадр (без отражения) и он же на холсте (48×48, у Лео 32×32)."""
+        pose, sprites, size = {
+            "alice": (self.alice_pose, self.alice_sprites, SPRITE_SIZE),
+            "chuchmek": (self.chuchmek_pose, self.chuchmek_sprites, SPRITE_SIZE),
+            "leo": (self.leo_pose, self.leo_sprites, LEO_SIZE),
+        }[who]
         key = (who, pose)
         if key not in self._frames:
-            sprites: CharacterSprites | None = self.alice_sprites if who == "alice" else self.chuchmek_sprites
             if sprites is None:
                 source = placeholder_animations().default.frames[0]
             else:
@@ -416,7 +436,7 @@ class FinalScene(Scene):
                     source = sprites.frame(pose).image
                 except KeyError:
                     source = sprites.frames[0].image
-            self._frames[key] = (source, pygame.transform.scale(source, (SPRITE_SIZE, SPRITE_SIZE)))
+            self._frames[key] = (source, pygame.transform.scale(source, (size, size)))
         return self._frames[key]
 
     def _draw_actor(
@@ -424,8 +444,9 @@ class FinalScene(Scene):
     ) -> None:
         bob = 0
         if self.dialogue is not None and self.dialogue.node is not None:
-            speaking = (self.dialogue.node.speaker == text.ALICE) == (who == "alice")
-            if speaking and self.dialogue.is_typing:
+            # Говорят только Алиса и Чучмек; Лео не покачивается «в такт» чужим репликам.
+            speaker = "alice" if self.dialogue.node.speaker == text.ALICE else "chuchmek"
+            if who == speaker and self.dialogue.is_typing:
                 bob = round(abs(math.sin(self.time * 9)))
         source, image = self._actor_frame(who)
         rect = image.get_rect(midbottom=(feet[0], feet[1] - bob))
@@ -433,6 +454,14 @@ class FinalScene(Scene):
             hires.sprite(source, rect)  # исходный кадр на том же месте и того же размера
         else:
             surface.blit(image, rect)
+
+    @staticmethod
+    def _draw_blanket(surface: pygame.Surface) -> None:
+        """Мягкое покрывало Лео: часть страницы, под всеми героями."""
+        pygame.draw.ellipse(surface, BLANKET_COLOR, BLANKET)
+        pygame.draw.ellipse(surface, BLANKET_EDGE_COLOR, BLANKET, 1)
+        for dx in (-9, 0, 9):  # звёздочки на покрывале
+            surface.set_at((BLANKET.centerx + dx, BLANKET.centery + 1), CREAM_COLOR)
 
     def _draw_symbols(self, surface: pygame.Surface) -> None:
         """Три фрагмента: в начале летят к центру страницы и превращаются в символы."""

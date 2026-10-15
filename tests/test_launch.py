@@ -37,14 +37,21 @@ def key(code: int, scancode: int = 0, event_type: int = pygame.KEYDOWN) -> pygam
     return pygame.event.Event(event_type, key=code, mod=0, unicode="", scancode=scancode)
 
 
+# Ветки выборов, которые видит игрок за прохождение: первые ответы и вторые ответы.
+FIRST_ANSWER_LINES = {"d_self_appointed", "e_sushi", "s_recipe", "i_by_title", "i_check"}
+SECOND_ANSWER_LINES = {"d_down_to_business", "e_mushroom", "s_appetite", "i_meta", "i_ceiling"}
+
+
 class LaunchTestCase(unittest.TestCase):
     dev_mode = False
+    answer = 0  # какой ответ игрок выбирает на каждом вопросе
 
     def setUp(self) -> None:
         pygame.display.init()
         pygame.font.init()
         self.app = App(dev_mode=self.dev_mode)
         self.app.running = True
+        self.seen: list[str] = []  # реплики, которые игрок пролистал, по порядку
 
     def tearDown(self) -> None:
         pygame.quit()
@@ -63,13 +70,23 @@ class LaunchTestCase(unittest.TestCase):
     def stack_names(self) -> list[str]:
         return [type(scene).__name__ for scene in self.app.scenes.stack]
 
+    def advance(self, scene) -> None:
+        """Один шаг реплики клавишей Enter; на вопросе сначала ↓ до ответа номер self.answer."""
+        dialogue = scene.dialogue
+        if not self.seen or self.seen[-1] != dialogue.node.id:
+            self.seen.append(dialogue.node.id)
+        if dialogue.choices:
+            for _ in range(self.answer):
+                self.press(pygame.K_DOWN)
+        self.press(pygame.K_RETURN)
+
     def finish_dialogue(self, scene) -> None:
         """Пролистывает текущий диалог сцены клавишей Enter через приложение."""
         script = scene.dialogue.script if scene.dialogue is not None else None
         for _ in range(200):
             if scene.dialogue is None or scene.dialogue.script is not script:
                 return
-            self.press(pygame.K_RETURN)
+            self.advance(scene)
         raise AssertionError("диалог не заканчивается")
 
     def play_intro(self) -> IntroScene:
@@ -80,7 +97,7 @@ class LaunchTestCase(unittest.TestCase):
             if self.app.scenes.current is not intro:
                 return intro
             if intro.dialogue is not None:
-                self.press(pygame.K_RETURN)
+                self.advance(intro)
             self.app._update(1 / 30)
         raise AssertionError("вступление не закончилось")
 
@@ -225,6 +242,9 @@ class FullPlaythroughTest(LaunchTestCase):
         for _ in range(400):
             if finale.phase == DONE:
                 break
+            if finale.dialogue is not None and finale.dialogue.choices:
+                for _ in range(self.answer):
+                    self.press(pygame.K_DOWN)
             self.press_e()
             self.app._update(0.4)
         self.assertEqual(finale.phase, DONE)
@@ -233,10 +253,15 @@ class FullPlaythroughTest(LaunchTestCase):
         self.assertEqual(self.app.progress.completed, ("sushi", "forms", "cakes"))
         # Порядок экранов финала — тот же, что задуман: ничего не пропущено и не переставлено.
         self.assertEqual(finale.shown, [
-            "talk", "f_restored", "f_ending", "f_usually", "f_ours", "f_documents", "f_backside",
+            "talk", "f_restored", "f_ending", "f_usually", "f_ours", "f_documents", "f_commission", "f_verdict",
+            "f_credit", ("f_together", "f_upside_down")[self.answer], "f_backside",
             "letter", "letter_0", "letter_1", "letter_2", "letter_3", "letter_4",
             "pause", "gift", "gift_reaction", "g_appeal", "credits", "the_end", "done",
         ])
+        # Игрок видел ветки своего ответа, и только их, — а сюжет и прогресс от ответа не зависят.
+        taken, skipped = (FIRST_ANSWER_LINES, SECOND_ANSWER_LINES)[:: 1 if self.answer == 0 else -1]
+        self.assertLessEqual(taken, set(self.seen))
+        self.assertFalse(skipped & set(self.seen))
 
     def test_finale_sequence_and_timings_are_unchanged(self) -> None:
         self.assertEqual(len(text.LETTER_PAGES), 5)  # пять листов письма, по два абзаца
@@ -247,6 +272,12 @@ class FullPlaythroughTest(LaunchTestCase):
              final_scene.END_INPUT_DELAY),
             (3.6, 0.5, 2.5, 5.0, 8.0, 1.0, 1.5),
         )
+
+
+class SecondAnswerPlaythroughTest(FullPlaythroughTest):
+    """То же прохождение, но на каждом вопросе — второй ответ: игра проходится так же до конца."""
+
+    answer = 1
 
 
 class DevModeTest(LaunchTestCase):

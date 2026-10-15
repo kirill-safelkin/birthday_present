@@ -12,6 +12,11 @@
 Мозаика в центре площади собирает фрагменты: у каждого пройденного испытания — свой
 символ в ней. Когда собраны все три, мозаика светится, и E рядом с ней открывает финал
 (FINALE_SCENE). Сам по себе третий фрагмент финал не запускает — только игрок.
+
+Слева от мозаики, напротив Чучмека, в корзинке спит Лео — главный инспектор праздничного
+настроения. Он не ходит и не мешает: корзинка стоит на траве в стороне от дорожек, порталов
+и клумб и не является препятствием (коллизии площади те же, что без него). Рядом с ней E
+показывает одну короткую реплику и сразу возвращает управление; прогресс это не меняет.
 """
 
 from __future__ import annotations
@@ -31,7 +36,7 @@ from game.graphics.animation import Direction
 from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
 from game.graphics.hires import HiResLayer, logical_target
 from game.graphics.sprite_manifest import CHARACTERS_DIR, try_load_character_sprites
-from game.story.hub_dialogue import CHUCHMEK_TALK, PORTAL_NOT_READY, all_scripts
+from game.story.hub_dialogue import CHUCHMEK_TALK, CHUCHMEK_TALK_AGAIN, PORTAL_NOT_READY, all_scripts, leo_script
 from game.world.character import Character
 from game.world.collision import CollisionMap
 from game.world.progress import TRIAL_NAMES, TRIALS, GameProgress
@@ -85,6 +90,15 @@ PORTALS = (
 CHUCHMEK_POSITION = (214, 80)  # недалеко от центра, выше дорожки к тортам
 CHUCHMEK_RADIUS = 24
 CHUCHMEK_OBSTACLE = pygame.Rect(206, 74, 16, 7)
+# Лео в корзинке: середина её дна. Зеркально Чучмеку, на траве между дорожками к суши и к формулярам.
+LEO_POSITION = (108, 78)
+# Откуда Алиса заглядывает в корзинку: справа, со стороны ног Лео (голова у кадра слева) —
+# так она его не заслоняет. Дотянуться можно и с края дорожки к суши.
+LEO_POINT = (134, 76)
+LEO_RADIUS = 16
+LEO_FRAME = "sleep_blanket"  # «спит под одеялом» из манифеста leo: лежит, ему не нужна ходьба
+BASKET_BACK = pygame.Rect(LEO_POSITION[0] - 15, LEO_POSITION[1] - 12, 30, 9)  # проём корзинки
+BASKET_FRONT = pygame.Rect(LEO_POSITION[0] - 16, LEO_POSITION[1] - 7, 32, 8)  # передняя стенка поверх одеяла
 # Декорации: стволы деревьев и клумбы — препятствия в стороне от дорожек.
 TREES = ((62, 58), (258, 58))
 FLOWER_BEDS = (pygame.Rect(54, 138, 34, 12), pygame.Rect(232, 138, 34, 12))
@@ -100,6 +114,11 @@ BED_COLOR = (124, 92, 66)
 FLOWER_COLORS = ((232, 120, 140), (250, 214, 110), (180, 150, 230))
 TREE_TRUNK_COLOR = (120, 88, 62)
 TREE_LEAF_COLOR = (92, 140, 84)
+BASKET_COLOR = (196, 146, 92)
+BASKET_DARK_COLOR = (150, 104, 62)
+BASKET_INSIDE_COLOR = (238, 220, 196)
+BLANKET_COLOR = (170, 196, 236)
+SLEEP_MARK_COLOR = (250, 250, 255)
 HUD_COLOR = (44, 38, 58)
 HUD_TEXT_COLOR = (240, 230, 206)
 HUD_ACCENT_COLOR = (250, 206, 108)
@@ -120,8 +139,8 @@ SIGN_STYLE = TextStyle(TEXT_SIZE, SIGN_TEXT_COLOR)
 class Interaction:
     """С чем Алиса может взаимодействовать сейчас: портал испытания или Чучмек."""
 
-    kind: str  # "portal", "chuchmek" или "mosaic"
-    target: str  # идентификатор испытания, "chuchmek" или "finale"
+    kind: str  # "portal", "chuchmek", "mosaic" или "leo"
+    target: str  # идентификатор испытания, "chuchmek", "finale" или "leo"
     prompt: str
 
 
@@ -131,8 +150,8 @@ class HubScene(Scene):
     Backspace (действие cancel) закрывает открытую реплику, а без реплики — возвращает
     к предыдущей сцене, если она есть (например, к экрану проверки).
 
-    Со слоем высокого разрешения Алиса и Чучмек рисуются из исходных кадров 64×64, а надписи —
-    шрифтом размера окна; площадь, порталы и деревья остаются пиксельными на холсте.
+    Со слоем высокого разрешения Алиса, Чучмек и Лео рисуются из исходных кадров 64×64, а надписи —
+    шрифтом размера окна; площадь, порталы, деревья и корзинка остаются пиксельными на холсте.
     """
 
     supports_hires = True
@@ -161,6 +180,11 @@ class HubScene(Scene):
             position=CHUCHMEK_POSITION,
             direction=Direction.DOWN,
         )
+        # Лео — не Character: он не ходит и не поворачивается, это одна поза из манифеста.
+        self.leo_sprites = try_load_character_sprites(root / "leo")
+        self._leo_frames: tuple[pygame.Surface, pygame.Surface] | None = None  # исходный кадр и он же 32×32
+        self.leo_visits = 0  # сколько раз Алиса заглядывала в корзинку: реплики идут по кругу
+        self.talked_to_chuchmek = False  # знакомство с площадью — только в первом разговоре
 
         self.box = DialogueBox()
         for script in all_scripts():
@@ -199,6 +223,9 @@ class HubScene(Scene):
         distance = math.dist((x, y), self._chuchmek_point())
         if distance <= CHUCHMEK_RADIUS:
             candidates.append((distance, Interaction("chuchmek", "chuchmek", "Чучмек   E — поговорить")))
+        distance = math.dist((x, y), LEO_POINT)
+        if distance <= LEO_RADIUS:
+            candidates.append((distance, Interaction("leo", "leo", "Лео   E — заглянуть в корзинку")))
         distance = math.dist((x, y), MOSAIC_CENTER)
         if distance <= MOSAIC_RADIUS:
             if self.progress.has_all_fragments:
@@ -256,7 +283,14 @@ class HubScene(Scene):
         self.alice.release_controls()
         if target.kind == "chuchmek":
             self._face(self._chuchmek_point())
-            self._open_dialogue(CHUCHMEK_TALK)
+            self._open_dialogue(CHUCHMEK_TALK_AGAIN if self.talked_to_chuchmek else CHUCHMEK_TALK)
+            self.talked_to_chuchmek = True
+            return True
+        if target.kind == "leo":
+            # Одна реплика и снова управление: ни прогресса, ни перехода.
+            self._face(LEO_POSITION)
+            self.leo_visits += 1
+            self._open_dialogue(leo_script(self.leo_visits))
             return True
         if target.kind == "mosaic":
             return self._use_mosaic()
@@ -354,6 +388,7 @@ class HubScene(Scene):
         ]
         drawables += [(y, lambda t=(x, y): self._draw_tree(surface, t, hires)) for x, y in TREES]
         drawables.append((self.chuchmek.y, lambda: self._draw_chuchmek(surface, target, hires)))
+        drawables.append((LEO_POSITION[1], lambda: self._draw_leo(surface, target, hires)))
         drawables.append((self.alice.y + 0.1, lambda: self.alice.draw(surface, hires)))
         for _, draw in sorted(drawables, key=lambda item: item[0]):
             draw()
@@ -445,6 +480,58 @@ class HubScene(Scene):
             x, y = self.chuchmek.rect.centerx, self.chuchmek.rect.top - 4 - round(abs(math.sin(self.time * 4)) * 2)
             with logical_target(canvas, hires, pygame.Rect(x - 4, y - 4, 9, 9)) as surface:
                 pygame.draw.polygon(surface, MARK_COLOR, [(x, y - 3), (x + 3, y), (x, y + 3), (x - 3, y)])
+
+    def leo_frames(self) -> tuple[pygame.Surface, pygame.Surface] | None:
+        """Кадр Лео из манифеста: исходный 64×64 и он же 32×32 (ближайший сосед). None — спрайтов нет."""
+        if self._leo_frames is None and self.leo_sprites is not None:
+            try:
+                source = self.leo_sprites.frame(LEO_FRAME).image
+            except KeyError:
+                source = self.leo_sprites.frames[0].image
+            self._leo_frames = (source, pygame.transform.scale(source, (SPRITE_SIZE, SPRITE_SIZE)))
+        return self._leo_frames
+
+    def leo_rect(self) -> pygame.Rect:
+        """Где на холсте стоит кадр Лео: ноги кадра чуть ниже края корзинки — одеяло заправлено."""
+        return pygame.Rect(0, 0, SPRITE_SIZE, SPRITE_SIZE).move(LEO_POSITION[0] - SPRITE_SIZE // 2,
+                                                                 LEO_POSITION[1] - 2 - SPRITE_SIZE)
+
+    def _draw_leo(self, canvas: pygame.Surface, target: Interaction | None, hires: HiResLayer | None) -> None:
+        """Корзинка, спящий Лео из манифеста и передняя стенка корзинки поверх его одеяла."""
+        x, y = LEO_POSITION
+        with logical_target(canvas, hires, BASKET_BACK.union(pygame.Rect(x - 16, y - 2, 33, 4))) as surface:
+            pygame.draw.ellipse(surface, GRASS_DARK_COLOR, (x - 16, y - 2, 33, 4))  # тень на траве
+            pygame.draw.ellipse(surface, BASKET_DARK_COLOR, BASKET_BACK)
+            pygame.draw.ellipse(surface, BASKET_INSIDE_COLOR, BASKET_BACK.inflate(-4, -3))
+        frames = self.leo_frames()
+        if frames is not None:
+            source, image = frames
+            if hires is not None:
+                hires.sprite(source, self.leo_rect())  # исходный кадр на том же месте и того же размера
+            else:
+                canvas.blit(image, self.leo_rect())
+        else:
+            # Спрайтов нет: в корзинке просто одеяло — без временного манекена в полный рост.
+            with logical_target(canvas, hires, pygame.Rect(x - 13, y - 14, 26, 10)) as surface:
+                pygame.draw.ellipse(surface, BLANKET_COLOR, (x - 12, y - 13, 24, 9))
+                pygame.draw.circle(surface, BASKET_INSIDE_COLOR, (x - 7, y - 10), 3)
+        with logical_target(canvas, hires, BASKET_FRONT) as surface:
+            pygame.draw.rect(surface, BASKET_COLOR, BASKET_FRONT, border_radius=3)
+            pygame.draw.rect(surface, BASKET_DARK_COLOR, BASKET_FRONT, 1, border_radius=3)
+            for k in range(BASKET_FRONT.left + 4, BASKET_FRONT.right - 2, 4):  # плетение
+                pygame.draw.line(surface, BASKET_DARK_COLOR, (k, BASKET_FRONT.top + 2), (k, BASKET_FRONT.bottom - 3))
+        # Сонные «з-з» над головой (голова у кадра слева): тихо покачиваются.
+        bob = round(abs(math.sin(self.time * 1.5)) * 2)
+        marks = pygame.Rect(x - 13, y - 33 - bob, 11, 10)
+        with logical_target(canvas, hires, marks) as surface:
+            for mx, my, size in ((marks.x, marks.y + 5, 3), (marks.x + 6, marks.y, 4)):
+                zigzag = [(mx, my), (mx + size, my), (mx, my + size), (mx + size, my + size)]
+                pygame.draw.lines(surface, SLEEP_MARK_COLOR, False, zigzag)
+        if target is not None and target.kind == "leo":
+            # Ромбик над корзинкой, как у Чучмека: сюда можно заглянуть.
+            mx, my = x + 10, y - 26 - round(abs(math.sin(self.time * 4)) * 2)
+            with logical_target(canvas, hires, pygame.Rect(mx - 4, my - 4, 9, 9)) as surface:
+                pygame.draw.polygon(surface, MARK_COLOR, [(mx, my - 3), (mx + 3, my), (mx, my + 3), (mx - 3, my)])
 
     def _draw_hud(self, canvas: pygame.Surface, hires: HiResLayer | None) -> None:
         middle = HUD_HEIGHT / 2

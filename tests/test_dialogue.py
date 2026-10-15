@@ -21,7 +21,8 @@ from game.dialogue.model import (  # noqa: E402
     DialogueNode,
     DialogueScript,
 )
-from game.dialogue.box import DialogueBox, wrap_spans, wrap_text  # noqa: E402
+from game.dialogue.box import CHOICES_GAP, PADDING_Y, DialogueBox, wrap_spans, wrap_text  # noqa: E402
+from game.graphics.hires import HiResLayer, TextCommand  # noqa: E402
 from game.graphics.fonts import load_font  # noqa: E402
 
 LONG_RUSSIAN_TEXT = (
@@ -244,6 +245,39 @@ class ControllerTest(unittest.TestCase):
         self.assertFalse(dialogue.handle_event(key(pygame.K_RETURN, pygame.KEYUP)))
         self.assertEqual(dialogue.visible_text, "")
 
+    def test_space_types_and_continues_but_never_answers(self) -> None:
+        dialogue = DialogueController(branching_script())
+        self.assertTrue(dialogue.handle_event(key(pygame.K_SPACE)))  # дописал вопрос
+        self.assertFalse(dialogue.is_typing)
+        for _ in range(3):
+            self.assertTrue(dialogue.handle_event(key(pygame.K_SPACE)))  # нажатие диалоговое, но ответа нет
+        self.assertEqual(dialogue.node.id, "question")
+        self.assertEqual(dialogue.answers, {})
+        dialogue.handle_event(key(pygame.K_DOWN))
+        dialogue.handle_event(key(pygame.K_KP_ENTER))  # Enter на цифровом блоке — тоже ответ
+        self.assertEqual(dialogue.node.id, "no")
+        dialogue.update(10)
+        dialogue.handle_event(key(pygame.K_SPACE))  # а обычные реплики пробел по-прежнему листает
+        self.assertTrue(dialogue.is_finished)
+
+    def test_e_answers_through_confirm_like_enter(self) -> None:
+        # Сцены передают E в confirm(): так E выбирает выделенный ответ, как Enter.
+        dialogue = DialogueController(branching_script())
+        dialogue.update(10)
+        dialogue.handle_event(key(pygame.K_DOWN))
+        dialogue.confirm()
+        self.assertEqual(dialogue.answers["question"], DialogueChoice("Нет", "no"))
+
+    def test_one_press_on_a_question_makes_one_step(self) -> None:
+        # Нажатие, которое дописывает вопрос, ответ не выбирает: его выбирает только следующее.
+        dialogue = DialogueController(branching_script())
+        dialogue.handle_event(key(pygame.K_RETURN))
+        self.assertEqual(dialogue.node.id, "question")
+        self.assertEqual(dialogue.answers, {})
+        dialogue.handle_event(key(pygame.K_RETURN))
+        self.assertEqual(dialogue.node.id, "yes")
+        self.assertTrue(dialogue.is_typing)  # новая реплика начата с нуля
+
     def test_typing_speed_must_be_positive(self) -> None:
         with self.assertRaises(ValueError):
             DialogueController(linear_script(), chars_per_second=0)
@@ -325,6 +359,8 @@ class DialogueBoxTest(unittest.TestCase):
         self.assertTrue(self.screen_rect.contains(layout.box), node.id)
         if layout.name_tab is not None:
             self.assertTrue(self.screen_rect.contains(layout.name_tab), node.id)
+        if layout.hint_tab is not None:
+            self.assertTrue(self.screen_rect.contains(layout.hint_tab), node.id)
         choice_rows = sum(len(lines) for lines in layout.choice_lines)
         self.assertLessEqual(layout.choices_top + choice_rows * self.box.line_height, layout.box.bottom, node.id)
 
@@ -389,6 +425,59 @@ class DialogueBoxTest(unittest.TestCase):
         used = {tuple(self.canvas.get_at((x, y)))[:3] for x in range(width) for y in range(height)}
         self.assertLessEqual(used, palette)
         self.assertIn(config.DIALOGUE_SELECTED_COLOR, used)
+
+    def test_answer_hint_appears_with_the_choices(self) -> None:
+        dialogue = DialogueController(branching_script())
+        layout = self.box.layout(dialogue.node)
+        tab = layout.hint_tab
+        self.assertIsNotNone(tab)
+        self.assertIsNone(self.box.layout(linear_script().nodes["first"]).hint_tab)  # без вопроса — без подсказки
+        # Справа на верхней рамке, той же высоты, что табличка имени, и не наезжает на неё.
+        self.assertEqual((tab.top, tab.height), (layout.name_tab.top, layout.name_tab.height))
+        self.assertEqual(tab.bottom, layout.box.top + 1)
+        self.assertGreater(tab.left, layout.name_tab.right)
+        self.assertEqual(layout.area, layout.box.union(layout.name_tab).union(tab))
+
+        def tab_border() -> tuple[int, ...]:
+            self.canvas.fill(config.BACKGROUND_COLOR)
+            self.box.draw(self.canvas, dialogue)
+            return tuple(self.canvas.get_at((tab.centerx, tab.top)))[:3]
+
+        self.assertEqual(tab_border(), config.BACKGROUND_COLOR)  # пока вопрос печатается — подсказки нет
+        dialogue.update(10)
+        self.assertEqual(tab_border(), config.DIALOGUE_BORDER_COLOR)
+
+    def test_answer_hint_is_drawn_at_window_resolution(self) -> None:
+        dialogue = DialogueController(branching_script())
+        dialogue.update(10)
+        layer = HiResLayer()
+        self.box.draw(self.canvas, dialogue, layer)
+        texts = [command.text for command in layer.commands if isinstance(command, TextCommand)]
+        self.assertIn("E — ответить", texts)
+        self.assertEqual(texts[0], "Чучмек")
+        self.assertIn("Выбирай.", texts)
+
+    def test_short_question_box_is_as_tall_as_a_plain_line(self) -> None:
+        # Вопрос в строку и два ответа в строку: окно не подпрыгивает, когда появляется вопрос.
+        question = DialogueNode("q", "Чучмек", "Ну?", choices=[DialogueChoice("Да", "a"), DialogueChoice("Нет", "a")])
+        plain = DialogueNode("a", "Чучмек", "Ну.")
+        for hires in (False, True):
+            with self.subTest(hires=hires):
+                layout = self.box.layout(question, hires)
+                self.assertEqual(layout.box, self.box.layout(plain, hires).box)
+                # Отступ перед ответами сохранён, а ответы не вылезают за нижний край окна.
+                self.assertEqual(layout.choices_top, layout.text_top + layout.line_height + CHOICES_GAP)
+                self.assertLessEqual(layout.choices_top + 2 * layout.line_height, layout.box.bottom - 2)
+                self.assertGreaterEqual(layout.text_top, layout.box.top + 2)
+
+    def test_long_question_box_grows_and_keeps_the_usual_padding(self) -> None:
+        question = DialogueNode("q", "Чучмек", LONG_RUSSIAN_TEXT[:150],
+                                choices=[DialogueChoice("Да", "a"), DialogueChoice("Нет", "a")])
+        layout = self.box.layout(question)
+        rows = len(layout.text_spans)
+        self.assertGreater(rows, 1)
+        self.assertEqual(layout.text_top, layout.box.top + PADDING_Y)
+        self.assertEqual(layout.box.height, (rows + 2) * layout.line_height + CHOICES_GAP + 2 * PADDING_Y)
 
     def test_finished_dialogue_draws_nothing(self) -> None:
         dialogue = DialogueController(linear_script())

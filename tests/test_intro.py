@@ -27,6 +27,7 @@ from game.story.intro_dialogue import (  # noqa: E402
     CHOICE_ID,
     CHUCHMEK,
     ERROR_LINES,
+    ORGANIZER_CHOICE_ID,
     ERROR_TITLE,
     POSES,
     RABBIT,
@@ -56,7 +57,13 @@ from game.story.intro_scene import (  # noqa: E402
 )
 from game.world.hub import HubScene  # noqa: E402
 
-CHOICES = ("Начинаем с суши. У истории должен быть вкус.", "Сначала объясни, почему гриб разговаривает.")
+CHOICES = ("Начнём с суши. Праздник должен быть вкусным.", "Почему за праздник отвечает именно гриб?")
+ORGANIZER_CHOICES = ("И кто тебя назначил?", "Ладно. Что нам нужно сделать?")
+# Ветки выборов вступления: вопрос → (реплики первой ветки, реплики второй ветки, общая реплика после них).
+BRANCHES = {
+    ORGANIZER_CHOICE_ID: (("d_self_appointed", "d_democratic"), ("d_down_to_business", "d_thought_of"), "d_plan"),
+    CHOICE_ID: (("e_sushi",), ("e_mushroom", "e_explains"), "e_ready"),
+}
 TITLE_TRUNCATED = "Алиса в стране чу…"
 # Слова, которых не должно быть в сказке до сюжетного сбоя.
 SPOILERS = ("чучмек", "гриб", "суши", "испытан", "формуляр", "торт", "компост", "должност")
@@ -74,22 +81,27 @@ def node_text() -> dict[str, str]:
     return {node.id: f"{node.speaker}: {node.text}" for node in all_nodes()}
 
 
-def step(scene: IntroScene, choice_index: int = 0, dt: float = 1 / 60, state: dict | None = None) -> None:
-    """Один шаг игрока: Enter, если реплика напечатана (в выборе — ↓ нужное число раз), иначе время."""
+def step(scene: IntroScene, choice_index: int | dict = 0, dt: float = 1 / 60, state: dict | None = None) -> None:
+    """Один шаг игрока: Enter, если реплика напечатана (в выборе — ↓ нужное число раз), иначе время.
+
+    choice_index — номер ответа на каждом вопросе или словарь «id вопроса → номер ответа»."""
     state = state if state is not None else {}
     dialogue = scene.dialogue
     if dialogue is not None and dialogue.node is not None and not dialogue.is_typing:
-        if dialogue.node.choices and not state.get("moved"):
-            for _ in range(choice_index):
+        node = dialogue.node
+        moved = state.setdefault("moved", set())
+        if node.choices and node.id not in moved:
+            index = choice_index.get(node.id, 0) if isinstance(choice_index, dict) else choice_index
+            for _ in range(index):
                 scene.handle_event(key(pygame.K_DOWN))
-            state["moved"] = True
+            moved.add(node.id)
         scene.handle_event(key(pygame.K_RETURN))
         scene.handle_event(key(pygame.K_RETURN, event_type=pygame.KEYUP))
     else:
         scene.update(dt)
 
 
-def play_through(scene: IntroScene, choice_index: int = 0, dt: float = 1 / 60, limit: int = 100000) -> list:
+def play_through(scene: IntroScene, choice_index: int | dict = 0, dt: float = 1 / 60, limit: int = 100000) -> list:
     state: dict = {}
     for _ in range(limit):
         if scene.completed or scene.is_finished:
@@ -164,14 +176,28 @@ class ScriptTest(IntroTestCase):
             "Это должность?",
             "Теперь да.",
             "не знаю, почему оказался в заголовке книги. Но считаю это повышением.",
-            "Нам нужны три сюжетных фрагмента. Без них финальная дверь не откроется.",
-            "Что за дверью?",
-            "Не знаю. Я гриб, а не экскурсовод.",
-            "Три испытания. Суши, формуляры и торты.",
-            "Почему формуляры?",
-            "Потому что зло бывает разным.",
-            "Но если следующее испытание окажется про заполнение двенадцати формуляров на один суши, "
-            "я буду задавать вопросы.",
+            "Ты гриб.",
+            "Так. Карьера подождёт. У меня тут праздник.",
+            "Чей?",
+            "Твой, конечно! Сегодня твой день рождения.",
+            "А я — временно главный организатор праздника.",
+            "Я подготовил праздничный план. Потом немного его улучшил. Потом сказка сломалась.",
+            "Теперь у нас три фрагмента плана, три испытания и ни одного желающего принять мою отчётность.",
+            "И как это связано с моим днём рождения?",
+            "У праздника три части: вкусная, официальная и сладкая.",
+            "Вкусная часть — угощение. Её охраняет кот-повар на кухне суши.",
+            "Официальная часть — порядок и разрешение на праздник. Их выдаёт гусь-инспектор в архиве.",
+            "Разрешение? На мой собственный день рождения?",
+            "Зло бывает разным.",
+            "А сладкая часть — торт. Он в перевёрнутой кондитерской. Про клубнику я пока говорить не готов.",
+            "Три фрагмента сложатся на мозаике посреди площади в последнюю страницу плана. "
+            "Открыть её сможешь только ты.",
+            "Подожди. Организатор — ты, а испытания проходить мне?",
+            "только именинница знает, каким должен быть её праздник.",
+            "я назначил его главным инспектором праздничного настроения.",
+            "достаточно ли в плане поводов улыбнуться.",
+            "все три портала открыты. Порядок — на твой вкус. Ты же именинница.",
+            "Но если для разрешения на праздник понадобится двенадцать формуляров, я буду задавать вопросы.",
             "Разумно. Хотя формуляр № 12-Б нужен именно для разрешения на вопросы.",
         ]
         for line in required:
@@ -259,11 +285,18 @@ class ScriptTest(IntroTestCase):
 
     def test_choice_branches_join(self) -> None:
         nodes = {node.id: node for node in all_nodes()}
-        choice_node = nodes[CHOICE_ID]
-        self.assertEqual(tuple(choice.text for choice in choice_node.choices), CHOICES)
-        replies = [nodes[choice.next_id] for choice in choice_node.choices]
-        self.assertNotEqual(replies[0].text, replies[1].text)  # ответы Чучмека разные
-        self.assertEqual({reply.next_id for reply in replies}, {"e_ready"})  # продолжение общее
+        self.assertEqual(tuple(choice.text for choice in nodes[CHOICE_ID].choices), CHOICES)
+        self.assertEqual(tuple(choice.text for choice in nodes[ORGANIZER_CHOICE_ID].choices), ORGANIZER_CHOICES)
+        self.assertEqual({node.id for node in all_nodes() if node.choices}, set(BRANCHES))  # других выборов нет
+        for question, (first, second, join) in BRANCHES.items():
+            with self.subTest(question=question):
+                choices = nodes[question].choices
+                self.assertEqual([choice.next_id for choice in choices], [first[0], second[0]])
+                self.assertNotEqual(nodes[first[0]].text, nodes[second[0]].text)  # ответы Чучмека разные
+                for branch in (first, second):  # каждая ветка — цепочка своих реплик до общей
+                    for current, following in zip(branch, (*branch[1:], join)):
+                        self.assertEqual(nodes[current].next_id, following)
+                self.assertFalse(set(first) & set(second))
 
     def test_stage_directions_refer_to_real_nodes_and_frames(self) -> None:
         ids = {node.id for node in all_nodes()}
@@ -297,12 +330,13 @@ class KeysTest(IntroTestCase):
                 scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
             else:
                 scene.update(1 / 60)
-        self.assertEqual(scene.dialogue.node.id, CHOICE_ID)
+        self.assertEqual(scene.dialogue.node.id, ORGANIZER_CHOICE_ID)  # первый вопрос — про организатора
         scene.handle_event(key(pygame.K_DOWN))
         chosen = scene.dialogue.node.choices[1]
         scene.handle_event(key(pygame.K_e, pygame.KSCAN_E))
         scene.update(1 / 60)
-        self.assertIs(scene.choice, chosen)  # E выбрал выделенный ответ, а не первый
+        self.assertIs(scene.answers[ORGANIZER_CHOICE_ID], chosen)  # E выбрал выделенный ответ, а не первый
+        self.assertEqual(scene.dialogue.node.id, chosen.next_id)
 
 
 class SequenceTest(IntroTestCase):
@@ -316,8 +350,10 @@ class SequenceTest(IntroTestCase):
             ("cue", "glitch"), ("cue", "error_message"), ("cue", "restart"),
             ("title", TITLE_CLASSIC), ("title", TITLE_TRUNCATED), ("title", TITLE_FINAL),
             ("cue", "chuchmek_emerges"), ("node", "c_who"), ("node", "c_name"), ("node", "c_title"),
-            ("cue", "alice_reacts"), ("node", "d_fragments"), ("node", "d_trials"),
-            ("node", CHOICE_ID), ("node", "e_ready"), ("node", "f_form_12b"), ("cue", "finale"),
+            ("cue", "alice_reacts"), ("node", "d_wait"), ("node", "d_yours"), ("node", ORGANIZER_CHOICE_ID),
+            ("node", "d_plan"), ("node", "d_parts"), ("node", "d_sushi"), ("node", "d_forms"), ("node", "d_cakes"),
+            ("node", "d_mosaic"), ("node", "d_leo"), ("node", CHOICE_ID), ("node", "e_ready"),
+            ("node", "f_form_12b"), ("cue", "finale"),
         ])
 
     def test_title_returns_to_classic_before_truncation_and_final_comes_last(self) -> None:
@@ -509,29 +545,42 @@ class SequenceTest(IntroTestCase):
         self.assertEqual(end.pose, "clipboard_confident")  # важный вид, будто так и задумано
         self.assertFalse(quiet.chuchmek_clipped)
 
-    def test_old_plot_follows_after_chuchmek_appears(self) -> None:
+    def test_birthday_plan_follows_after_chuchmek_appears(self) -> None:
         events = play_through(IntroScene())
         emerge = events.index(("cue", "chuchmek_emerges"))
         after = [value for kind, value in events[emerge:] if kind == "node"]
-        for node_id in ("d_fragments", "d_door", "d_trials", "d_why_forms", "d_evil", "d_cat", "d_goose",
-                        CHOICE_ID, "e_ready", "f_questions", "f_form_12b"):
+        for node_id in ("d_wait", "d_yours", ORGANIZER_CHOICE_ID, "d_plan", "d_pieces", "d_how", "d_parts",
+                        "d_sushi", "d_forms", "d_permit", "d_evil", "d_cakes", "d_mosaic", "d_why_me", "d_tried",
+                        "d_only_you", "d_leo", "d_leo_job", "d_leo_smile", CHOICE_ID, "e_ready", "f_go",
+                        "f_questions", "f_form_12b"):
             self.assertIn(node_id, after)
         self.assertEqual(after[-1], "f_form_12b")
 
-    def test_both_choices_lead_to_common_ending(self) -> None:
-        for index, reply in ((0, "e_sushi"), (1, "e_talking")):
-            with self.subTest(choice=index):
-                scene = IntroScene()
-                events = play_through(scene, index)
-                nodes = [value for kind, value in events if kind == "node"]
-                self.assertTrue(scene.completed)
-                self.assertEqual(scene.choice.text, CHOICES[index])
-                other = ({"e_sushi", "e_talking"} - {reply}).pop()
-                self.assertIn(reply, nodes)
-                self.assertNotIn(other, nodes)
-                self.assertLess(nodes.index(reply), nodes.index("e_ready"))
-                self.assertEqual(nodes[-1], "f_form_12b")
-                self.assertEqual(len(nodes), len(all_nodes()) - 1)  # все реплики, кроме второй ветки
+    def test_every_combination_of_answers_leads_to_common_ending(self) -> None:
+        nodes_by_id = {node.id: node for node in all_nodes()}
+        branch_nodes = {node_id for first, second, _ in BRANCHES.values() for node_id in (*first, *second)}
+        for organizer in (0, 1):
+            for start in (0, 1):
+                with self.subTest(organizer=organizer, start=start):
+                    scene = IntroScene()
+                    answers = {ORGANIZER_CHOICE_ID: organizer, CHOICE_ID: start}
+                    events = play_through(scene, answers)
+                    nodes = [value for kind, value in events if kind == "node"]
+                    self.assertTrue(scene.completed)
+                    self.assertEqual(scene.answers[ORGANIZER_CHOICE_ID].text, ORGANIZER_CHOICES[organizer])
+                    self.assertEqual(scene.choice.text, CHOICES[start])
+                    chosen = set()
+                    for question, index in answers.items():
+                        first, second, join = BRANCHES[question]
+                        taken, skipped = (first, second) if index == 0 else (second, first)
+                        chosen.update(taken)
+                        self.assertEqual([node for node in nodes if node in taken], list(taken))
+                        self.assertFalse(set(skipped) & set(nodes))  # чужая ветка не показана
+                        self.assertLess(nodes.index(taken[-1]), nodes.index(join))
+                    # Все общие реплики — при любых ответах, каждая по одному разу.
+                    expected = [node_id for node_id in nodes_by_id if node_id not in branch_nodes or node_id in chosen]
+                    self.assertEqual(sorted(nodes), sorted(expected))
+                    self.assertEqual(nodes[-1], "f_form_12b")
 
     def test_sequence_does_not_depend_on_dt(self) -> None:
         reference = play_through(IntroScene())

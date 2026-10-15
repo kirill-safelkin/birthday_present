@@ -269,7 +269,9 @@ class SequenceTest(FinaleTestCase):
     def test_whole_order_of_screens(self) -> None:
         play_finale(self.scene)
         letter = [f"letter_{index}" for index in range(len(text.LETTER_PAGES))]
-        talk = list(text.FINALE_TALK.nodes)
+        # Enter на вопросе выбирает первый ответ; вторая ветка (f_upside_down) не показывается.
+        talk = ["f_restored", "f_ending", "f_usually", "f_ours", "f_documents", "f_commission", "f_verdict",
+                text.CREDIT_CHOICE_ID, "f_together", "f_backside"]
         self.assertEqual(self.scene.shown, [TALK, *talk, LETTER, *letter, PAUSE, GIFT, GIFT_REACTION, "g_appeal",
                                             CREDITS, THE_END, DONE])
 
@@ -586,6 +588,8 @@ class AppIntegrationTest(unittest.TestCase):
             if finale.phase == DONE:
                 return
             code = (pygame.K_e, pygame.K_RETURN, pygame.K_SPACE)[len(finale.shown) % 3]
+            if code == pygame.K_SPACE and finale.dialogue is not None and finale.dialogue.choices:
+                code = pygame.K_e  # пробел только листает реплики: ответ игрок выбирает E или Enter
             self.press(code, pygame.KSCAN_E if code == pygame.K_e else 0)
             self.app._update(0.4)
         raise AssertionError(f"финал не закончился: {finale.phase}")

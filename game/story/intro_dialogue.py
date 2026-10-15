@@ -12,9 +12,13 @@ POSES — ремарки: какую позу принимает персона�
   A — классическая «Алиса в стране чудес»: заставка, Белый Кролик, нора, «Ну, поехали»;
   B — сбой сказки: рывки, сообщение об ошибке, перезапуск, превращение заголовка;
   C — Чучмек вылезает из норы и знакомится;
-  D — объяснение приключения и три испытания;
-  E — выбор Алисы (обе ветки сходятся);
+  D — праздничный план: у Алисы день рождения, Чучмек сам назначил себя организатором,
+      план распался на три фрагмента — вкусную, официальную и сладкую части праздника;
+      почему их собирает Алиса и кто такой Лео;
+  E — выбор Алисы, с чего начать;
   F — конец вступления.
+В частях D и E у Алисы по одному выбору ответа: ветки дают свои реплики и сходятся в общей,
+так что главное игрок узнаёт при любом ответе.
 До части C (до превращения названия) Чучмек, грибы и испытания не упоминаются.
 """
 
@@ -30,8 +34,10 @@ CHUCHMEK = "Чучмек"
 # Говорящий → персонаж на сцене (идентификатор из assets/characters).
 SPEAKER_ACTORS = {ALICE: "alice", RABBIT: "white_rabbit", CHUCHMEK: "chuchmek"}
 
-# Реплика с выбором Алисы: по ней сцена и экран проверки узнают, какой ответ выбран.
+# Реплика с выбором Алисы в части E: по ней сцена и экран проверки узнают, какой ответ выбран.
 CHOICE_ID = "e_where_to_start"
+# Выбор в части D: как Алиса отвечает на новость о самоназначенном организаторе.
+ORGANIZER_CHOICE_ID = "d_organizer"
 
 TITLE_CLASSIC = "Алиса в стране чудес"
 TITLE_FINAL = "Алиса в стране Чучмека?!"
@@ -178,54 +184,138 @@ PART_C_TITLE = _script(
     ),
 )
 
-# --- Часть D. Объяснение приключения ---
+# --- Часть D. Праздничный план ---
 
-PART_D_EXPLANATION = _script(
+PART_D_PLAN = _script(
+    DialogueNode("d_wait", CHUCHMEK, "Так. Карьера подождёт. У меня тут праздник.", next_id="d_whose"),
+    DialogueNode("d_whose", ALICE, "Чей?", next_id="d_yours"),
+    DialogueNode("d_yours", CHUCHMEK, "Твой, конечно! Сегодня твой день рождения.", next_id=ORGANIZER_CHOICE_ID),
     DialogueNode(
-        "d_fragments",
+        ORGANIZER_CHOICE_ID,
         CHUCHMEK,
-        "Так. К делу. Нам нужны три сюжетных фрагмента. Без них финальная дверь не откроется.",
-        next_id="d_door",
-    ),
-    DialogueNode("d_door", ALICE, "Что за дверью?", next_id="d_guide"),
-    DialogueNode("d_guide", CHUCHMEK, "Не знаю. Я гриб, а не экскурсовод.", next_id="d_where"),
-    DialogueNode("d_where", ALICE, "Хорошо. А где берут эти фрагменты?", next_id="d_trials"),
-    DialogueNode("d_trials", CHUCHMEK, "Три испытания. Суши, формуляры и торты.", next_id="d_why_forms"),
-    DialogueNode("d_why_forms", ALICE, "Почему формуляры?", next_id="d_evil"),
-    DialogueNode("d_evil", CHUCHMEK, "Потому что зло бывает разным.", next_id="d_cat"),
-    DialogueNode(
-        "d_cat", CHUCHMEK, "Суши охраняет кот-повар. Строгий, но справедливый. В основном строгий.", next_id="d_goose"
+        "А я — временно главный организатор праздника.",
+        choices=[
+            DialogueChoice("И кто тебя назначил?", "d_self_appointed"),
+            DialogueChoice("Ладно. Что нам нужно сделать?", "d_down_to_business"),
+        ],
     ),
     DialogueNode(
-        "d_goose",
+        "d_self_appointed",
         CHUCHMEK,
-        "Формуляры принимает гусь-инспектор. А про торты я пока говорить не готов. Эмоционально.",
+        "Я сам. Остальные кандидаты почему-то спрятались. Кролик, например, очень срочно опоздал.",
+        next_id="d_democratic",
+    ),
+    DialogueNode("d_democratic", ALICE, "Очень демократично.", next_id="d_plan"),
+    DialogueNode(
+        "d_down_to_business",
+        CHUCHMEK,
+        "Деловой подход! Мне бы такой: я сначала назначил себя, а потом уже начал думать.",
+        next_id="d_thought_of",
+    ),
+    DialogueNode("d_thought_of", ALICE, "И до чего додумался?", next_id="d_plan"),
+    # Ветки сошлись: дальше одно и то же при любом ответе.
+    DialogueNode(
+        "d_plan",
+        CHUCHMEK,
+        "Я подготовил праздничный план. Потом немного его улучшил. Потом сказка сломалась.",
+        next_id="d_pieces",
+    ),
+    DialogueNode(
+        "d_pieces",
+        CHUCHMEK,
+        "Теперь у нас три фрагмента плана, три испытания и ни одного желающего принять мою отчётность.",
+        next_id="d_how",
+    ),
+    DialogueNode("d_how", ALICE, "И как это связано с моим днём рождения?", next_id="d_parts"),
+    DialogueNode(
+        "d_parts",
+        CHUCHMEK,
+        "Напрямую. У праздника три части: вкусная, официальная и сладкая. Без них он есть только на бумаге.",
+        next_id="d_sushi",
+    ),
+    DialogueNode(
+        "d_sushi",
+        CHUCHMEK,
+        "Вкусная часть — угощение. Её охраняет кот-повар на кухне суши. Строгий, но справедливый. В основном строгий.",
+        next_id="d_forms",
+    ),
+    DialogueNode(
+        "d_forms",
+        CHUCHMEK,
+        "Официальная часть — порядок и разрешение на праздник. Их выдаёт гусь-инспектор в архиве.",
+        next_id="d_permit",
+    ),
+    DialogueNode("d_permit", ALICE, "Разрешение? На мой собственный день рождения?", next_id="d_evil"),
+    DialogueNode("d_evil", CHUCHMEK, "Зло бывает разным.", next_id="d_cakes"),
+    DialogueNode(
+        "d_cakes",
+        CHUCHMEK,
+        "А сладкая часть — торт. Он в перевёрнутой кондитерской. Про клубнику я пока говорить не готов. Эмоционально.",
+        next_id="d_mosaic",
+    ),
+    DialogueNode(
+        "d_mosaic",
+        CHUCHMEK,
+        "Три фрагмента сложатся на мозаике посреди площади в последнюю страницу плана. Открыть её сможешь только ты.",
+        next_id="d_why_me",
+    ),
+    DialogueNode("d_why_me", ALICE, "Подожди. Организатор — ты, а испытания проходить мне?", next_id="d_tried"),
+    DialogueNode(
+        "d_tried",
+        CHUCHMEK,
+        "Я пробовал сам. Кот не пустил меня на кухню, гусь — в архив, а торт от меня перевернулся.",
+        next_id="d_only_you",
+    ),
+    DialogueNode(
+        "d_only_you",
+        CHUCHMEK,
+        "И потом, только именинница знает, каким должен быть её праздник. Я знаю только, каким не должен.",
+        next_id="d_leo",
+    ),
+    DialogueNode(
+        "d_leo",
+        CHUCHMEK,
+        "Но ты не одна. На площади ждёт Лео: я назначил его главным инспектором праздничного настроения.",
+        next_id="d_leo_job",
+    ),
+    DialogueNode("d_leo_job", ALICE, "Лео? И что же он инспектирует?", next_id="d_leo_smile"),
+    DialogueNode(
+        "d_leo_smile",
+        CHUCHMEK,
+        "Самое важное: достаточно ли в плане поводов улыбнуться. Пока проверяет во сне. Очень тщательно.",
     ),
 )
 
-# --- Часть E. Выбор направления: обе ветки сходятся в e_ready ---
+# --- Часть E. С чего начать: обе ветки сходятся в e_ready ---
 
 PART_E_CHOICE = _script(
     DialogueNode(
         CHOICE_ID,
         CHUCHMEK,
-        "Итак. С чего начнём?",
+        "Итак, план ясен. Вопросы к организатору?",
         choices=[
-            DialogueChoice("Начинаем с суши. У истории должен быть вкус.", "e_sushi"),
-            DialogueChoice("Сначала объясни, почему гриб разговаривает.", "e_talking"),
+            DialogueChoice("Начнём с суши. Праздник должен быть вкусным.", "e_sushi"),
+            DialogueChoice("Почему за праздник отвечает именно гриб?", "e_mushroom"),
         ],
     ),
-    DialogueNode("e_sushi", CHUCHMEK, "Смело. Кот-повар как раз точит ножи. Надеюсь, для суши.", next_id="e_ready"),
     DialogueNode(
-        "e_talking",
+        "e_sushi",
         CHUCHMEK,
-        "Долгая история. Если коротко: я вырос у стены библиотеки. Остальное — сплетни.",
+        "Правильно: сначала угощение, потом бюрократия. Кот-повар как раз точит ножи. Надеюсь, для суши.",
         next_id="e_ready",
     ),
     DialogueNode(
-        "e_ready", CHUCHMEK, "В любом случае все три испытания открыты. Порядок — на твой вкус.", next_id="e_alice"
+        "e_mushroom",
+        CHUCHMEK,
+        "Больше никто не вызвался. И я вырос у стены библиотеки: прочитал все книги о праздниках. Обложки.",
+        next_id="e_explains",
     ),
-    DialogueNode("e_alice", ALICE, "Отлично. Значит, пора выяснить, что здесь вообще происходит."),
+    DialogueNode("e_explains", ALICE, "Это многое объясняет.", next_id="e_ready"),
+    DialogueNode(
+        "e_ready",
+        CHUCHMEK,
+        "В любом случае все три портала открыты. Порядок — на твой вкус. Ты же именинница.",
+    ),
 )
 
 # --- Часть F. Конец вступления ---
@@ -235,8 +325,7 @@ PART_F_ENDING = _script(
     DialogueNode(
         "f_questions",
         ALICE,
-        "Но если следующее испытание окажется про заполнение двенадцати формуляров "
-        "на один суши, я буду задавать вопросы.",
+        "Но если для разрешения на праздник понадобится двенадцать формуляров, я буду задавать вопросы.",
         next_id="f_form_12b",
     ),
     DialogueNode("f_form_12b", CHUCHMEK, "Разумно. Хотя формуляр № 12-Б нужен именно для разрешения на вопросы."),
@@ -264,8 +353,8 @@ BEATS: tuple[Beat, ...] = (
     Pause("C", 1.0),
     Lines("C", PART_C_TITLE),
     Cue("C", "alice_reacts", 0.8),
-    # D–F. Прежнее продолжение: три испытания, выбор, конец
-    Lines("D", PART_D_EXPLANATION),
+    # D–F. Праздничный план, выбор, конец
+    Lines("D", PART_D_PLAN),
     Lines("E", PART_E_CHOICE),
     Lines("F", PART_F_ENDING),
     Cue("F", "finale", 2.0),
@@ -298,15 +387,34 @@ POSES: dict[str, dict[str, str]] = {
     "c_title": {"chuchmek": "talk_gesture", **FACING_CHUCHMEK},
     "c_mushroom": {"chuchmek": "curious_glance"},
     "c_career": {"chuchmek": "talk_01", **FACING_CHUCHMEK},
-    "d_fragments": {"chuchmek": "talk_01"},
-    "d_guide": {"chuchmek": "confused"},
-    "d_trials": {"chuchmek": "talk_excited"},
-    "d_evil": {"chuchmek": "wink"},
-    "d_cat": {"chuchmek": "talk_02"},
-    "d_goose": {"chuchmek": "confused"},
+    "d_wait": {"chuchmek": "talk_gesture"},
+    "d_whose": {"chuchmek": "idle"},
+    "d_yours": {"chuchmek": "talk_excited"},
+    ORGANIZER_CHOICE_ID: {"chuchmek": "clipboard_confident"},
+    "d_self_appointed": {"chuchmek": "smug_wink"},
+    "d_democratic": {"chuchmek": "idle", "alice": "react_down_1"},
+    "d_down_to_business": {"chuchmek": "talk_excited"},
+    "d_thought_of": {"chuchmek": "curious_glance"},
+    "d_plan": {"chuchmek": "talk_01", **FACING_CHUCHMEK},
+    "d_pieces": {"chuchmek": "confused"},
+    "d_how": {"chuchmek": "idle"},
+    "d_parts": {"chuchmek": "talk_gesture"},
+    "d_sushi": {"chuchmek": "talk_02"},
+    "d_forms": {"chuchmek": "clipboard_confident"},
+    "d_permit": {"chuchmek": "curious_glance", "alice": "react_down_2"},
+    "d_evil": {"chuchmek": "wink", **FACING_CHUCHMEK},
+    "d_cakes": {"chuchmek": "confused"},
+    "d_mosaic": {"chuchmek": "talk_excited"},
+    "d_why_me": {"chuchmek": "curious_glance"},
+    "d_tried": {"chuchmek": "panicked"},
+    "d_only_you": {"chuchmek": "talk_01"},
+    "d_leo": {"chuchmek": "clipboard_confident"},
+    "d_leo_job": {"chuchmek": "idle"},
+    "d_leo_smile": {"chuchmek": "smug_wink"},
     CHOICE_ID: {"chuchmek": "clipboard_confident"},
     "e_sushi": {"chuchmek": "talk_excited"},
-    "e_talking": {"chuchmek": "smug_wink"},
+    "e_mushroom": {"chuchmek": "smug_wink"},
+    "e_explains": {"chuchmek": "idle"},
     "e_ready": {"chuchmek": "talk_gesture"},
     "f_form_12b": {"chuchmek": "clipboard_confident"},
 }

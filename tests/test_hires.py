@@ -588,11 +588,14 @@ class HubHiResTest(PygameTestCase):
         hub.update(0.1)
         layer, canvas = self.draw(hub)
         sprites = self.sprites(layer)
-        self.assertEqual(len(sprites), 2)
+        self.assertEqual(len(sprites), 3)  # Алиса, Чучмек и Лео в корзинке — каждый по одному разу
         chuchmek_frame = load_character_sprites(CHARACTERS_DIR / "chuchmek").frame("idle").image
         by_rect = {command.rect.topleft: command for command in sprites}
         alice, chuchmek = by_rect[hub.alice.rect.topleft], by_rect[hub.chuchmek.rect.topleft]
         self.assertIs(alice.image, hub.alice.player.source)
+        leo = by_rect[hub.leo_rect().topleft]
+        self.assertIs(leo.image, hub.leo_frames()[0])  # исходный кадр 64×64, а не уменьшенная копия
+        self.assertEqual(leo.rect, hub.leo_rect())
         # Чучмек не отражён: его кадр совпадает с исходным кадром манифеста.
         self.assertEqual(pygame.image.tobytes(chuchmek.image, "RGBA"), pygame.image.tobytes(chuchmek_frame, "RGBA"))
         # На холсте персонажей нет — двойного силуэта не будет.

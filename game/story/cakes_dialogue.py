@@ -1,15 +1,20 @@
 """Реплики испытания тортов: вступление в перевёрнутой кондитерской, отказы и успех рецепта,
 побег клубники, находка в кладовой и финал. Только данные.
 
+Торт — сладкая часть праздничного плана. Во вступлении у Алисы выбор: Чучмек отвечает
+по-разному, а головоломка рецепта и побег клубники одни и те же при любом ответе.
+
 Показывает их game/trials/cakes_scene.py через существующую систему диалогов.
 CHUCHMEK_POSES — какую позу (кадр chuchmek) принимает Чучмек на реплике.
 """
 
 from __future__ import annotations
 
-from game.dialogue.model import DialogueNode, DialogueScript
+from game.dialogue.model import DialogueChoice, DialogueNode, DialogueScript
 from game.story.intro_dialogue import ALICE, CHUCHMEK
 from game.trials.cakes_puzzle import STEPS
+
+CHECK_CHOICE_ID = "i_sweet"  # выбор Алисы во вступлении
 
 
 def _script(*nodes: DialogueNode) -> DialogueScript:
@@ -27,8 +32,24 @@ INTRO = _script(
         "i_backwards",
         CHUCHMEK,
         "Неправда. Я просто выполнил рецепт в обратном порядке. Очень удобно: сразу знаешь, чем всё закончится.",
-        next_id="i_fix",
+        next_id=CHECK_CHOICE_ID,
     ),
+    DialogueNode(
+        CHECK_CHOICE_ID,
+        CHUCHMEK,
+        "Сладкая часть праздника почти готова. Проверим?",
+        choices=[
+            DialogueChoice("Сначала проверим рецепт.", "i_check"),
+            DialogueChoice("Почему даже потолок выглядит подозрительно?", "i_ceiling"),
+        ],
+    ),
+    DialogueNode(
+        "i_check", CHUCHMEK, "Проверяй. Только переставляй этапы аккуратно: они у меня нервные.", next_id="i_fix"
+    ),
+    DialogueNode(
+        "i_ceiling", CHUCHMEK, "Это не подозрительно, это праздничная лепнина. Из вчерашнего теста.", next_id="i_oven"
+    ),
+    DialogueNode("i_oven", CHUCHMEK, "Зато духовка на полу. Очень удобно, если ты тоже вверх ногами.", next_id="i_fix"),
     DialogueNode("i_fix", ALICE, "Тогда я расставлю этапы по порядку. А потом проверим."),
 )
 
@@ -84,7 +105,7 @@ FINAL = _script(
     ),
     DialogueNode("f_boss", ALICE, "По-моему, она уже назначила себя руководителем.", next_id="f_fragment"),
     DialogueNode(
-        "f_fragment", CHUCHMEK, "Тогда держи фрагмент праздника. Руководитель проекта одобрил. Кажется, кивнул."
+        "f_fragment", CHUCHMEK, "Тогда держи сладкую часть праздника. Руководитель проекта одобрил. Кажется, кивнул."
     ),
 )
 
@@ -92,6 +113,10 @@ CHUCHMEK_POSES = {
     "i_ready": "clipboard_confident",
     "i_space": "smug_wink",
     "i_backwards": "talk_gesture",
+    CHECK_CHOICE_ID: "clipboard_confident",
+    "i_check": "talk_gesture",
+    "i_ceiling": "smug_wink",
+    "i_oven": "talk_excited",
     "wrong_joke": "confused",
     "s_finally": "talk_excited",
     "e_escaped": "arms_up_panic",

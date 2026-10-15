@@ -20,14 +20,32 @@ from game.core.scenes import Scene, SceneManager  # noqa: E402
 from game.dialogue.box import DialogueBox  # noqa: E402
 from game.graphics.animation import IDLE, WALK, Direction  # noqa: E402
 from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites  # noqa: E402
-from game.story.hub_dialogue import CHUCHMEK_TALK, PORTAL_NOT_READY, all_scripts  # noqa: E402
+from game.story.hub_dialogue import (  # noqa: E402
+    CHUCHMEK_TALK,
+    CHUCHMEK_TALK_AGAIN,
+    HUB_CHOICE_ID,
+    HUB_JOIN_ID,
+    LEO_LINES,
+    PORTAL_NOT_READY,
+    all_scripts,
+)
 from game.story.intro_dialogue import CHUCHMEK  # noqa: E402
 from game.story.intro_scene import IntroScene  # noqa: E402
 from game.world.hub import (  # noqa: E402
     CHUCHMEK_POSITION,
     CHUCHMEK_RADIUS,
+    FLOWER_BEDS,
+    GRASS_COLOR,
+    GRASS_DARK_COLOR,
     HUB_SCENE,
     HUD_HEIGHT,
+    LEO_FRAME,
+    LEO_POINT,
+    LEO_POSITION,
+    LEO_RADIUS,
+    MOSAIC_CENTER,
+    MOSAIC_RADIUS,
+    TREES,
     PORTALS,
     SPAWN,
     SPRITE_SIZE,
@@ -354,20 +372,24 @@ class ChuchmekTest(HubTestCase):
             shown.append(self.hub.dialogue.node.id)
             press(self.hub, pygame.K_RETURN)
             press(self.hub, pygame.K_RETURN)
-        self.assertEqual(shown, ["h_welcome", "h_why", "h_because", "h_where", "h_directions"])
+        # Enter на вопросе выбирает первый ответ — совет о порталах; дальше общая реплика про мозаику.
+        self.assertEqual(shown, ["h_welcome", "h_why", "h_because", HUB_CHOICE_ID, "h_where", "h_hungry", HUB_JOIN_ID])
         x = self.hub.alice.x
         hold(self.hub, [pygame.K_LEFT], 0.5)  # управление вернулось
         self.assertLess(self.hub.alice.x, x)
 
     def test_dialogue_texts(self) -> None:
-        texts = [CHUCHMEK_TALK.nodes[node_id].text for node_id in ("h_welcome", "h_why", "h_because", "h_where")]
+        texts = [CHUCHMEK_TALK.nodes[node_id].text for node_id in ("h_welcome", "h_why", "h_because")]
         self.assertEqual(texts, [
             "Добро пожаловать на центральную площадь!",
             "Почему она центральная?",
             "Потому что если бы она была боковой, её пришлось бы искать.",
-            "А где три испытания?",
         ])
-        self.assertIn("Слева суши, справа торты", CHUCHMEK_TALK.nodes["h_directions"].text)
+        choices = [choice.text for choice in CHUCHMEK_TALK.nodes[HUB_CHOICE_ID].choices]
+        self.assertEqual(choices, ["С какого испытания лучше начать?", "А что конкретно ты поручил Лео?"])
+        self.assertIn("Слева суши, справа торты", CHUCHMEK_TALK.nodes["h_where"].text)
+        self.assertIn("Если Лео улыбнётся — пункт плана утверждён", CHUCHMEK_TALK.nodes["h_leo"].text)
+        self.assertIn("мозаике", CHUCHMEK_TALK.nodes[HUB_JOIN_ID].text)  # общая реплика — про финал
 
     def test_alice_does_not_walk_during_dialogue(self) -> None:
         walk_to_chuchmek(self.hub)
@@ -399,6 +421,177 @@ class ChuchmekTest(HubTestCase):
         lowest_feet.append(CHUCHMEK_POSITION[1] + 6 + CHUCHMEK_RADIUS)
         for feet in lowest_feet:
             self.assertLessEqual(feet, lowest_box)  # окно реплики не закрывает Алису
+
+
+def talk(hub: HubScene, answer: int) -> list[str]:
+    """Разговор с Чучмеком целиком: E у Чучмека, Enter по репликам, на вопросе — ответ answer."""
+    press(hub, pygame.K_e, pygame.KSCAN_E)
+    shown = []
+    for _ in range(100):
+        dialogue = hub.dialogue
+        if dialogue is None:
+            return shown
+        shown.append(dialogue.node.id)
+        press(hub, pygame.K_RETURN)  # дописать
+        for _ in range(answer if hub.dialogue is not None and hub.dialogue.choices else 0):
+            press(hub, pygame.K_DOWN)
+        press(hub, pygame.K_RETURN)  # дальше или ответ
+    raise AssertionError(f"разговор не заканчивается: {shown}")
+
+
+class ChuchmekChoiceTest(HubTestCase):
+    def test_both_answers_have_own_lines_and_join(self) -> None:
+        expected = {
+            0: [HUB_CHOICE_ID, "h_where", "h_hungry", HUB_JOIN_ID],
+            1: [HUB_CHOICE_ID, "h_leo", "h_yawn", "h_commission", HUB_JOIN_ID],
+        }
+        for answer, tail in expected.items():
+            with self.subTest(answer=answer):
+                hub = HubScene(GameProgress())
+                walk_to_chuchmek(hub)
+                self.assertEqual(talk(hub, answer), ["h_welcome", "h_why", "h_because", *tail])
+                self.assertIsNone(hub.dialogue)
+
+    def test_second_talk_skips_the_welcome(self) -> None:
+        walk_to_chuchmek(self.hub)
+        talk(self.hub, 0)
+        press(self.hub, pygame.K_e, pygame.KSCAN_E)
+        self.assertIs(self.hub.dialogue.script, CHUCHMEK_TALK_AGAIN)
+        self.assertEqual(self.hub.dialogue.node.id, "h_again")
+        press(self.hub, pygame.K_BACKSPACE)
+        self.assertEqual(talk(self.hub, 1), ["h_again", "h_leo", "h_yawn", "h_commission", HUB_JOIN_ID])
+
+    def test_answers_change_nothing_but_the_lines(self) -> None:
+        manager = SceneManager()
+        manager.register(HUB_SCENE, lambda: self.hub)
+        manager.push(HUB_SCENE)
+        for answer in (0, 1):
+            walk_to_chuchmek(self.hub)
+            talk(self.hub, answer)
+            self.assertEqual(self.progress.completed, ())  # ни фрагментов, ни открытого финала
+            self.assertIs(manager.current, self.hub)  # и никакого перехода в испытание
+            self.assertEqual(list(manager.stack), [self.hub])
+
+    def test_space_does_not_answer_and_held_enter_answers_once(self) -> None:
+        walk_to_chuchmek(self.hub)
+        press(self.hub, pygame.K_e, pygame.KSCAN_E)
+        for _ in range(3):  # приветствие, «почему центральная», ответ: дописать и дальше
+            press(self.hub, pygame.K_SPACE)
+            press(self.hub, pygame.K_SPACE)
+        dialogue = self.hub.dialogue
+        press(self.hub, pygame.K_SPACE)  # дописать вопрос
+        self.assertEqual(dialogue.node.id, HUB_CHOICE_ID)
+        self.assertTrue(dialogue.choices)
+        for _ in range(3):
+            press(self.hub, pygame.K_SPACE)  # пробел листает реплики, но ответ не выбирает
+        self.assertEqual(dialogue.node.id, HUB_CHOICE_ID)
+        self.assertEqual(dialogue.answers, {})
+        press(self.hub, pygame.K_DOWN)
+        self.hub.handle_event(key(pygame.K_RETURN))  # зажатый Enter: первое нажатие — ответ…
+        self.assertEqual(dialogue.node.id, "h_leo")
+        self.assertTrue(dialogue.is_typing)  # …и новая реплика начата с нуля, а не пролистана
+
+
+class LeoTest(HubTestCase):
+    def walk_to_leo(self, hub: HubScene) -> None:
+        hold(hub, [pygame.K_UP], (SPAWN[1] - LEO_POINT[1]) / WALK_SPEED)
+        hold(hub, [pygame.K_LEFT], (SPAWN[0] - LEO_POINT[0]) / WALK_SPEED)
+
+    def test_sprite_is_the_manifest_frame_scaled_by_nearest_neighbour(self) -> None:
+        frame = load_character_sprites(CHARACTERS_DIR / "leo").frame(LEO_FRAME).image
+        source, image = self.hub.leo_frames()
+        self.assertEqual(pygame.image.tobytes(source, "RGBA"), pygame.image.tobytes(frame, "RGBA"))
+        expected = pygame.transform.scale(frame, (SPRITE_SIZE, SPRITE_SIZE))
+        self.assertEqual(pygame.image.tobytes(image, "RGBA"), pygame.image.tobytes(expected, "RGBA"))
+        self.assertEqual(self.hub.leo_rect().size, (SPRITE_SIZE, SPRITE_SIZE))
+
+    def test_leo_is_drawn_in_his_basket(self) -> None:
+        self.hub.draw(self.canvas)
+        rect = self.hub.leo_rect()
+        _, image = self.hub.leo_frames()
+        # Пиксели спящего Лео над передней стенкой корзинки — его, а не фона.
+        x, y = next((x, y) for y in range(SPRITE_SIZE) for x in range(SPRITE_SIZE)
+                    if image.get_at((x, y)).a == 255 and rect.y + y < LEO_POSITION[1] - 8)
+        point = (rect.x + x, rect.y + y)
+        self.assertEqual(self.canvas.get_at(point)[:3], image.get_at((x, y))[:3])
+        self.assertNotEqual(self.canvas.get_at(point), self.hub._background.get_at(point))
+
+    def test_basket_does_not_change_collisions(self) -> None:
+        with tempfile.TemporaryDirectory() as empty:
+            root = Path(empty)
+            for char_id in ("alice", "chuchmek"):  # всё, кроме Лео
+                (root / char_id).symlink_to(CHARACTERS_DIR / char_id)
+            without_leo = HubScene(characters_dir=root)
+        self.assertIsNone(without_leo.leo_frames())
+        self.assertEqual(self.hub.collision.bounds, without_leo.collision.bounds)
+        self.assertEqual(self.hub.collision.obstacles, without_leo.collision.obstacles)
+        self.assertTrue(self.hub.collision.is_free(*LEO_POSITION))  # корзинка — не препятствие
+        self.assertTrue(self.hub.collision.is_free(*LEO_POINT))
+
+    def test_basket_stays_off_paths_portals_beds_trees_and_mosaic(self) -> None:
+        rect = self.hub.leo_rect().union(pygame.Rect(LEO_POSITION[0] - 17, LEO_POSITION[1] - 13, 34, 15))
+        background = self.hub._background
+        for x in range(rect.left, rect.right):
+            for y in range(rect.top, rect.bottom):  # только трава: ни дорожек, ни мозаики, ни клумб
+                self.assertIn(tuple(background.get_at((x, y)))[:3], (GRASS_COLOR, GRASS_DARK_COLOR), (x, y))
+        for portal in PORTALS:
+            self.assertFalse(rect.colliderect(portal.rect.inflate(8, 8)), portal.id)
+            self.assertFalse(rect.colliderect(self.hub.plaque_rect(portal)), portal.id)
+        for bed in FLOWER_BEDS:
+            self.assertFalse(rect.colliderect(bed))
+        for x, y in TREES:
+            self.assertFalse(rect.colliderect(pygame.Rect(x - 10, y - 24, 21, 25)))
+        self.assertGreater(math.dist(LEO_POSITION, MOSAIC_CENTER), 28 + 10)  # за краем мозаичного круга
+
+    def test_leo_zone_does_not_steal_other_targets(self) -> None:
+        points = [portal.point for portal in PORTALS]
+        points += [MOSAIC_CENTER, (CHUCHMEK_POSITION[0], CHUCHMEK_POSITION[1] + 6)]
+        for point in points:
+            self.assertGreater(math.dist(point, LEO_POINT), LEO_RADIUS + MOSAIC_RADIUS, point)
+        hub = HubScene()
+        for point in points:
+            hub.alice.set_position(*point)
+            self.assertNotEqual(hub.nearby().kind, "leo", point)
+        hub.alice.set_position(*LEO_POINT)
+        self.assertEqual(hub.nearby().kind, "leo")
+        self.assertEqual(hub.status_text(), "Лео   E — заглянуть в корзинку")
+
+    def test_peek_shows_one_line_and_returns_control_without_progress(self) -> None:
+        self.walk_to_leo(self.hub)
+        self.assertEqual(self.hub.nearby().kind, "leo")
+        seen = []
+        for visit in range(len(LEO_LINES) + 1):
+            press(self.hub, pygame.K_e, pygame.KSCAN_E)
+            dialogue = self.hub.dialogue
+            self.assertEqual(len(dialogue.script.nodes), 1)  # одна реплика, без выбора
+            self.assertEqual(dialogue.node.speaker, "")  # говорит рассказчик, а не Лео
+            seen.append(dialogue.node.text)
+            press(self.hub, pygame.K_RETURN)  # дописать
+            press(self.hub, pygame.K_RETURN)  # закрыть
+            self.assertIsNone(self.hub.dialogue)
+        self.assertEqual(seen, [*LEO_LINES, LEO_LINES[0]])  # по кругу, без повторов подряд
+        self.assertEqual(self.progress.completed, ())
+        self.assertEqual(self.hub.leo_visits, len(LEO_LINES) + 1)
+        x = self.hub.alice.x
+        hold(self.hub, [pygame.K_RIGHT], 0.3)  # управление вернулось
+        self.assertGreater(self.hub.alice.x, x)
+
+    def test_alice_walks_past_the_basket_and_leo_does_not_move(self) -> None:
+        hub = HubScene()
+        hub.alice.set_position(LEO_POSITION[0] - 30, LEO_POSITION[1] - 4)
+        rect = hub.leo_rect()
+        hold(hub, [pygame.K_RIGHT], 60 / WALK_SPEED)  # прямо сквозь место корзинки
+        self.assertGreater(hub.alice.x, LEO_POSITION[0] + 20)
+        self.assertEqual(hub.leo_rect(), rect)
+
+    def test_missing_leo_sprites_leave_a_blanket_in_the_basket(self) -> None:
+        with tempfile.TemporaryDirectory() as empty:
+            hub = HubScene(characters_dir=Path(empty))
+            self.assertIsNone(hub.leo_frames())
+            hub.alice.set_position(*LEO_POINT)
+            hub.draw(self.canvas)  # без падений
+            press(hub, pygame.K_e, pygame.KSCAN_E)
+            self.assertIsNotNone(hub.dialogue)
 
 
 class DrawingTest(HubTestCase):
