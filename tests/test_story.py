@@ -226,16 +226,20 @@ class BirthdayGoalTest(unittest.TestCase):
         self.assertIn("Я пробовал сам", nodes["d_tried"].text)
         self.assertIn("только именинница знает", nodes["d_only_you"].text)
 
-    def test_leo_is_part_of_the_story_and_never_speaks(self) -> None:
-        speakers = {node.speaker for script in story_scripts() for node in script.nodes.values()}
-        self.assertNotIn("Лео", speakers)
+    def test_leo_is_part_of_the_story_and_only_babbles(self) -> None:
+        # Лео — младенец: взрослых фраз у него нет нигде. Его голос — только короткие звуки
+        # у корзинки на площади («*сопит*», «Хи-хи!», «Агу-агу!»).
+        sounds = {text for texts in hub_dialogue.LEO_SOUNDS.values() for text in texts}
+        leo_lines = [node for script in story_scripts() for node in script.nodes.values() if node.speaker == "Лео"]
+        self.assertEqual({node.text for node in leo_lines}, sounds)
+        for node in leo_lines:
+            self.assertEqual(node.id, "leo")  # реплика у корзинки, а не в сюжетных разговорах
+            self.assertLessEqual(len(node.text.split()), 3, node.text)
         mentions = [node for script in story_scripts() for node in script.nodes.values() if "Лео" in node.text]
         self.assertTrue(any(node.id == "d_leo" for node in mentions))  # вступление
         self.assertTrue(any(node.id == "h_leo" for node in mentions))  # площадь
         self.assertTrue(any(node.id == "f_decree" for node in mentions))  # формуляры: его гражданство
         self.assertTrue(any(node.id == "f_verdict" for node in mentions))  # финал
-        for line in hub_dialogue.LEO_LINES:
-            self.assertTrue(line.startswith("Лео "))  # рассказчик о нём, а не он сам
         for node in final_dialogue.FINALE_TALK.nodes.values():
             self.assertNotIn("подар", node.text.lower())  # про настоящий подарок здесь ни слова
 

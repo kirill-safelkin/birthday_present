@@ -18,15 +18,19 @@ GameProgress, площадь их только показывает и, верн
 Когда собраны все три, мозаика сияет, и E рядом со столом открывает финал (FINALE_SCENE).
 Сам по себе третий фрагмент финал не запускает — только игрок.
 
-Слева от стола, напротив Чучмека, в корзинке спит Лео — главный инспектор праздничного
+Слева от стола, напротив Чучмека, в корзинке живёт Лео — главный инспектор праздничного
 настроения. Он не ходит и не мешает: корзинка стоит на траве в стороне от тропинок и деревьев
-и не является препятствием. Рядом с ней E показывает одну короткую реплику и сразу возвращает
-управление; прогресс это не меняет.
+и не является препятствием. Лео то спит, то смеётся, то сидит и играет: позы из его манифеста
+спокойно сменяют друг друга в случайном ритме (game/world/leo.py), а место корзинки не меняется.
+Рядом с ней E показывает одну короткую реплику Лео по его настроению («*сопит*», «Хи-хи!»,
+«Агу-агу!») и сразу возвращает управление; пока она на экране, поза не меняется. Прогресс
+это не меняет.
 """
 
 from __future__ import annotations
 
 import math
+import random
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -42,7 +46,14 @@ from game.graphics.animation import Direction
 from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
 from game.graphics.hires import HiResLayer, logical_target
 from game.graphics.sprite_manifest import CHARACTERS_DIR, try_load_character_sprites
-from game.story.hub_dialogue import CHUCHMEK_TALK, CHUCHMEK_TALK_AGAIN, PORTAL_NOT_READY, all_scripts, leo_script
+from game.story.hub_dialogue import (
+    CHUCHMEK_TALK,
+    CHUCHMEK_TALK_AGAIN,
+    LEO_SOUNDS,
+    PORTAL_NOT_READY,
+    all_scripts,
+    leo_script,
+)
 from game.world import hub_scenery
 from game.world.character import Character
 from game.world.collision import CollisionMap
@@ -52,6 +63,7 @@ from game.world.hub_ground import (  # noqa: F401  (цвета земли нуж
     render_ground,
 )
 from game.world.hub_scenery import MOSAIC_SLOTS, SLOT_SIZE, TABLE_CENTER, TREE_SPECS, WARM_LIGHT
+from game.world.leo import SLEEP, START_POSE, LeoIdle
 from game.world.progress import TRIAL_NAMES, TRIALS, GameProgress
 
 HUB_SCENE = "hub"  # имя площади в SceneManager
@@ -110,7 +122,10 @@ LEO_POSITION = (104, 84)
 # так она его не заслоняет. Дотянуться можно и с края тропинки.
 LEO_POINT = (130, 86)
 LEO_RADIUS = 16
-LEO_FRAME = "sleep_blanket"  # «спит под одеялом» из манифеста leo: лежит, ему не нужна ходьба
+LEO_FRAME = START_POSE  # первая поза: «спит под одеялом»; дальше позы сменяются (game/world/leo.py)
+# Сонные «з-з» над головой: левый верхний угол значка относительно LEO_POSITION — у каждой
+# позы сна голова на своём месте.
+SLEEP_MARKS = {"sleep_blanket": (-13, -33), "nap_pillow": (-13, -33), "sleep_teddy": (-23, -37)}
 BASKET_BACK = pygame.Rect(LEO_POSITION[0] - 15, LEO_POSITION[1] - 12, 30, 9)  # проём корзинки
 BASKET_FRONT = pygame.Rect(LEO_POSITION[0] - 16, LEO_POSITION[1] - 7, 32, 8)  # передняя стенка поверх одеяла
 # Весь участок Лео — кадр и корзинка: на нём земля остаётся простой травой.
@@ -167,8 +182,10 @@ class HubScene(Scene):
 
     supports_hires = True
 
-    def __init__(self, progress: GameProgress | None = None, characters_dir: str | Path = CHARACTERS_DIR) -> None:
+    def __init__(self, progress: GameProgress | None = None, characters_dir: str | Path = CHARACTERS_DIR,
+                 rng: random.Random | None = None) -> None:
         self.progress = progress if progress is not None else GameProgress()
+        self.rng = rng if rng is not None else random.Random()  # позы и реплики Лео
         root = Path(characters_dir)
         obstacles = [portal.rect for portal in PORTALS] + [CHUCHMEK_OBSTACLE]
         obstacles += list(hub_scenery.table().footprint) + hub_scenery.prop_obstacles()
@@ -191,10 +208,14 @@ class HubScene(Scene):
             position=CHUCHMEK_POSITION,
             direction=Direction.DOWN,
         )
-        # Лео — не Character: он не ходит и не поворачивается, это одна поза из манифеста.
+        # Лео — не Character: он не ходит и не поворачивается, только меняет позы из манифеста.
         self.leo_sprites = try_load_character_sprites(root / "leo")
-        self._leo_frames: tuple[pygame.Surface, pygame.Surface] | None = None  # исходный кадр и он же 32×32
-        self.leo_visits = 0  # сколько раз Алиса заглядывала в корзинку: реплики идут по кругу
+        self.leo = LeoIdle(self.rng)
+        # Кадры поз: исходный 64×64 и он же 32×32 — по одному разу на позу.
+        self._leo_frames: dict[str, tuple[pygame.Surface, pygame.Surface]] = {}
+        self.leo_visits = 0  # сколько раз Алиса заглядывала в корзинку
+        self._leo_line = ""  # последняя реплика Лео: подряд он её не повторяет
+        self._leo_talk: DialogueScript | None = None  # открытая реплика Лео
         self.talked_to_chuchmek = False  # знакомство с площадью — только в первом разговоре
 
         self.box = DialogueBox()
@@ -298,10 +319,11 @@ class HubScene(Scene):
             self.talked_to_chuchmek = True
             return True
         if target.kind == "leo":
-            # Одна реплика и снова управление: ни прогресса, ни перехода.
+            # Одна реплика по настроению Лео и снова управление: ни прогресса, ни перехода.
             self._face(LEO_POSITION)
             self.leo_visits += 1
-            self._open_dialogue(leo_script(self.leo_visits))
+            self._leo_talk = leo_script(self._next_leo_line())
+            self._open_dialogue(self._leo_talk)
             return True
         if target.kind == "mosaic":
             return self._use_mosaic()
@@ -334,6 +356,12 @@ class HubScene(Scene):
             return True
         self._finale_scene = manager.push(FINALE_SCENE)
         return True
+
+    def _next_leo_line(self) -> str:
+        """Короткий звук Лео по его настроению; тот же, что в прошлый раз, подряд не звучит."""
+        sounds = LEO_SOUNDS[self.leo.mood]
+        self._leo_line = self.rng.choice([text for text in sounds if text != self._leo_line] or sounds)
+        return self._leo_line
 
     def _face(self, point: tuple[int, int]) -> None:
         dx, dy = point[0] - self.alice.x, point[1] - self.alice.y
@@ -382,6 +410,8 @@ class HubScene(Scene):
                 self._placed_at[trial_id] = self.time
         if self.dialogue is not None:
             self.dialogue.update(dt)
+        if self.dialogue is None or self.dialogue.script is not self._leo_talk:
+            self.leo.update(dt)  # пока Лео «говорит», его поза совпадает с репликой
         self.alice.update(dt)
         self.chuchmek.update(dt)
         if self._toast_time > 0 and self.dialogue is None:
@@ -558,14 +588,19 @@ class HubScene(Scene):
                 pygame.draw.polygon(surface, MARK_COLOR, [(x, y - 3), (x + 3, y), (x, y + 3), (x - 3, y)])
 
     def leo_frames(self) -> tuple[pygame.Surface, pygame.Surface] | None:
-        """Кадр Лео из манифеста: исходный 64×64 и он же 32×32 (ближайший сосед). None — спрайтов нет."""
-        if self._leo_frames is None and self.leo_sprites is not None:
+        """Кадр текущей позы Лео из манифеста: исходный 64×64 и он же 32×32 (ближайший сосед).
+        None — спрайтов нет."""
+        if self.leo_sprites is None:
+            return None
+        frame_id = self.leo.frame
+        frames = self._leo_frames.get(frame_id)
+        if frames is None:
             try:
-                source = self.leo_sprites.frame(LEO_FRAME).image
+                source = self.leo_sprites.frame(frame_id).image
             except KeyError:
                 source = self.leo_sprites.frames[0].image
-            self._leo_frames = (source, pygame.transform.scale(source, (SPRITE_SIZE, SPRITE_SIZE)))
-        return self._leo_frames
+            frames = self._leo_frames[frame_id] = (source, pygame.transform.scale(source, (SPRITE_SIZE, SPRITE_SIZE)))
+        return frames
 
     def leo_rect(self) -> pygame.Rect:
         """Где на холсте стоит кадр Лео: ноги кадра чуть ниже края корзинки — одеяло заправлено."""
@@ -573,7 +608,7 @@ class HubScene(Scene):
                                                                  LEO_POSITION[1] - 2 - SPRITE_SIZE)
 
     def _draw_leo(self, canvas: pygame.Surface, target: Interaction | None, hires: HiResLayer | None) -> None:
-        """Корзинка, спящий Лео из манифеста и передняя стенка корзинки поверх его одеяла."""
+        """Корзинка, Лео в текущей позе из манифеста и передняя стенка корзинки поверх него."""
         x, y = LEO_POSITION
         with logical_target(canvas, hires, BASKET_BACK.union(pygame.Rect(x - 16, y - 2, 33, 4))) as surface:
             pygame.draw.ellipse(surface, GRASS_DARK_COLOR, (x - 16, y - 2, 33, 4))  # тень на траве
@@ -596,13 +631,15 @@ class HubScene(Scene):
             pygame.draw.rect(surface, BASKET_DARK_COLOR, BASKET_FRONT, 1, border_radius=3)
             for k in range(BASKET_FRONT.left + 4, BASKET_FRONT.right - 2, 4):  # плетение
                 pygame.draw.line(surface, BASKET_DARK_COLOR, (k, BASKET_FRONT.top + 2), (k, BASKET_FRONT.bottom - 3))
-        # Сонные «з-з» над головой (голова у кадра слева): тихо покачиваются.
-        bob = round(abs(math.sin(self.time * 1.5)) * 2)
-        marks = pygame.Rect(x - 13, y - 33 - bob, 11, 10)
-        with logical_target(canvas, hires, marks) as surface:
-            for mx, my, size in ((marks.x, marks.y + 5, 3), (marks.x + 6, marks.y, 4)):
-                zigzag = [(mx, my), (mx + size, my), (mx, my + size), (mx + size, my + size)]
-                pygame.draw.lines(surface, SLEEP_MARK_COLOR, False, zigzag)
+        if self.leo.mood == SLEEP:
+            # Сонные «з-з» над головой: тихо покачиваются, пока Лео спит.
+            bob = round(abs(math.sin(self.time * 1.5)) * 2)
+            dx, dy = SLEEP_MARKS.get(self.leo.frame, SLEEP_MARKS[LEO_FRAME])
+            marks = pygame.Rect(x + dx, y + dy - bob, 11, 10)
+            with logical_target(canvas, hires, marks) as surface:
+                for mx, my, size in ((marks.x, marks.y + 5, 3), (marks.x + 6, marks.y, 4)):
+                    zigzag = [(mx, my), (mx + size, my), (mx, my + size), (mx + size, my + size)]
+                    pygame.draw.lines(surface, SLEEP_MARK_COLOR, False, zigzag)
         if target is not None and target.kind == "leo":
             # Ромбик над корзинкой, как у Чучмека: сюда можно заглянуть.
             mx, my = x + 10, y - 26 - round(abs(math.sin(self.time * 4)) * 2)

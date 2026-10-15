@@ -8,13 +8,19 @@
 разговор начинается с того же вопроса, без приветствия, и заканчивается тем же напоминанием.
 Что внутри испытаний, Чучмек не рассказывает и порядок не подсказывает: это игрок узнаёт
 в самих порталах. Ни один ответ не переводит в испытание.
-Лео спит в корзинке и не говорит: у корзинки — по одной короткой реплике по кругу.
+Лео — младенец в корзинке: он то спит, то смеётся, то просто сидит и смотрит по сторонам
+(позы и их смена — game/world/leo.py). Если к нему подойти, он отвечает одним коротким звуком
+по своему настроению: спящий только сопит, смеющийся хихикает, проснувшийся агукает.
+Взрослых фраз у Лео нет.
 """
 
 from __future__ import annotations
 
 from game.dialogue.model import DialogueChoice, DialogueNode, DialogueScript
 from game.story.intro_dialogue import ALICE, CHUCHMEK
+from game.world.leo import AWAKE, LAUGH, SLEEP
+
+LEO = "Лео"
 
 # Вопрос, на который Алиса отвечает выбором, и общая реплика, где ветки сходятся.
 HUB_CHOICE_ID = "h_question"
@@ -63,17 +69,17 @@ _TALK_NODES = (
 CHUCHMEK_TALK = DialogueScript("h_welcome", _TALK_NODES)
 CHUCHMEK_TALK_AGAIN = DialogueScript("h_again", _TALK_NODES)
 
-# Лео в корзинке: реплики рассказчика по кругу — каждая следующая встреча со своей.
-LEO_LINES = (
-    "Лео сладко спит в корзинке. Проверка праздничного настроения идёт полным ходом.",
-    "Лео улыбается во сне. Кажется, ещё один пункт плана только что утверждён.",
-    "Лео тихонько сопит. Тише: главный инспектор совещается сам с собой.",
-)
+# Что Лео «говорит», когда к нему подходят, — по настроению. Сон — подпись в звёздочках.
+LEO_SOUNDS = {
+    SLEEP: ("*сопит*", "*сладко посапывает*", "*причмокивает во сне*"),
+    LAUGH: ("Хи-хи!", "Хи-хи-хи!", "Ха-ха!"),
+    AWAKE: ("Агу-агу!", "Угу!", "А-а?", "Агу?", "Гу-гу!"),
+}
 
 
-def leo_script(visit: int) -> DialogueScript:
-    """Одна реплика у корзинки Лео. visit — номер подхода с единицы."""
-    return DialogueScript("leo", [DialogueNode("leo", "", LEO_LINES[(visit - 1) % len(LEO_LINES)])])
+def leo_script(text: str) -> DialogueScript:
+    """Одна короткая реплика Лео у корзинки, без выбора."""
+    return DialogueScript("leo", [DialogueNode("leo", LEO, text)])
 
 
 # Порталы пока не подключены к испытаниям: Чучмек объясняет, что они не готовы.
@@ -104,5 +110,5 @@ PORTAL_NOT_READY = {
 
 
 def all_scripts() -> list[DialogueScript]:
-    leo = [leo_script(visit) for visit in range(1, len(LEO_LINES) + 1)]
+    leo = [leo_script(text) for sounds in LEO_SOUNDS.values() for text in sounds]
     return [CHUCHMEK_TALK, CHUCHMEK_TALK_AGAIN, *leo, *PORTAL_NOT_READY.values()]

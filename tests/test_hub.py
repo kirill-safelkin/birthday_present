@@ -8,6 +8,7 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import math  # noqa: E402
+import random  # noqa: E402
 import tempfile  # noqa: E402
 import unittest  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -19,13 +20,15 @@ from game.core.app import App  # noqa: E402
 from game.core.scenes import Scene, SceneManager  # noqa: E402
 from game.dialogue.box import DialogueBox  # noqa: E402
 from game.graphics.animation import IDLE, WALK, Direction  # noqa: E402
+from game.graphics.hires import HiResLayer  # noqa: E402
 from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites  # noqa: E402
 from game.story.hub_dialogue import (  # noqa: E402
     CHUCHMEK_TALK,
     CHUCHMEK_TALK_AGAIN,
     HUB_CHOICE_ID,
     HUB_JOIN_ID,
-    LEO_LINES,
+    LEO,
+    LEO_SOUNDS,
     PORTAL_NOT_READY,
     all_scripts,
 )
@@ -45,6 +48,7 @@ from game.world.hub import (  # noqa: E402
     MOSAIC_CENTER,
     MOSAIC_RADIUS,
     PORTALS,
+    SLEEP_MARK_COLOR,
     SPAWN,
     SPRITE_SIZE,
     STATUS_TOP,
@@ -54,6 +58,7 @@ from game.world.hub import (  # noqa: E402
     HubScene,
 )
 from game.world import hub_scenery  # noqa: E402
+from game.world.leo import AWAKE, LAUGH, POSE_BY_FRAME, POSES, SLEEP  # noqa: E402
 from game.world.progress import GameProgress  # noqa: E402
 
 DT = 1 / 60
@@ -689,21 +694,117 @@ class LeoTest(HubTestCase):
         self.walk_to_leo(self.hub)
         self.assertEqual(self.hub.nearby().kind, "leo")
         seen = []
-        for visit in range(len(LEO_LINES) + 1):
+        for visit in range(6):
             press(self.hub, pygame.K_e, pygame.KSCAN_E)
             dialogue = self.hub.dialogue
             self.assertEqual(len(dialogue.script.nodes), 1)  # одна реплика, без выбора
-            self.assertEqual(dialogue.node.speaker, "")  # говорит рассказчик, а не Лео
+            self.assertEqual(dialogue.node.speaker, LEO)
             seen.append(dialogue.node.text)
             press(self.hub, pygame.K_RETURN)  # дописать
             press(self.hub, pygame.K_RETURN)  # закрыть
             self.assertIsNone(self.hub.dialogue)
-        self.assertEqual(seen, [*LEO_LINES, LEO_LINES[0]])  # по кругу, без повторов подряд
+        self.assertLessEqual(set(seen), set(LEO_SOUNDS[SLEEP]))  # Лео ещё спит — только сопит
+        self.assertTrue(all(a != b for a, b in zip(seen, seen[1:])))  # без повторов подряд
         self.assertEqual(self.progress.completed, ())
-        self.assertEqual(self.hub.leo_visits, len(LEO_LINES) + 1)
+        self.assertEqual(self.hub.leo_visits, 6)
         x = self.hub.alice.x
         hold(self.hub, [pygame.K_RIGHT], 0.3)  # управление вернулось
         self.assertGreater(self.hub.alice.x, x)
+
+    def set_pose(self, hub: HubScene, frame: str) -> None:
+        hub.leo.pose = POSE_BY_FRAME[frame]
+        hub.leo.time_left = 60.0
+
+    def test_line_matches_the_mood_and_changes_nothing(self) -> None:
+        hub = HubScene(self.progress, rng=random.Random(7))
+        hub.alice.set_position(*LEO_POINT)
+        for pose in POSES:
+            with self.subTest(pose=pose.frame):
+                self.set_pose(hub, pose.frame)
+                completed, fragments = self.progress.completed, self.progress.fragments
+                press(hub, pygame.K_e, pygame.KSCAN_E)
+                node = hub.dialogue.node
+                self.assertEqual(node.speaker, LEO)
+                self.assertIn(node.text, LEO_SOUNDS[pose.mood])
+                hub.update(120)  # пока реплика на экране (она уже дописана), поза та же
+                self.assertEqual(hub.leo.frame, pose.frame)
+                press(hub, pygame.K_e, pygame.KSCAN_E)  # закрыть
+                self.assertIsNone(hub.dialogue)
+                self.assertEqual((self.progress.completed, self.progress.fragments), (completed, fragments))
+                self.assertEqual(hub.talked_to_chuchmek, False)
+                self.assertEqual(hub.active_trial, None)
+
+    def test_sounds_are_short_baby_sounds(self) -> None:
+        self.assertEqual(set(LEO_SOUNDS), {SLEEP, LAUGH, AWAKE})
+        self.assertIn("*сопит*", LEO_SOUNDS[SLEEP])
+        self.assertIn("Хи-хи!", LEO_SOUNDS[LAUGH])
+        for sound in ("Агу-агу!", "Угу!", "А-а?"):
+            self.assertIn(sound, LEO_SOUNDS[AWAKE])
+        for mood, sounds in LEO_SOUNDS.items():
+            for text in sounds:
+                with self.subTest(text=text):
+                    self.assertLessEqual(len(text.split()), 3)  # никаких взрослых предложений
+                    self.assertLessEqual(len(text), 24)
+                    if mood == SLEEP:
+                        self.assertTrue(text.startswith("*") and text.endswith("*"))  # подпись, а не слова
+                    else:
+                        self.assertTrue(text.endswith(("!", "?")))
+
+    def test_leo_answers_only_within_reach(self) -> None:
+        hub = HubScene()
+        for distance, expected in ((0, True), (LEO_RADIUS - 1, True), (LEO_RADIUS + 2, False)):
+            with self.subTest(distance=distance):
+                hub.alice.set_position(LEO_POINT[0] + distance, LEO_POINT[1])
+                press(hub, pygame.K_e, pygame.KSCAN_E)
+                self.assertEqual(hub.dialogue is not None and hub.dialogue.script.start_id == "leo", expected)
+                if hub.dialogue is not None:
+                    press(hub, pygame.K_BACKSPACE)
+
+    def test_nothing_else_answers_next_to_leo(self) -> None:
+        # Где бы Алиса ни стояла в досягаемости Лео, E обращается к нему, а не к соседям.
+        hub = HubScene()
+        checked = 0
+        for dx in range(-LEO_RADIUS, LEO_RADIUS + 1):
+            for dy in range(-LEO_RADIUS, LEO_RADIUS + 1):
+                point = (LEO_POINT[0] + dx, LEO_POINT[1] + dy)
+                if math.dist(point, LEO_POINT) > LEO_RADIUS or not hub.collision.is_free(*point):
+                    continue
+                hub.alice.set_position(*point)
+                self.assertEqual(hub.nearby().kind, "leo", point)
+                checked += 1
+        self.assertGreater(checked, 300)
+
+    def test_poses_change_in_place_and_every_pose_is_drawn(self) -> None:
+        hub = HubScene(rng=random.Random(3))
+        rect = hub.leo_rect()
+        seen = set()
+        for _ in range(round(600 / 0.25)):  # десять минут площади
+            hub.update(0.25)
+            seen.add(hub.leo.frame)
+            self.assertEqual(hub.leo_rect(), rect)  # корзинка и Лео на месте: он не ходит
+        self.assertEqual(seen, {pose.frame for pose in POSES})
+        sprites = load_character_sprites(CHARACTERS_DIR / "leo")
+        for pose in POSES:
+            with self.subTest(pose=pose.frame):
+                self.set_pose(hub, pose.frame)
+                source, image = hub.leo_frames()
+                expected = sprites.frame(pose.frame).image
+                self.assertEqual(pygame.image.tobytes(source, "RGBA"), pygame.image.tobytes(expected, "RGBA"))
+                self.assertEqual(image.get_size(), (SPRITE_SIZE, SPRITE_SIZE))
+                hub.draw(self.canvas)
+                hub.draw(self.canvas, HiResLayer(strict=True))
+
+    def test_sleep_marks_only_while_sleeping(self) -> None:
+        hub = HubScene()
+        marks_area = pygame.Rect(LEO_POSITION[0] - 26, LEO_POSITION[1] - 42, 26, 18)
+        for pose in POSES:
+            with self.subTest(pose=pose.frame):
+                self.set_pose(hub, pose.frame)
+                hub.draw(self.canvas)
+                white = sum(1 for x in range(marks_area.left, marks_area.right)
+                            for y in range(marks_area.top, marks_area.bottom)
+                            if tuple(self.canvas.get_at((x, y)))[:3] == SLEEP_MARK_COLOR)
+                self.assertEqual(white > 0, pose.mood == SLEEP)
 
     def test_alice_walks_past_the_basket_and_leo_does_not_move(self) -> None:
         hub = HubScene()
