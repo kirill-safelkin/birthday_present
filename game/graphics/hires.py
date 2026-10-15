@@ -10,10 +10,14 @@
 очередь команд в логических координатах холста. Display выполняет их по порядку сразу после
 увеличения холста — в той же области окна (viewport) и той же трансформацией (ViewTransform):
 - sprite() — исходный кадр, масштабированный сразу до своего размера в окне (scale_sprite);
-- text() — строка шрифтом без засечек размера окна со сглаживанием (game/graphics/fonts.py);
+- text() — строка шрифтом без засечек размера окна со сглаживанием (game/graphics/fonts.py),
+  при необходимости повёрнутая (перевёрнутые таблички в кондитерской);
 - logical() — логическая графика поверх уже выведенных команд (см. ниже);
-- fill() — заливка части экрана, например вспышка;
-- torn() — кадр «сбоя»: холст с командами, порванный горизонтальными полосами.
+- fill() и rect() — заливка части экрана (вспышка, затемнение) и прямоугольник или рамка
+  заливками окна — без увеличения картинки;
+- torn() — кадр «сбоя»: холст с командами, порванный горизонтальными полосами;
+- group() — неподвижная панель из команд (лист письма): собирается в картинку размера окна
+  один раз и дальше выводится одним копированием, проявляется целиком.
 
 Порядок слоёв. Всё, что на холсте, лежит под командами слоя. Поэтому логическую графику,
 которая должна оказаться поверх персонажа или текста (дерево перед Алисой, окно диалога),
@@ -27,8 +31,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
-from collections.abc import Iterator
+from collections import OrderedDict
+from collections.abc import Callable, Hashable, Iterator
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 
@@ -37,8 +43,9 @@ import pygame
 import config
 from game.graphics.fonts import TextFonts, TextMetrics, TextStyle
 
-# Сколько масштабированных кадров и строк держать готовыми. Кэш очищается и при смене
-# масштаба (полный экран, другой размер окна): старые размеры больше не понадобятся.
+# Сколько масштабированных кадров и строк держать готовыми: при переполнении вытесняются
+# давно не использованные. Кэш очищается и при смене масштаба (полный экран, другой размер
+# окна): старые размеры больше не понадобятся.
 CACHE_LIMIT = 512
 
 
@@ -76,6 +83,8 @@ class ViewTransform:
 
 # Наибольшая длина кадра по одной оси на промежуточном шаге scale_sprite, пикселей.
 MAX_STRETCH = 8192
+# Цвета-кандидаты для цветового ключа увеличенных заплаток (берётся первый, которого в заплатке нет).
+PATCH_KEYS = ((255, 0, 255), (0, 255, 254), (1, 254, 3), (254, 1, 253))
 
 
 def scale_sprite(image: pygame.Surface, size: tuple[int, int]) -> pygame.Surface:
@@ -148,6 +157,7 @@ class TextCommand:
     anchor: str = "topleft"  # какой точкой прямоугольника строки (как у pygame.Rect)
     alpha: int = 255
     clip: pygame.Rect | None = None
+    angle: float = 0.0  # поворот строки против часовой стрелки (180 — вверх ногами)
 
 
 @dataclass(frozen=True, eq=False)
@@ -173,7 +183,18 @@ class TearCommand:
     bands: tuple[tuple[int, int, int], ...]  # (y, высота, сдвиг) — в логических пикселях
 
 
-Command = SpriteCommand | TextCommand | PatchCommand | FillCommand | TearCommand
+@dataclass(frozen=True, eq=False)
+class GroupCommand:
+    """Команды, собранные в одну непрозрачную картинку прямоугольника rect и выведенные с
+    прозрачностью alpha. Картинка хранится, пока не изменятся сами команды (key)."""
+
+    rect: pygame.Rect
+    commands: tuple[Command, ...]
+    key: tuple
+    alpha: int = 255
+
+
+Command = SpriteCommand | TextCommand | PatchCommand | FillCommand | TearCommand | GroupCommand
 
 
 class HiResLayer:
@@ -186,8 +207,10 @@ class HiResLayer:
         self.covered: list[pygame.Rect] = []  # какие части холста уже заняты командами (с запасом)
         self._scale: float | None = None
         self._metrics: dict[tuple[float, bool], TextMetrics] = {}
-        self._sprites: dict[tuple[pygame.Surface, tuple[int, int]], pygame.Surface] = {}
-        self._texts: dict[tuple, pygame.Surface] = {}
+        self._sprites: OrderedDict[tuple[pygame.Surface, tuple[int, int]], pygame.Surface] = OrderedDict()
+        self._texts: OrderedDict[tuple, pygame.Surface] = OrderedDict()
+        self._patches: OrderedDict[tuple, pygame.Surface] = OrderedDict()
+        self._groups: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self._fills: dict[tuple, pygame.Surface] = {}
         self._offscreen: pygame.Surface | None = None
 
@@ -238,14 +261,23 @@ class HiResLayer:
         anchor: str = "topleft",
         alpha: int = 255,
         clip: pygame.Rect | None = None,
+        angle: float = 0.0,
     ) -> None:
-        """Строка text, привязанная точкой anchor («topleft», «center», «midleft»…) к точке холста pos."""
+        """Строка text, привязанная точкой anchor («topleft», «center», «midleft»…) к точке холста pos.
+
+        angle — поворот против часовой стрелки; anchor тогда относится к прямоугольнику
+        уже повёрнутой строки (как у pygame.transform.rotate и get_rect)."""
         if not text or alpha <= 0:
             return
         # Границы — по ширине строки в логических пикселях (самой большой из масштабов раскладки)
         # с запасом на тень и округление: в окне строка может оказаться на пиксель-другой шире.
         metrics = self.text_metrics(style)
-        bounds = pygame.Rect(0, 0, math.ceil(metrics.width(text) * 1.03), math.ceil(metrics.height))
+        width, height = metrics.width(text) * 1.03, metrics.height
+        if angle:
+            radians = math.radians(angle)
+            cos, sin = abs(math.cos(radians)), abs(math.sin(radians))
+            width, height = width * cos + height * sin, width * sin + height * cos
+        bounds = pygame.Rect(0, 0, math.ceil(width), math.ceil(height))
         setattr(bounds, anchor, (round(pos[0]), round(pos[1])))
         bounds = bounds.inflate(4, 4)
         if style.shadow is not None:
@@ -253,7 +285,7 @@ class HiResLayer:
             bounds.height += math.ceil(style.shadow_offset) + 1
         if clip is not None:
             bounds = bounds.clip(clip)
-        self._add(TextCommand(text, style, pos, anchor, min(255, alpha), clip), bounds)
+        self._add(TextCommand(text, style, pos, anchor, min(255, alpha), clip, angle), bounds)
 
     def text_metrics(self, style: TextStyle) -> TextMetrics:
         """Размеры строк стиля в логических пикселях (шрифтами этого слоя)."""
@@ -267,12 +299,43 @@ class HiResLayer:
         if alpha > 0:
             self._add(FillCommand(color, rect, min(255, alpha)), None if rect is None else pygame.Rect(rect))
 
+    def rect(self, color: config.Color, rect: pygame.Rect, width: int = 0, *, alpha: int = 255) -> None:
+        """Прямоугольник холста, как pygame.draw.rect: width=0 — залитый, иначе рамка такой
+        толщины внутрь. Выводится заливками окна — без масштабирования картинки."""
+        rect = pygame.Rect(rect)
+        if width <= 0 or 2 * width >= min(rect.width, rect.height):
+            self.fill(color, rect, alpha=alpha)
+            return
+        for side in (
+            pygame.Rect(rect.x, rect.y, rect.width, width),
+            pygame.Rect(rect.x, rect.bottom - width, rect.width, width),
+            pygame.Rect(rect.x, rect.y + width, width, rect.height - 2 * width),
+            pygame.Rect(rect.right - width, rect.y + width, width, rect.height - 2 * width),
+        ):
+            self.fill(color, side, alpha=alpha)
+
     def torn(
         self, canvas: pygame.Surface, commands: tuple[Command, ...], bands: tuple[tuple[int, int, int], ...]
     ) -> None:
         """Холст canvas с командами commands (записанными в другом HiResLayer), порванный полосами
         bands — (y, высота, сдвиг) в логических пикселях. Закрывает всю область холста."""
         self._add(TearCommand(canvas, tuple(commands), tuple(bands)), None)
+
+    @contextmanager
+    def group(self, rect: pygame.Rect, *, alpha: int = 255) -> Iterator[HiResLayer]:
+        """Неподвижная панель: команды, добавленные в выданный слой, выводятся одной картинкой
+        прямоугольника rect (его они должны закрывать целиком, например заливкой фона).
+
+        Картинка собирается в разрешении окна один раз и хранится, пока команды те же, —
+        лист письма с дюжиной строк выводится одним копированием. alpha — прозрачность всей
+        панели сразу (лист проявляется целиком, как картинка на холсте)."""
+        panel = HiResLayer(self.fonts)
+        panel._metrics = self._metrics  # те же размеры строк, без повторных измерений
+        yield panel
+        if alpha > 0 and panel.commands:
+            rect = pygame.Rect(rect)
+            key = (tuple(rect), *(_command_key(command) for command in panel.commands))
+            self._add(GroupCommand(rect, tuple(panel.commands), key, min(255, alpha)), rect)
 
     @contextmanager
     def logical(self, canvas: pygame.Surface, area: pygame.Rect | None = None) -> Iterator[pygame.Surface]:
@@ -311,6 +374,8 @@ class HiResLayer:
             self._scale = transform.scale
             self._sprites.clear()
             self._texts.clear()
+            self._patches.clear()
+            self._groups.clear()
             self._fills.clear()
             self._offscreen = None
         self._render(target, transform, self.commands)
@@ -332,9 +397,11 @@ class HiResLayer:
                 elif isinstance(command, PatchCommand):
                     rect = transform.rect(command.rect)
                     if rect.width > 0 and rect.height > 0:
-                        target.blit(pygame.transform.scale(command.surface, rect.size), rect)
+                        target.blit(self.scaled_patch(command.surface, rect.size), rect)
                 elif isinstance(command, TearCommand):
                     self._draw_torn(target, transform, command)
+                elif isinstance(command, GroupCommand):
+                    self._draw_group(target, transform, command)
                 else:
                     self._draw_fill(target, transform, command)
         finally:
@@ -342,24 +409,35 @@ class HiResLayer:
 
     def scaled_sprite(self, image: pygame.Surface, size: tuple[int, int]) -> pygame.Surface:
         """scale_sprite с кэшем: один кадр одного размера масштабируется один раз."""
-        key = (image, size)
-        scaled = self._sprites.get(key)
-        if scaled is None:
-            if len(self._sprites) >= CACHE_LIMIT:
-                self._sprites.clear()
-            scaled = self._sprites[key] = scale_sprite(image, size)
-        return scaled
+        return _remember(self._sprites, (image, size), lambda: scale_sprite(image, size))
 
-    def text_image(self, text: str, style: TextStyle, scale: float) -> pygame.Surface:
-        """Строка со сглаживанием шрифтом размера окна (без тени), с кэшем."""
-        key = (text, style.size, style.bold, style.color, scale)
-        image = self._texts.get(key)
-        if image is None:
-            if len(self._texts) >= CACHE_LIMIT:
-                self._texts.clear()
+    def scaled_patch(self, surface: pygame.Surface, size: tuple[int, int]) -> pygame.Surface:
+        """Заплатка, увеличенная ближайшим соседом, с кэшем по содержимому: окно реплики или полоса
+        интерфейса рисуются заново каждый кадр, но меняются редко, а увеличение в полном экране
+        стоит около 2 мс. Отпечаток маленькой логической картинки считается в десять раз быстрее."""
+        pixels = pygame.image.tobytes(surface, "RGBA")
+        digest = hashlib.blake2b(pixels, digest_size=16).digest()
+        key = (digest, surface.get_size(), size)
+        return _remember(self._patches, key, lambda: _scale_patch(surface, pixels, size))
+
+    def text_image(self, text: str, style: TextStyle, scale: float, angle: float = 0.0) -> pygame.Surface:
+        """Строка со сглаживанием шрифтом размера окна (без тени), с кэшем: заново рисуется,
+        только если изменились текст, размер, начертание, цвет, масштаб окна или поворот."""
+
+        def render() -> pygame.Surface:
             font = self.fonts.font(style.size, scale, style.bold)
-            image = self._texts[key] = font.render(text, True, style.color)
-        return image
+            if style.background is not None:
+                # Непрозрачная строка на своём фоне: сглаживание то же, а выводится простым копированием.
+                image = font.render(text, True, style.color, style.background)
+                if pygame.display.get_surface() is not None:
+                    image = image.convert()
+            else:
+                image = font.render(text, True, style.color)
+            # Поворот на 180° — точное отражение пикселей, буквы остаются такими же чёткими.
+            return pygame.transform.rotate(image, angle) if angle else image
+
+        key = (text, style.size, style.bold, style.color, style.background, scale, angle)
+        return _remember(self._texts, key, render)
 
     def _draw_sprite(self, target: pygame.Surface, transform: ViewTransform, command: SpriteCommand) -> None:
         rect = transform.rect(command.rect)
@@ -378,11 +456,14 @@ class HiResLayer:
 
     def _draw_text(self, target: pygame.Surface, transform: ViewTransform, command: TextCommand) -> None:
         style = command.style
-        image = self.text_image(command.text, style, transform.scale)
+        if style.background is not None and (command.alpha < 255 or style.shadow is not None):
+            style = replace(style, background=None)  # полупрозрачной строке фон не подходит
+        image = self.text_image(command.text, style, transform.scale, command.angle)
         rect = image.get_rect(**{command.anchor: transform.point(command.pos)})
         layers = [(image, rect)]
         if style.shadow is not None:
-            shadow = self.text_image(command.text, replace(style, color=style.shadow, shadow=None), transform.scale)
+            shadow_style = replace(style, color=style.shadow, shadow=None, background=None)
+            shadow = self.text_image(command.text, shadow_style, transform.scale, command.angle)
             offset = max(1, round(style.shadow_offset * transform.scale))
             layers.insert(0, (shadow, rect.move(offset, offset)))
         for surface, place in layers:
@@ -390,6 +471,26 @@ class HiResLayer:
                 surface = surface.copy()
                 surface.set_alpha(command.alpha)
             target.blit(surface, place)
+
+    def _draw_group(self, target: pygame.Surface, transform: ViewTransform, command: GroupCommand) -> None:
+        rect = transform.rect(command.rect)
+        if rect.width <= 0 or rect.height <= 0:
+            return
+
+        def build() -> pygame.Surface:
+            image = pygame.Surface(rect.size, 0, target)
+            # Та же трансформация, только начало координат — в левом верхнем углу панели.
+            local = ViewTransform(transform.viewport.move(-rect.x, -rect.y), transform.logical_size)
+            self._render(image, local, command.commands)
+            return image
+
+        image = _remember(self._groups, (command.key, rect.size), build)
+        if command.alpha < 255:
+            image.set_alpha(command.alpha)
+            target.blit(image, rect)
+            image.set_alpha(None)
+        else:
+            target.blit(image, rect)
 
     def _draw_torn(self, target: pygame.Surface, transform: ViewTransform, command: TearCommand) -> None:
         """Собирает холст и его команды в отдельном изображении размера области окна и рвёт его полосами."""
@@ -417,8 +518,56 @@ class HiResLayer:
         if surface is None:
             surface = self._fills[key] = pygame.Surface(rect.size)
             surface.fill(command.color)
-        surface.set_alpha(command.alpha)
+        if surface.get_alpha() != command.alpha:  # смена прозрачности заставляет SDL заново готовить вывод
+            surface.set_alpha(command.alpha)
         target.blit(surface, rect)
+
+
+def _command_key(command: Command) -> tuple:
+    """Что определяет вид команды внутри группы — для ключа её картинки."""
+    if isinstance(command, TextCommand):
+        clip = tuple(command.clip) if command.clip is not None else None
+        return ("text", command.text, command.style, command.pos, command.anchor, command.alpha, clip, command.angle)
+    if isinstance(command, FillCommand):
+        return ("fill", command.color, tuple(command.rect) if command.rect is not None else None, command.alpha)
+    if isinstance(command, SpriteCommand):
+        clip = tuple(command.clip) if command.clip is not None else None
+        return ("sprite", command.image, tuple(command.rect), command.alpha, command.angle, clip)
+    if isinstance(command, PatchCommand):
+        digest = hashlib.blake2b(pygame.image.tobytes(command.surface, "RGBA"), digest_size=16).digest()
+        return ("patch", digest, tuple(command.rect))
+    raise TypeError(f"в неподвижной панели не может быть {type(command).__name__}")
+
+
+def _scale_patch(surface: pygame.Surface, pixels: bytes, size: tuple[int, int]) -> pygame.Surface:
+    """Увеличивает заплатку ближайшим соседом. Если её пиксели либо прозрачны, либо непрозрачны
+    (так рисуют pygame.draw и заливки), результат — поверхность с цветовым ключом и RLE: она
+    выводится в несколько раз быстрее смешивания по альфе, а пиксели получаются те же."""
+    scaled = pygame.transform.scale(surface, size)
+    alphas = set(pixels[3::4])
+    if not alphas <= {0, 255} or pygame.display.get_surface() is None:
+        return scaled
+    colors = {pixels[i : i + 3] for i in range(0, len(pixels), 4) if pixels[i + 3]}
+    key = next((color for color in PATCH_KEYS if bytes(color) not in colors), None)
+    if key is None:
+        return scaled
+    keyed = pygame.Surface(size).convert()
+    keyed.fill(key)
+    keyed.blit(scaled, (0, 0))
+    keyed.set_colorkey(key, pygame.RLEACCEL)
+    return keyed
+
+
+def _remember(cache: OrderedDict, key: Hashable, make: Callable[[], pygame.Surface]) -> pygame.Surface:
+    """Значение из кэша или make(); при переполнении вытесняется давно не использованное."""
+    value = cache.get(key)
+    if value is None:
+        value = cache[key] = make()
+        if len(cache) > CACHE_LIMIT:
+            cache.popitem(last=False)
+    else:
+        cache.move_to_end(key)
+    return value
 
 
 def logical_target(canvas: pygame.Surface, hires: HiResLayer | None, area: pygame.Rect | None = None):

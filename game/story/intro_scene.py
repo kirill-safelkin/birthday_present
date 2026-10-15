@@ -121,7 +121,7 @@ FINALE_TEXT = "…и сказка пошла совсем не по плану"
 # Текст в разрешении окна (слой высокого разрешения); размеры — в логических пикселях.
 TITLE_STYLE = TextStyle(15, TITLE_COLOR, bold=True, shadow=TITLE_SHADOW_COLOR)
 TITLE_FINAL_STYLE = TextStyle(15, TITLE_FINAL_COLOR, bold=True, shadow=TITLE_FINAL_SHADOW_COLOR)
-ERROR_TITLE_STYLE = TextStyle(9, CREAM_COLOR, bold=True)
+ERROR_TITLE_STYLE = TextStyle(9, CREAM_COLOR, bold=True, background=PLUM_COLOR)  # на полосе заголовка
 ERROR_LINE_STYLE = TextStyle(8, INK_COLOR)
 ERROR_LINE_STEP = 13  # строки сообщения об ошибке — через столько пикселей
 FINALE_STYLE = TextStyle(9, INK_COLOR)

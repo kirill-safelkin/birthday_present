@@ -33,12 +33,15 @@ NAME_PADDING_Y = 2
 
 # Текст высокого разрешения: размер — в логических пикселях, как у FONT_SIZE.
 TEXT_SIZE = 9
-TEXT_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_TEXT_COLOR)
-NAME_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_NAME_COLOR, bold=True)
-CHOICE_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_CHOICE_COLOR)
-SELECTED_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_SELECTED_COLOR)
+# Фон — цвет окна (у выбранного варианта — его подсветки): строка стоит на нём целиком.
+TEXT_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_TEXT_COLOR, background=config.DIALOGUE_BOX_COLOR)
+NAME_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_NAME_COLOR, bold=True, background=config.DIALOGUE_BOX_COLOR)
+CHOICE_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_CHOICE_COLOR, background=config.DIALOGUE_BOX_COLOR)
+SELECTED_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_SELECTED_COLOR, background=config.DIALOGUE_SELECTED_BG_COLOR)
 
-_WORD = re.compile(r"\S+")
+# Слово для переноса. Отдельно стоящее тире прилипает к предыдущему слову: по правилам русской
+# типографики строка не начинается с тире посреди фразы («Что это — / пока секрет», а не «— пока…»).
+_WORD = re.compile(r"\S+(?:[ \u00a0]+[—–](?=\s|$))*")
 
 
 def wrap_spans(text: str, font: pygame.font.Font | TextMetrics, max_width: int) -> list[tuple[int, int]]:
@@ -49,8 +52,9 @@ def wrap_spans(text: str, font: pygame.font.Font | TextMetrics, max_width: int) 
 
     Возвращает границы строк (начало, конец) в исходном тексте. Так печатающийся
     текст сразу появляется на своей строке, и слова не перескакивают при переносе.
-    Переносы делаются по пробелам. Слово, которое не помещается в строку целиком,
-    режется по буквам. Символ \\n начинает новую строку.
+    Переносы делаются по пробелам, но тире посреди фразы не переносится в начало строки.
+    Слово, которое не помещается в строку целиком, режется по буквам. Символ \\n начинает
+    новую строку.
     """
     spans: list[tuple[int, int]] = []
     paragraph_start = 0

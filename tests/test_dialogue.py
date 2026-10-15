@@ -277,6 +277,15 @@ class LongTextTest(unittest.TestCase):
             self.assertLessEqual(self.font.size(line)[0], 100, line)
         self.assertEqual("".join(lines), word)
 
+    def test_dash_inside_a_phrase_never_starts_a_line(self) -> None:
+        text = "Что это — пока секрет. Скоро — узнаешь — правда."
+        for width in range(70, 320, 7):  # уже — пара «слово + тире» сама не помещается и режется по буквам
+            lines = wrap_text(text, self.font, width)
+            with self.subTest(width=width):
+                self.assertFalse(any(line.startswith("—") for line in lines), lines)
+                self.assertEqual(" ".join(lines).split(), text.split())
+        self.assertEqual(wrap_text("— Привет!", self.font, 300), ["— Привет!"])  # тире прямой речи — на месте
+
     def test_newline_starts_new_line(self) -> None:
         self.assertEqual(wrap_text("Раз.\nДва три.", self.font, 300), ["Раз.", "Два три."])
 

@@ -8,6 +8,9 @@ CollisionMap, как на площади), станции ингредиенто
 Фрагмент (GameProgress.complete("sushi")) выдаётся только после финальной реплики;
 отмена (Backspace) в любой момент до этого возвращает на площадь без награды.
 Оформление временное: кухня нарисована геометрией.
+
+Со слоем высокого разрешения (game/graphics/hires.py) Алиса и кот-повар рисуются из исходных
+кадров 64×64, а надписи — шрифтом размера окна; кухня и значки остаются пиксельными.
 """
 
 from __future__ import annotations
@@ -24,7 +27,8 @@ from game.core.scenes import Scene
 from game.dialogue.box import DialogueBox
 from game.dialogue.model import DialogueController, DialogueScript
 from game.graphics.animation import Direction
-from game.graphics.fonts import load_font, render_text
+from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
+from game.graphics.hires import HiResLayer, logical_target
 from game.graphics.placeholder import placeholder_animations
 from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, try_load_character_sprites
 from game.story.sushi_dialogue import (
@@ -97,6 +101,18 @@ TODO_COLOR = (200, 196, 214)
 MARK_COLOR = (255, 236, 140)
 RED_ACCENT = (200, 60, 60)
 
+# Надписи в разрешении окна (слой высокого разрешения); размер — в логических пикселях, как на площади.
+TEXT_SIZE = 8
+HUD_STYLE = TextStyle(TEXT_SIZE, HUD_TEXT_COLOR, background=HUD_COLOR)  # полосы вверху и внизу
+ORDER_STYLE = TextStyle(TEXT_SIZE, HUD_ACCENT_COLOR, background=HUD_COLOR)
+DONE_STYLE = TextStyle(TEXT_SIZE, DONE_COLOR, background=HUD_COLOR)
+TODO_STYLE = TextStyle(TEXT_SIZE, TODO_COLOR, background=HUD_COLOR)
+LABEL_STYLE = TextStyle(TEXT_SIZE, LABEL_COLOR)  # на стойке под подписью — линия, фон не однотонный
+HUD_ROWS = (6.5, 17.5)  # середины двух строк верхней полосы
+LABEL_MIDDLE = COUNTER.top + 21  # середина подписи станции на передней стенке стойки
+# Где рисуется стол с тарелкой: подсветка, сияние собранного заказа и тень столешницы.
+TABLE_AREA = TABLE.inflate(6, 8).union(TABLE.move(0, 2))
+
 
 @dataclass(frozen=True)
 class Station:
@@ -132,6 +148,8 @@ def _distance_to_rect(point: tuple[float, float], rect: pygame.Rect) -> float:
 class SushiTrialScene(Scene):
     """Кухня кота-повара. Открывается порталом «Суши» на площади и закрывается возвратом на неё."""
 
+    supports_hires = True
+
     def __init__(self, progress: GameProgress | None = None, characters_dir: str | Path = CHARACTERS_DIR) -> None:
         self.progress = progress if progress is not None else GameProgress()
         self.orders = SushiOrders()
@@ -149,7 +167,7 @@ class SushiTrialScene(Scene):
         self.alice.collider = self.collision.move
         self.chef_sprites = try_load_character_sprites(root / "cat_chef")
         self.chef_pose = CHEF_IDLE_POSE
-        self._chef_frames: dict[str, pygame.Surface] = {}
+        self._chef_frames: dict[str, tuple[pygame.Surface, pygame.Surface]] = {}  # поза → (исходник, на холсте)
 
         self.box = DialogueBox()
         for script in all_scripts():
@@ -164,7 +182,10 @@ class SushiTrialScene(Scene):
         self.time = 0.0
         self._font = load_font(9)
         self._text_cache: dict[tuple[str, config.Color], pygame.Surface] = {}
+        self._fonts = TextFonts()
+        self.text_metrics = self._fonts.metrics(HUD_STYLE)  # все надписи кухни одного размера
         self._background = self._render_background()
+        self._background_plain = self._render_background(labels=False)  # подписи станций рисует слой окна
         self._open_dialogue(INTRO)
 
     # --- Состояние ---
@@ -336,26 +357,30 @@ class SushiTrialScene(Scene):
 
     # --- Отрисовка ---
 
-    def draw(self, surface: pygame.Surface) -> None:
-        surface.blit(self._background, (0, 0))
+    def draw(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Рисует кухню на холсте; со слоем hires персонажи и надписи уходят в него
+        (см. game/graphics/hires.py), а порядок слоёв остаётся тем же."""
+        surface.blit(self._background if hires is None else self._background_plain, (0, 0))
         target = self.nearby() if self.phase == COOKING and self.dialogue is None else None
         for station in STATIONS:
             if target is not None and target.kind == "station" and target.ingredient == station.ingredient:
                 rect = pygame.Rect(0, 0, 22, 16)
                 rect.center = (station.x, COUNTER.top + 9)
                 pygame.draw.rect(surface, MARK_COLOR, rect, 1)
+            if hires is not None:  # подпись на стойке — под персонажами, как часть фона
+                hires.text(station.name, LABEL_STYLE, (station.x, LABEL_MIDDLE), anchor="center")
         drawables = [
-            (TABLE.bottom, lambda: self._draw_table(surface, target is not None and target.kind == "plate")),
-            (CHEF_POSITION[1], lambda: self._draw_chef(surface, target is not None and target.kind == "chef")),
-            (self.alice.y + 0.1, lambda: self._draw_alice(surface)),
+            (TABLE.bottom, lambda: self._draw_table(surface, target is not None and target.kind == "plate", hires)),
+            (CHEF_POSITION[1], lambda: self._draw_chef(surface, target is not None and target.kind == "chef", hires)),
+            (self.alice.y + 0.1, lambda: self._draw_alice(surface, hires)),
         ]
         for _, draw in sorted(drawables, key=lambda item: item[0]):
             draw()
-        self._draw_hud(surface)
+        self._draw_hud(surface, hires)
         if self.dialogue is not None and not self.dialogue.is_finished:
-            self.box.draw(surface, self.dialogue)
+            self.box.draw(surface, self.dialogue, hires)
         else:
-            self._draw_status(surface)
+            self._draw_status(surface, hires)
 
     def _text(self, text: str, color: config.Color) -> pygame.Surface:
         key = (text, color)
@@ -374,14 +399,19 @@ class SushiTrialScene(Scene):
             return rect.right + 2, rect.top + 8
         return rect.left - 2, rect.top + 8  # у правого края — слева от головы
 
-    def _draw_alice(self, surface: pygame.Surface) -> None:
-        self.alice.draw(surface)
+    def _draw_alice(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        self.alice.draw(canvas, hires)
         if self.orders.held is not None:
             # Что в руках — видно значком (не текстом: персонажа ничего не закрывает).
             x, y = self.held_icon_center()
-            draw_ingredient(surface, self.orders.held, (x, y - round(abs(math.sin(self.time * 4)))))
+            with logical_target(canvas, hires, pygame.Rect(x - 8, y - 9, 17, 17)) as surface:
+                draw_ingredient(surface, self.orders.held, (x, y - round(abs(math.sin(self.time * 4)))))
 
-    def _draw_table(self, surface: pygame.Surface, highlighted: bool) -> None:
+    def _draw_table(self, canvas: pygame.Surface, highlighted: bool, hires: HiResLayer | None = None) -> None:
+        with logical_target(canvas, hires, TABLE_AREA) as surface:
+            self._draw_table_on(surface, highlighted)
+
+    def _draw_table_on(self, surface: pygame.Surface, highlighted: bool) -> None:
         pygame.draw.rect(surface, TABLE_EDGE_COLOR, TABLE.move(0, 2), border_radius=2)
         pygame.draw.rect(surface, TABLE_COLOR, TABLE, border_radius=2)
         plate = pygame.Rect(0, 0, 36, 10)
@@ -398,56 +428,97 @@ class SushiTrialScene(Scene):
         if highlighted:
             pygame.draw.rect(surface, MARK_COLOR, TABLE.inflate(4, 6), 1, border_radius=3)
 
-    def _draw_chef(self, surface: pygame.Surface, highlighted: bool) -> None:
-        image = self._chef_image()
+    def _draw_chef(self, canvas: pygame.Surface, highlighted: bool, hires: HiResLayer | None = None) -> None:
+        source, image = self._chef_frame()
         rect = image.get_rect(midbottom=CHEF_POSITION)
-        surface.blit(image, rect)
+        if hires is not None:
+            hires.sprite(source, rect)  # исходный кадр на том же месте и того же размера
+        else:
+            canvas.blit(image, rect)
         if highlighted:
             x, y = rect.centerx, rect.top - 4
-            pygame.draw.polygon(surface, MARK_COLOR, [(x, y - 3), (x + 3, y), (x, y + 3), (x - 3, y)])
+            with logical_target(canvas, hires, pygame.Rect(x - 4, y - 4, 9, 9)) as surface:
+                pygame.draw.polygon(surface, MARK_COLOR, [(x, y - 3), (x + 3, y), (x, y + 3), (x - 3, y)])
 
     def _chef_image(self) -> pygame.Surface:
         """Поза повара из манифеста cat_chef, уменьшенная ближайшим соседом; без отражения."""
+        return self._chef_frame()[1]
+
+    def _chef_frame(self) -> tuple[pygame.Surface, pygame.Surface]:
+        """Поза повара: исходный кадр манифеста cat_chef (без отражения) и он же на холсте."""
         pose = self.chef_pose
         if pose not in self._chef_frames:
             sprites: CharacterSprites | None = self.chef_sprites
             if sprites is None:
-                image = placeholder_animations().default.frames[0]
+                source = image = placeholder_animations().default.frames[0]
             else:
                 try:
                     source = sprites.frame(pose).image
                 except KeyError:
                     source = sprites.frames[0].image
                 image = pygame.transform.scale(source, (SPRITE_SIZE, SPRITE_SIZE))
-            self._chef_frames[pose] = image
+            self._chef_frames[pose] = (source, image)
         return self._chef_frames[pose]
 
-    def _draw_hud(self, surface: pygame.Surface) -> None:
-        surface.fill(HUD_COLOR, (0, 0, WIDTH, HUD_HEIGHT))
-        surface.blit(self._text(self.order_text(), HUD_ACCENT_COLOR), (4, 1))
-        held = self._text(self.held_text(), HUD_TEXT_COLOR)
-        surface.blit(held, held.get_rect(topright=(WIDTH - 4, 1)))
+    def hud_items(self, hires: bool = False) -> list[tuple[str, bool, int, int]]:
+        """Вторая строка интерфейса: (ингредиент, лежит ли на тарелке, x подписи, x галочки).
+
+        Подписи меряются тем шрифтом, которым будут нарисованы: пиксельным или шрифтом окна."""
         recipe = self.orders.current
         if recipe is None:
-            return
+            return []
+        items = []
         x = 4
         for ingredient in recipe.ingredients:
             done = ingredient in self.orders.plate
-            draw_ingredient(surface, ingredient, (x + 4, 17), small=True)
-            label = self._text(INGREDIENT_NAMES[ingredient], DONE_COLOR if done else TODO_COLOR)
-            surface.blit(label, (x + 10, 12))
-            x += 10 + label.get_width()
-            if done:  # галочка из двух линий
-                pygame.draw.lines(surface, DONE_COLOR, False, [(x + 1, 17), (x + 3, 19), (x + 7, 14)])
-            x += 12
+            name = INGREDIENT_NAMES[ingredient]
+            if hires:
+                width = math.ceil(self.text_metrics.width(name))
+            else:
+                width = self._text(name, DONE_COLOR if done else TODO_COLOR).get_width()
+            items.append((ingredient, done, x + 10, x + 10 + width))
+            x += 10 + width + 12
+        return items
 
-    def _draw_status(self, surface: pygame.Surface) -> None:
-        surface.fill(HUD_COLOR, (0, STATUS_TOP, WIDTH, HEIGHT - STATUS_TOP))
-        text = self._text(self.status_text(), HUD_TEXT_COLOR)
-        surface.blit(text, text.get_rect(center=(WIDTH // 2, STATUS_TOP + (HEIGHT - STATUS_TOP) // 2)))
+    def _draw_hud(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        bar = pygame.Rect(0, 0, WIDTH, HUD_HEIGHT)
+        items = self.hud_items(hires is not None)
+        with logical_target(canvas, hires, bar) as surface:
+            surface.fill(HUD_COLOR, bar)
+            if hires is None:
+                surface.blit(self._text(self.order_text(), HUD_ACCENT_COLOR), (4, 1))
+                held = self._text(self.held_text(), HUD_TEXT_COLOR)
+                surface.blit(held, held.get_rect(topright=(WIDTH - 4, 1)))
+            for ingredient, done, label_x, check_x in items:
+                draw_ingredient(surface, ingredient, (label_x - 6, 17), small=True)
+                if hires is None:
+                    label = self._text(INGREDIENT_NAMES[ingredient], DONE_COLOR if done else TODO_COLOR)
+                    surface.blit(label, (label_x, 12))
+                if done:  # галочка из двух линий
+                    x = check_x
+                    pygame.draw.lines(surface, DONE_COLOR, False, [(x + 1, 17), (x + 3, 19), (x + 7, 14)])
+        if hires is not None:
+            hires.text(self.order_text(), ORDER_STYLE, (4, HUD_ROWS[0]), anchor="midleft")
+            hires.text(self.held_text(), HUD_STYLE, (WIDTH - 4, HUD_ROWS[0]), anchor="midright")
+            for ingredient, done, label_x, _ in items:
+                style = DONE_STYLE if done else TODO_STYLE
+                hires.text(INGREDIENT_NAMES[ingredient], style, (label_x, HUD_ROWS[1]), anchor="midleft")
 
-    def _render_background(self) -> pygame.Surface:
-        """Стена, задняя стойка со станциями, пол, барная стойка и табуреты."""
+    def _draw_status(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        center = (WIDTH // 2, STATUS_TOP + (HEIGHT - STATUS_TOP) // 2)
+        bar = pygame.Rect(0, STATUS_TOP, WIDTH, HEIGHT - STATUS_TOP)
+        with logical_target(canvas, hires, bar) as surface:
+            surface.fill(HUD_COLOR, bar)
+            if hires is None:
+                text = self._text(self.status_text(), HUD_TEXT_COLOR)
+                surface.blit(text, text.get_rect(center=center))
+        if hires is not None:
+            hires.text(self.status_text(), HUD_STYLE, center, anchor="center")
+
+    def _render_background(self, labels: bool = True) -> pygame.Surface:
+        """Стена, задняя стойка со станциями, пол, барная стойка и табуреты.
+
+        labels=False — без подписей станций: их рисует слой высокого разрешения."""
         page = pygame.Surface(config.LOGICAL_SIZE)
         for row, y in enumerate(range(COUNTER.bottom, BAR.top, 8)):  # плитка на полу
             for column, x in enumerate(range(0, WIDTH, 8)):
@@ -462,8 +533,9 @@ class SushiTrialScene(Scene):
             pygame.draw.ellipse(page, (236, 228, 214), bowl)
             pygame.draw.ellipse(page, (150, 130, 110), bowl, 1)
             draw_ingredient(page, station.ingredient, (station.x, COUNTER.top + 8))
-            label = render_text(self._font, station.name, LABEL_COLOR)
-            page.blit(label, label.get_rect(midtop=(station.x, COUNTER.top + 16)))
+            if labels:
+                label = render_text(self._font, station.name, LABEL_COLOR)
+                page.blit(label, label.get_rect(midtop=(station.x, COUNTER.top + 16)))
         # Рисоварка и подставка для ножей — декорации на стойке справа.
         pygame.draw.rect(page, (236, 236, 240), (266, COUNTER.top + 2, 20, 13), border_radius=4)
         pygame.draw.rect(page, (120, 120, 130), (266, COUNTER.top + 2, 20, 13), 1, border_radius=4)

@@ -10,6 +10,11 @@
 прохождение: сцена просит приложение закрыться (SceneManager.request_quit). Backspace до
 этого возвращает на площадь — прогресс не трогается, мозаика по-прежнему светится.
 Все паузы и анимации идут по dt, без ожиданий и своих циклов.
+
+Со слоем высокого разрешения (game/graphics/hires.py) Алиса и Чучмек рисуются из исходных
+кадров 64×64, а все надписи — письмо, секрет подарка, штамп, титры, последний экран и
+подсказки — шрифтом размера окна. Письмо для этого переносится по метрикам того же шрифта
+(своя раскладка, те же листы и те же границы строк); страница и символы остаются пиксельными.
 """
 
 from __future__ import annotations
@@ -24,7 +29,8 @@ from game.core.input import Action, actions_for
 from game.core.scenes import Scene
 from game.dialogue.box import DialogueBox, wrap_text
 from game.dialogue.model import DialogueController, DialogueScript
-from game.graphics.fonts import load_font, render_text
+from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
+from game.graphics.hires import HiResLayer, logical_target
 from game.graphics.placeholder import placeholder_animations
 from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, try_load_character_sprites
 from game.story import final_dialogue as text
@@ -60,6 +66,13 @@ CREDITS_SKIP_DELAY = 1.0  # титры можно пролистать, но н�
 END_INPUT_DELAY = 1.5  # последний экран не закрыть случайным нажатием, оставшимся от титров
 PANEL = pygame.Rect(16, 8, WIDTH - 32, HEIGHT - 16)  # лист письма
 PANEL_PADDING = 12
+# Поля вокруг листа письма — то, что видно от страницы, когда лист проявился целиком.
+LETTER_MARGINS = (
+    pygame.Rect(0, 0, WIDTH, PANEL.top),
+    pygame.Rect(0, PANEL.bottom, WIDTH, HEIGHT - PANEL.bottom),
+    pygame.Rect(0, PANEL.top, PANEL.left, PANEL.height),
+    pygame.Rect(PANEL.right, PANEL.top, WIDTH - PANEL.right, PANEL.height),
+)
 GARLAND_FLAGS = 15
 
 PAGE_COLOR = (246, 236, 208)
@@ -76,6 +89,26 @@ GLOW_COLOR = (255, 236, 140)
 FLAG_COLORS = ((232, 120, 140), (250, 214, 110), (150, 200, 230), (170, 220, 150), (200, 160, 230))
 FRAGMENT_COLORS = {"sushi": (250, 170, 150), "forms": (176, 196, 236), "cakes": (252, 196, 226)}
 STAMP_COLOR = (196, 52, 60)
+CREDITS_SMALL_COLOR = (196, 186, 214)
+
+# Надписи в разрешении окна (слой высокого разрешения); размеры — в логических пикселях.
+LETTER_SIZE = 9.5  # письмо и секрет подарка — крупно и спокойно
+# Всё на листе стоит на бумаге: строки рисуются сразу на её цвете (см. TextStyle.background).
+LETTER_STYLE = TextStyle(LETTER_SIZE, INK_COLOR, background=PARCHMENT_COLOR)
+LETTER_TITLE_STYLE = TextStyle(LETTER_SIZE, PLUM_COLOR, bold=True, background=PARCHMENT_COLOR)
+SIGNATURE_STYLE = TextStyle(LETTER_SIZE, PLUM_COLOR, background=PARCHMENT_COLOR)
+STAMP_STYLE = TextStyle(6, STAMP_COLOR, bold=True, background=PARCHMENT_COLOR)
+PAGE_NUMBER_STYLE = TextStyle(6, PAGE_EDGE_COLOR, background=PARCHMENT_COLOR)
+RIBBON_STYLE = TextStyle(8.5, PLUM_COLOR)
+HINT_SIZE = 9
+SHEET_HINT_STYLE = TextStyle(HINT_SIZE, PAGE_EDGE_COLOR, background=PARCHMENT_COLOR)
+CREDIT_STYLES = {
+    "title": TextStyle(15, GOLD_COLOR, bold=True),
+    "line": TextStyle(10, CREAM_COLOR),
+    "small": TextStyle(8, CREDITS_SMALL_COLOR),
+}
+THE_END_STYLE = TextStyle(12, CREAM_COLOR)
+CREDITS_HINT_BAR = pygame.Rect(0, HEIGHT - 18, WIDTH, 18)  # под ней скрываются уезжающие титры
 
 
 def _ease(t: float) -> float:
@@ -110,6 +143,8 @@ def draw_symbol(surface: pygame.Surface, trial_id: str, center: tuple[float, flo
 class FinalScene(Scene):
     """Последняя страница сказки. Открывается мозаикой на площади, закрывает игру."""
 
+    supports_hires = True
+
     def __init__(self, progress: GameProgress | None = None, characters_dir: str | Path = CHARACTERS_DIR) -> None:
         self.progress = progress if progress is not None else GameProgress()
         root = Path(characters_dir)
@@ -117,7 +152,7 @@ class FinalScene(Scene):
         self.chuchmek_sprites = try_load_character_sprites(root / "chuchmek")
         self.alice_pose = "idle_right"
         self.chuchmek_pose = "idle"
-        self._frames: dict[tuple[str, str], pygame.Surface] = {}
+        self._frames: dict[tuple[str, str], tuple[pygame.Surface, pygame.Surface]] = {}  # (исходник, на холсте)
 
         self.box = DialogueBox()
         for script in text.all_scripts():
@@ -127,8 +162,16 @@ class FinalScene(Scene):
         self._title_font = load_font(16)
         self._end_font = load_font(12)
         self._small_font = load_font(7)
+        self._fonts = TextFonts()
+        self.letter_metrics = self._fonts.metrics(LETTER_STYLE)
+        self.ribbon_metrics = self._fonts.metrics(RIBBON_STYLE)
+        # Строки письма в окне — не теснее пиксельных: те же поля листа, тот же предел строк.
+        self.letter_line_height = max(self._letter_font.get_linesize(), math.ceil(self.letter_metrics.height))
         self._page_lines = [self._wrap(page) for page in text.LETTER_PAGES]
         self._gift_lines = self._wrap(text.GIFT_TEXT)
+        # Раскладка того же письма для шрифта окна: переносы по его настоящим метрикам.
+        self.hires_page_lines = [self._wrap(page, hires=True) for page in text.LETTER_PAGES]
+        self.hires_gift_lines = self._wrap(text.GIFT_TEXT, hires=True)
         self._page_cache: dict[int, pygame.Surface] = {}
         self._text_cache: dict[tuple[str, config.Color, int], pygame.Surface] = {}
 
@@ -141,6 +184,7 @@ class FinalScene(Scene):
         self.time = 0.0
         self.shown: list[str] = []  # что игрок увидел, по порядку (для проверки сценария)
         self._background = self._render_page()
+        self._background_plain = self._render_page(label=False)  # подпись ленточки рисует слой окна
 
     # --- Состояние ---
 
@@ -272,34 +316,41 @@ class FinalScene(Scene):
 
     # --- Отрисовка ---
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Рисует финал на холсте; со слоем hires персонажи и надписи уходят в него
+        (см. game/graphics/hires.py), а порядок слоёв и экранов остаётся тем же."""
         if self.phase in (CREDITS, THE_END, DONE):
             self._draw_night(surface)
             if self.phase == CREDITS:
-                self._draw_credits(surface)
+                self._draw_credits(surface, hires)
             else:
-                self._draw_the_end(surface)
-            self._draw_hint(surface)
+                self._draw_the_end(surface, hires)
+            self._draw_hint(surface, hires)
             return
-        surface.blit(self._background, (0, 0))
+        surface.blit(self._background if hires is None else self._background_plain, (0, 0))
         self._draw_festive(surface)
         self._draw_symbols(surface)
-        self._draw_actor(surface, "chuchmek", CHUCHMEK_POSITION)
-        self._draw_actor(surface, "alice", ALICE_POSITION)
+        if hires is not None:  # подпись ленточки — часть страницы, под героями
+            hires.text("Последняя страница", RIBBON_STYLE, self.ribbon_rect(hires=True).center, anchor="center")
+        self._draw_actor(surface, "chuchmek", CHUCHMEK_POSITION, hires)
+        self._draw_actor(surface, "alice", ALICE_POSITION, hires)
         if self.phase == ARRIVAL:
             # Страница «проявляется» из белого листа.
             whiteness = 1 - _ease(self.phase_time / (ARRIVAL_SECONDS * 0.25))
             if whiteness > 0:
-                veil = pygame.Surface(config.LOGICAL_SIZE)
-                veil.fill(PARCHMENT_COLOR)
-                veil.set_alpha(round(255 * whiteness))
-                surface.blit(veil, (0, 0))
+                if hires is not None:
+                    hires.fill(PARCHMENT_COLOR, alpha=round(255 * whiteness))  # закрывает и героев
+                else:
+                    veil = pygame.Surface(config.LOGICAL_SIZE)
+                    veil.fill(PARCHMENT_COLOR)
+                    veil.set_alpha(round(255 * whiteness))
+                    surface.blit(veil, (0, 0))
         if self.phase in (LETTER, GIFT):
-            self._draw_letter(surface)
+            self._draw_letter(surface, hires)
         if self.dialogue is not None and not self.dialogue.is_finished:
-            self.box.draw(surface, self.dialogue)
+            self.box.draw(surface, self.dialogue, hires)
         else:
-            self._draw_hint(surface)
+            self._draw_hint(surface, hires)
 
     def _text(self, line: str, color: config.Color, size: int = 9) -> pygame.Surface:
         key = (line, color, size)
@@ -310,42 +361,78 @@ class FinalScene(Scene):
             image = self._text_cache[key] = render_text(font, line, color)
         return image
 
-    def _wrap(self, page: str) -> list[str]:
-        """Строки страницы письма. Если текст не помещается на лист — ошибка сразу, а не обрезка в игре."""
-        lines = wrap_text(page, self._letter_font, PANEL.width - 2 * PANEL_PADDING)
-        if len(lines) > self.max_letter_lines():
+    def _wrap(self, page: str, hires: bool = False) -> list[str]:
+        """Строки страницы письма пиксельным шрифтом или (hires=True) шрифтом окна — по его
+        метрикам. Если текст не помещается на лист — ошибка сразу, а не обрезка в игре."""
+        font = self.letter_metrics if hires else self._letter_font
+        lines = wrap_text(page, font, PANEL.width - 2 * PANEL_PADDING)
+        if len(lines) > self.max_letter_lines(hires):
             raise ValueError(f"страница письма не помещается на лист: {lines[0]}…")
         return lines
 
-    def max_letter_lines(self) -> int:
+    def max_letter_lines(self, hires: bool = False) -> int:
         body = PANEL.height - 2 * PANEL_PADDING - 2 * self._font.get_linesize() - 4  # заголовок и подпись/подсказка
-        return body // self._letter_font.get_linesize()
+        return body // (self.letter_line_height if hires else self._letter_font.get_linesize())
+
+    def letter_layout(self, key: int) -> dict[str, object]:
+        """Где на листе (в координатах холста) стоят заголовок, строки, подпись, штамп и номер.
+
+        key — номер страницы письма или -1 для секрета подарка. Те же места, что у пиксельного
+        листа (_render_sheet), но строки — по раскладке шрифта окна."""
+        gift = key < 0
+        title_line = self._font.get_linesize()
+        top = PANEL.y + PANEL_PADDING + title_line + 2
+        lines = self.hires_gift_lines if gift else self.hires_page_lines[key]
+        bottom = PANEL.bottom - PANEL_PADDING - title_line + 2
+        last_page = not gift and key == len(text.LETTER_PAGES) - 1
+        step = self.letter_line_height
+        left = PANEL.x + PANEL_PADDING
+        stamp = pygame.Rect(PANEL.right - PANEL_PADDING - 74, PANEL.y + PANEL_PADDING - 3, 74, 12)
+        return {
+            "title": (text.GIFT_TITLE if gift else text.LETTER_TITLE,
+                      (left, PANEL.y + PANEL_PADDING - 2 + title_line / 2)),
+            "lines": [(line, (left, top + row * step + step / 2)) for row, line in enumerate(lines)],
+            "lines_bottom": top + len(lines) * step,
+            "signature": (PANEL.right - PANEL_PADDING, bottom - 12 + title_line / 2) if gift or last_page else None,
+            "signature_top": bottom - 12,
+            "stamp": stamp if gift else None,
+            "number": None if gift else (f"{key + 1}/{len(text.LETTER_PAGES)}", (PANEL.right - 8, PANEL.bottom - 10)),
+        }
 
     def _actor_image(self, who: str) -> pygame.Surface:
         """Поза из манифеста, уменьшенная ближайшим соседом до 48×48; кадры никогда не отражаются."""
+        return self._actor_frame(who)[1]
+
+    def _actor_frame(self, who: str) -> tuple[pygame.Surface, pygame.Surface]:
+        """Поза из манифеста: исходный кадр (без отражения) и он же на холсте 48×48."""
         pose = self.alice_pose if who == "alice" else self.chuchmek_pose
         key = (who, pose)
         if key not in self._frames:
             sprites: CharacterSprites | None = self.alice_sprites if who == "alice" else self.chuchmek_sprites
             if sprites is None:
-                image = pygame.transform.scale(placeholder_animations().default.frames[0], (SPRITE_SIZE, SPRITE_SIZE))
+                source = placeholder_animations().default.frames[0]
             else:
                 try:
                     source = sprites.frame(pose).image
                 except KeyError:
                     source = sprites.frames[0].image
-                image = pygame.transform.scale(source, (SPRITE_SIZE, SPRITE_SIZE))
-            self._frames[key] = image
+            self._frames[key] = (source, pygame.transform.scale(source, (SPRITE_SIZE, SPRITE_SIZE)))
         return self._frames[key]
 
-    def _draw_actor(self, surface: pygame.Surface, who: str, feet: tuple[int, int]) -> None:
+    def _draw_actor(
+        self, surface: pygame.Surface, who: str, feet: tuple[int, int], hires: HiResLayer | None = None
+    ) -> None:
         bob = 0
         if self.dialogue is not None and self.dialogue.node is not None:
             speaking = (self.dialogue.node.speaker == text.ALICE) == (who == "alice")
             if speaking and self.dialogue.is_typing:
                 bob = round(abs(math.sin(self.time * 9)))
-        image = self._actor_image(who)
-        surface.blit(image, image.get_rect(midbottom=(feet[0], feet[1] - bob)))
+        source, image = self._actor_frame(who)
+        rect = image.get_rect(midbottom=(feet[0], feet[1] - bob))
+        if hires is not None:
+            hires.sprite(source, rect)  # исходный кадр на том же месте и того же размера
+        else:
+            surface.blit(image, rect)
 
     def _draw_symbols(self, surface: pygame.Surface) -> None:
         """Три фрагмента: в начале летят к центру страницы и превращаются в символы."""
@@ -398,18 +485,50 @@ class FinalScene(Scene):
             lit = math.sin(self.time * 3 + i * 1.7) > -0.2
             pygame.draw.circle(surface, GLOW_COLOR if lit else CREAM_COLOR, (x, y), 2)
 
-    def _draw_letter(self, surface: pygame.Surface) -> None:
+    def _draw_letter(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
         """Лист письма поверх притушенной страницы; проявляется за PAGE_FADE_SECONDS."""
+        key = -1 if self.phase == GIFT else self.page
+        alpha = round(255 * min(1.0, self.page_time / PAGE_FADE_SECONDS))
+        if hires is not None:
+            self._draw_letter_hires(surface, hires, key, alpha)
+            return
         dim = pygame.Surface(config.LOGICAL_SIZE)
         dim.fill(NIGHT_COLOR)
         dim.set_alpha(150)
         surface.blit(dim, (0, 0))
-        key = -1 if self.phase == GIFT else self.page
         sheet = self._page_cache.get(key)
         if sheet is None:
             sheet = self._page_cache[key] = self._render_sheet(key)
-        sheet.set_alpha(round(255 * min(1.0, self.page_time / PAGE_FADE_SECONDS)))
+        sheet.set_alpha(alpha)
         surface.blit(sheet, PANEL)
+
+    def _draw_letter_hires(self, surface: pygame.Surface, hires: HiResLayer, key: int, alpha: int) -> None:
+        """Лист — теми же рамками, что и на холсте, слова — шрифтом окна. Лист собирается одной
+        картинкой (HiResLayer.group) и проявляется целиком, как картинка на холсте."""
+        if alpha >= 255:
+            # Непрозрачный лист закрывает почти всю страницу: притушить достаточно полей вокруг него
+            # (затемнять весь экран 1920×1080 каждый кадр — около 3 мс).
+            for margin in LETTER_MARGINS:
+                hires.fill(NIGHT_COLOR, margin, alpha=150)
+        else:
+            hires.fill(NIGHT_COLOR, alpha=150)  # притушить страницу вместе с героями
+        layout = self.letter_layout(key)
+        with hires.group(PANEL, alpha=alpha) as sheet:
+            sheet.rect(PARCHMENT_COLOR, PANEL)
+            sheet.rect(GOLD_COLOR, PANEL, 2)
+            sheet.rect(PAGE_EDGE_COLOR, PANEL.inflate(-6, -6), 1)
+            title, point = layout["title"]
+            sheet.text(title, LETTER_TITLE_STYLE, point, anchor="midleft")
+            for line, point in layout["lines"]:
+                sheet.text(line, LETTER_STYLE, point, anchor="midleft")
+            if layout["signature"] is not None:
+                sheet.text(text.LETTER_SIGNATURE, SIGNATURE_STYLE, layout["signature"], anchor="midright")
+            if layout["stamp"] is not None:
+                sheet.rect(STAMP_COLOR, layout["stamp"], 1)
+                sheet.text("F-17: ОТКАЗАНО", STAMP_STYLE, layout["stamp"].center, anchor="center")
+            if layout["number"] is not None:
+                number, point = layout["number"]
+                sheet.text(number, PAGE_NUMBER_STYLE, point, anchor="midright")
 
     def _render_sheet(self, key: int) -> pygame.Surface:
         sheet = pygame.Surface(PANEL.size)
@@ -439,22 +558,33 @@ class FinalScene(Scene):
             sheet.blit(number, number.get_rect(bottomright=(PANEL.width - 8, PANEL.height - 6)))
         return sheet
 
-    def _draw_hint(self, surface: pygame.Surface) -> None:
+    def _draw_hint(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
         line = self.hint()
         if not line:
             return
         dark = self.phase in (CREDITS, THE_END, DONE)
         if self.phase in (LETTER, GIFT):
             # Подсказка — внизу листа письма, чтобы не закрывать текст.
+            if hires is not None:
+                hires.text(line, SHEET_HINT_STYLE, (PANEL.centerx, PANEL.bottom - 10.5), anchor="center")
+                return
             image = self._text(line, PAGE_EDGE_COLOR)
-            surface.blit(image, image.get_rect(midbottom=(PANEL.centerx, PANEL.bottom - 5)))
+            canvas.blit(image, image.get_rect(midbottom=(PANEL.centerx, PANEL.bottom - 5)))
             return
         if self.phase == THE_END and int(self.time * 2) % 3 == 2:
             return  # мягко мигает
-        image = self._text(line, CREAM_COLOR if dark else INK_COLOR)
+        color = CREAM_COLOR if dark else INK_COLOR
         if self.phase == CREDITS:  # титры уезжают под полосу подсказки, а не сквозь текст
-            surface.fill(NIGHT_COLOR, (0, HEIGHT - 18, WIDTH, 18))
-        surface.blit(image, image.get_rect(midbottom=(WIDTH // 2, HEIGHT - 6)))
+            with logical_target(canvas, hires, CREDITS_HINT_BAR) as surface:
+                surface.fill(NIGHT_COLOR, CREDITS_HINT_BAR)
+        if hires is not None:
+            # Под подсказкой титров — однотонная полоса; на последнем экране за ней звёзды.
+            background = NIGHT_COLOR if self.phase == CREDITS else None
+            hires.text(line, TextStyle(HINT_SIZE, color, background=background), (WIDTH // 2, HEIGHT - 11.5),
+                       anchor="center")
+            return
+        image = self._text(line, color)
+        canvas.blit(image, image.get_rect(midbottom=(WIDTH // 2, HEIGHT - 6)))
 
     def _draw_night(self, surface: pygame.Surface) -> None:
         surface.fill(NIGHT_COLOR)
@@ -473,33 +603,56 @@ class FinalScene(Scene):
             y += {"title": 24, "line": 13, "small": 11, "gap": 8}[kind]
         return result
 
-    def _draw_credits(self, surface: pygame.Surface) -> None:
+    def credits_top(self) -> float:
+        """Где сейчас верх блока титров: они выезжают снизу к середине экрана."""
         lines = self.credit_lines()
         height = lines[-1][2] + 12
         start, end = HEIGHT, (HEIGHT - height) // 2
-        top = start + (end - start) * _ease(self.phase_time / CREDITS_SCROLL_SECONDS)
-        for kind, line, y in lines:
+        return start + (end - start) * _ease(self.phase_time / CREDITS_SCROLL_SECONDS)
+
+    def _draw_credits(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        top = self.credits_top()
+        for kind, line, y in self.credit_lines():
             if not line:
+                continue
+            if hires is not None:
+                # В окне титры едут плавно, по его пикселям, а не ступеньками холста.
+                hires.text(line, CREDIT_STYLES[kind], (WIDTH / 2, top + y), anchor="midtop")
                 continue
             if kind == "title":
                 image = self._text(line, GOLD_COLOR, 16)
             elif kind == "small":
-                image = self._text(line, (196, 186, 214))
+                image = self._text(line, CREDITS_SMALL_COLOR)
             else:
                 image = self._text(line, CREAM_COLOR, 10)
             surface.blit(image, image.get_rect(midtop=(WIDTH // 2, round(top + y))))
 
-    def _draw_the_end(self, surface: pygame.Surface) -> None:
+    def _draw_the_end(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
         for index, trial_id in enumerate(TRIALS):
             draw_symbol(surface, trial_id, (130 + index * 30, 50 + math.sin(self.time * 2 + index) * 1.5))
         y = 82
         for line in text.THE_END_LINES:
-            image = self._text(line, CREAM_COLOR, 12)
-            surface.blit(image, image.get_rect(midtop=(WIDTH // 2, y)))
+            if hires is not None:
+                hires.text(line, THE_END_STYLE, (WIDTH // 2, y), anchor="midtop")
+            else:
+                image = self._text(line, CREAM_COLOR, 12)
+                surface.blit(image, image.get_rect(midtop=(WIDTH // 2, y)))
             y += 18
 
-    def _render_page(self) -> pygame.Surface:
-        """Восстановленная страница книги: небо, холмы, тропинка, цветы — как на первой странице сказки."""
+    def ribbon_rect(self, hires: bool = False) -> pygame.Rect:
+        """Ленточка «Последняя страница» — по размеру подписи пиксельным шрифтом или шрифтом окна."""
+        if hires:
+            width, height = self.ribbon_metrics.size("Последняя страница")
+            label = pygame.Rect(0, 0, math.ceil(width), math.ceil(height))
+        else:
+            label = render_text(self._font, "Последняя страница", PLUM_COLOR).get_rect()
+        label.midtop = (WIDTH // 2, 6)
+        return label.inflate(10, 2)
+
+    def _render_page(self, label: bool = True) -> pygame.Surface:
+        """Восстановленная страница книги: небо, холмы, тропинка, цветы — как на первой странице сказки.
+
+        label=False — ленточка без подписи: её рисует слой высокого разрешения."""
         page = pygame.Surface(config.LOGICAL_SIZE)
         page.fill(PAGE_EDGE_COLOR)
         inner = pygame.Rect(4, 4, WIDTH - 8, HEIGHT - 8)
@@ -516,9 +669,10 @@ class FinalScene(Scene):
         for x, y in ((40, 128), (290, 126)):  # кусты для огоньков
             pygame.draw.circle(page, HILL_COLORS[1], (x, y), 10)
         # Ленточка с подписью страницы.
-        label = render_text(self._font, "Последняя страница", PLUM_COLOR)
-        ribbon = label.get_rect(midtop=(WIDTH // 2, 6)).inflate(10, 2)
+        ribbon = self.ribbon_rect(hires=not label)
         pygame.draw.rect(page, CREAM_COLOR, ribbon)
         pygame.draw.rect(page, PLUM_COLOR, ribbon, 1)
-        page.blit(label, label.get_rect(center=ribbon.center))
+        if label:
+            image = render_text(self._font, "Последняя страница", PLUM_COLOR)
+            page.blit(image, image.get_rect(center=ribbon.center))
         return page

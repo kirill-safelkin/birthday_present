@@ -111,8 +111,8 @@ MARK_COLOR = (255, 236, 140)
 
 # Надписи в разрешении окна (слой высокого разрешения); размер — в логических пикселях.
 TEXT_SIZE = 8
-HUD_STYLE = TextStyle(TEXT_SIZE, HUD_TEXT_COLOR)
-FRAGMENTS_STYLE = TextStyle(TEXT_SIZE, HUD_ACCENT_COLOR)
+HUD_STYLE = TextStyle(TEXT_SIZE, HUD_TEXT_COLOR, background=HUD_COLOR)  # полосы вверху и внизу
+FRAGMENTS_STYLE = TextStyle(TEXT_SIZE, HUD_ACCENT_COLOR, background=HUD_COLOR)
 SIGN_STYLE = TextStyle(TEXT_SIZE, SIGN_TEXT_COLOR)
 
 

@@ -12,6 +12,11 @@
 (GameProgress.complete("cakes")) выдаётся только после финальной реплики; отмена
 (Backspace) в любой момент до этого возвращает на площадь без награды.
 Оформление временное: кондитерская и кладовая нарисованы геометрией.
+
+Со слоем высокого разрешения (game/graphics/hires.py) Алиса и Чучмек рисуются из исходных
+кадров 64×64, а надписи — шрифтом размера окна; перевёрнутые надписи (заголовок доски до
+исправления рецепта, таблички «ТОРТЫ» и «КЛАДОВАЯ») — тем же шрифтом, повёрнутым на 180°.
+Кондитерская, кладовая, торт и клубника остаются пиксельными.
 """
 
 from __future__ import annotations
@@ -27,7 +32,8 @@ from game.core.scenes import Scene
 from game.dialogue.box import DialogueBox
 from game.dialogue.model import DialogueController, DialogueScript
 from game.graphics.animation import Direction
-from game.graphics.fonts import load_font, render_text
+from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
+from game.graphics.hires import HiResLayer, logical_target
 from game.graphics.placeholder import placeholder_animations
 from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, try_load_character_sprites
 from game.story import cakes_dialogue as lines
@@ -116,6 +122,19 @@ PLANK_LINE_COLOR = (140, 100, 70)
 SIGN_COLOR = (236, 222, 190)
 SIGN_TEXT_COLOR = (90, 56, 48)
 
+# Надписи в разрешении окна (слой высокого разрешения); размер — в логических пикселях.
+TEXT_SIZE = 8  # интерфейс и доска, как на площади
+HUD_STYLE = TextStyle(TEXT_SIZE, HUD_TEXT_COLOR, background=HUD_COLOR)  # полосы вверху и внизу
+TASK_STYLE = TextStyle(TEXT_SIZE, HUD_ACCENT_COLOR, background=HUD_COLOR)
+CHALK_STYLE = TextStyle(TEXT_SIZE, CHALK_COLOR)
+CHALK_DIM_STYLE = TextStyle(TEXT_SIZE, CHALK_DIM_COLOR)
+SIGN_STYLE = TextStyle(6, SIGN_TEXT_COLOR)  # подвешенные таблички
+HUD_ROWS = (6.5, 17.5)  # середины двух строк верхней полосы
+BOARD_TITLE_MIDDLE = BOARD.y + 8  # середина заголовка доски — над первой строкой этапов
+SIGNS = {"bakery": ("ТОРТЫ", (296, 62)), "pantry": ("КЛАДОВАЯ", (170, 34))}
+# Где рисуется рабочий стол: столешница с ножками и торт на ней.
+TABLE_AREA = pygame.Rect(TABLE.x, CAKE_CENTER[1] - 16, TABLE.width, TABLE.bottom + 8 - (CAKE_CENTER[1] - 16))
+
 
 def draw_strawberry(surface: pygame.Surface, center: tuple[float, float]) -> None:
     """Клубника: красная ягода с жёлтыми семечками и зелёными листьями (рисуется, не ассет)."""
@@ -153,6 +172,8 @@ def draw_step_icon(surface: pygame.Surface, step: str, center: tuple[int, int]) 
 class CakesTrialScene(Scene):
     """Перевёрнутая кондитерская. Открывается правым порталом площади и закрывается возвратом на неё."""
 
+    supports_hires = True
+
     def __init__(self, progress: GameProgress | None = None, characters_dir: str | Path = CHARACTERS_DIR) -> None:
         self.progress = progress if progress is not None else GameProgress()
         self.recipe = CakeRecipe()
@@ -169,7 +190,7 @@ class CakesTrialScene(Scene):
         )
         self.chuchmek_sprites = try_load_character_sprites(root / "chuchmek")
         self.chuchmek_pose = lines.CHUCHMEK_IDLE_POSE
-        self._chuchmek_frames: dict[str, pygame.Surface] = {}
+        self._chuchmek_frames: dict[str, tuple[pygame.Surface, pygame.Surface]] = {}  # поза → (исходник, на холсте)
 
         self.box = DialogueBox()
         for script in lines.all_scripts():
@@ -187,8 +208,14 @@ class CakesTrialScene(Scene):
         self._font = load_font(9)
         self._small_font = load_font(7)
         self._text_cache: dict[tuple[str, config.Color, bool], pygame.Surface] = {}
+        self._fonts = TextFonts()
+        self.text_metrics = self._fonts.metrics(HUD_STYLE)
+        self.sign_metrics = self._fonts.metrics(SIGN_STYLE)
         self._bakery = self._render_bakery()
         self._pantry = self._render_pantry()
+        # Без надписей на табличках: их рисует слой высокого разрешения.
+        self._bakery_plain = self._render_bakery(labels=False)
+        self._pantry_plain = self._render_pantry(labels=False)
         self._open_dialogue(lines.INTRO)
 
     # --- Состояние ---
@@ -413,29 +440,34 @@ class CakesTrialScene(Scene):
 
     # --- Отрисовка ---
 
-    def draw(self, surface: pygame.Surface) -> None:
+    def draw(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Рисует кондитерскую или кладовую на холсте; со слоем hires персонажи и надписи уходят
+        в него (см. game/graphics/hires.py), а порядок слоёв остаётся тем же."""
         if self.area == BAKERY:
-            surface.blit(self._bakery, (0, 0))
-            self._draw_board(surface)
-            self._draw_table(surface)
+            surface.blit(self._bakery if hires is None else self._bakery_plain, (0, 0))
+            self._draw_table(surface, hires)
+            self._draw_board(surface, hires)
             chuchmek_spot = CHUCHMEK_SPOT
         else:
-            surface.blit(self._pantry, (0, 0))
+            surface.blit(self._pantry if hires is None else self._pantry_plain, (0, 0))
             chuchmek_spot = CHUCHMEK_DOOR
+        if hires is not None:  # перевёрнутая табличка — часть фона, под персонажами
+            text, center = SIGNS[self.area]
+            hires.text(text, SIGN_STYLE, self.sign_rect(text, center, hires=True).center, anchor="center", angle=180)
         drawables = [
-            (chuchmek_spot[1], lambda: self._draw_chuchmek(surface, chuchmek_spot)),
-            (self.alice.y + 0.1, lambda: self._draw_alice(surface)),
+            (chuchmek_spot[1], lambda: self._draw_chuchmek(surface, chuchmek_spot, hires)),
+            (self.alice.y + 0.1, lambda: self._draw_alice(surface, hires)),
         ]
         strawberry = self.strawberry_position()
         if strawberry is not None:
-            drawables.append((strawberry[1] + 5, lambda: self._draw_loose_strawberry(surface, strawberry)))
+            drawables.append((strawberry[1] + 5, lambda: self._draw_loose_strawberry(surface, strawberry, hires)))
         for _, draw in sorted(drawables, key=lambda item: item[0]):
             draw()
-        self._draw_hud(surface)
+        self._draw_hud(surface, hires)
         if self.dialogue is not None and not self.dialogue.is_finished:
-            self.box.draw(surface, self.dialogue)
+            self.box.draw(surface, self.dialogue, hires)
         else:
-            self._draw_status(surface)
+            self._draw_status(surface, hires)
 
     def _text(self, text: str, color: config.Color, small: bool = False) -> pygame.Surface:
         key = (text, color, small)
@@ -449,42 +481,55 @@ class CakesTrialScene(Scene):
         rect = self.alice.rect
         return rect.centerx, rect.top - 6
 
-    def _draw_alice(self, surface: pygame.Surface) -> None:
-        self.alice.draw(surface)
+    def _draw_alice(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        self.alice.draw(canvas, hires)
         if self.phase == FOUND_PHASE:
             x, y = self.held_icon_center()
-            draw_strawberry(surface, (x, y - round(abs(math.sin(self.time * 4)))))
+            with logical_target(canvas, hires, pygame.Rect(x - 6, y - 10, 13, 16)) as surface:
+                draw_strawberry(surface, (x, y - round(abs(math.sin(self.time * 4)))))
 
-    def _draw_loose_strawberry(self, surface: pygame.Surface, center: tuple[float, float]) -> None:
-        draw_strawberry(surface, center)
-        if self.area == PANTRY:  # блёстки, чтобы ягоду было видно издалека
-            x, y = round(center[0]), round(center[1])
-            for k, (dx, dy) in enumerate(((-9, -7), (8, -9), (10, 3), (-10, 4))):
-                if int(self.time * 3 + k) % 2 == 0:
-                    surface.set_at((x + dx, y + dy), MARK_COLOR)
-                    surface.set_at((x + dx + 1, y + dy), MARK_COLOR)
-            if self.near_strawberry():
-                top = y - 13 - round(abs(math.sin(self.time * 4)) * 2)
-                pygame.draw.polygon(surface, MARK_COLOR, [(x, top - 3), (x + 3, top), (x, top + 3), (x - 3, top)])
+    def _draw_loose_strawberry(
+        self, canvas: pygame.Surface, center: tuple[float, float], hires: HiResLayer | None = None
+    ) -> None:
+        x, y = round(center[0]), round(center[1])
+        # Ягода, блёстки и ромбик над ней — вокруг той же точки, что и область, где её ловят.
+        with logical_target(canvas, hires, pygame.Rect(x - 11, y - 19, 23, 25)) as surface:
+            draw_strawberry(surface, center)
+            if self.area == PANTRY:  # блёстки, чтобы ягоду было видно издалека
+                for k, (dx, dy) in enumerate(((-9, -7), (8, -9), (10, 3), (-10, 4))):
+                    if int(self.time * 3 + k) % 2 == 0:
+                        surface.set_at((x + dx, y + dy), MARK_COLOR)
+                        surface.set_at((x + dx + 1, y + dy), MARK_COLOR)
+                if self.near_strawberry():
+                    top = y - 13 - round(abs(math.sin(self.time * 4)) * 2)
+                    pygame.draw.polygon(surface, MARK_COLOR, [(x, top - 3), (x + 3, top), (x, top + 3), (x - 3, top)])
 
-    def _draw_chuchmek(self, surface: pygame.Surface, spot: tuple[int, int]) -> None:
-        image = self._chuchmek_image()
-        surface.blit(image, image.get_rect(midbottom=spot))
+    def _draw_chuchmek(self, canvas: pygame.Surface, spot: tuple[int, int], hires: HiResLayer | None = None) -> None:
+        source, image = self._chuchmek_frame()
+        rect = image.get_rect(midbottom=spot)
+        if hires is not None:
+            hires.sprite(source, rect)  # исходный кадр на том же месте и того же размера, без отражения
+        else:
+            canvas.blit(image, rect)
 
     def _chuchmek_image(self) -> pygame.Surface:
         """Поза Чучмека из манифеста chuchmek, уменьшенная ближайшим соседом; без отражения."""
+        return self._chuchmek_frame()[1]
+
+    def _chuchmek_frame(self) -> tuple[pygame.Surface, pygame.Surface]:
+        """Поза Чучмека: исходный кадр манифеста chuchmek (без отражения) и он же на холсте."""
         pose = self.chuchmek_pose
         if pose not in self._chuchmek_frames:
             sprites: CharacterSprites | None = self.chuchmek_sprites
             if sprites is None:
-                image = placeholder_animations().default.frames[0]
+                source = image = placeholder_animations().default.frames[0]
             else:
                 try:
                     source = sprites.frame(pose).image
                 except KeyError:
                     source = sprites.frames[0].image
                 image = pygame.transform.scale(source, (SPRITE_SIZE, SPRITE_SIZE))
-            self._chuchmek_frames[pose] = image
+            self._chuchmek_frames[pose] = (source, image)
         return self._chuchmek_frames[pose]
 
     def row_rect(self, index: int) -> pygame.Rect:
@@ -493,32 +538,53 @@ class CakesTrialScene(Scene):
             return CHECK_BUTTON.copy()
         return pygame.Rect(BOARD.x + 4, ROW_TOP + index * ROW_HEIGHT, BOARD.width - 8, ROW_HEIGHT)
 
-    def _draw_board(self, surface: pygame.Surface) -> None:
+    def _draw_board(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Доска рецепта: на холсте — рамки строк и значки, надписи — на холсте или в слое окна."""
         recipe = self.recipe
-        title = self._text("РЕЦЕПТ ТОРТА", CHALK_COLOR)
-        if not recipe.solved:  # перевёрнутая кондитерская: даже заголовок вверх ногами
-            title = pygame.transform.rotate(title, 180)
-        surface.blit(title, title.get_rect(midtop=(BOARD.centerx, BOARD.y + 2)))
+        title_text = "РЕЦЕПТ ТОРТА"
+        # Перевёрнутая кондитерская: даже заголовок вверх ногами, пока рецепт не исправлен.
+        title_angle = 0 if recipe.solved else 180
         choosing = self.phase == ORDERING and self.dialogue is None
-        for index, step in enumerate(recipe.order):
-            rect = self.row_rect(index)
-            if recipe.picked == index:
-                surface.fill(PICKED_COLOR, rect)
-            if choosing and self.cursor == index:
-                pygame.draw.rect(surface, MARK_COLOR, rect, 1)
-            color = DONE_COLOR if recipe.solved else (HUD_ACCENT_COLOR if recipe.picked == index else CHALK_COLOR)
-            surface.blit(self._text(f"{index + 1}.", CHALK_DIM_COLOR), (rect.x + 2, rect.y))
-            draw_step_icon(surface, step, (rect.x + 20, rect.centery))
-            surface.blit(self._text(STEP_NAMES[step], color), (rect.x + 28, rect.y))
-        button = self.row_rect(CHECK_ROW)
-        selected = choosing and self.cursor == CHECK_ROW
-        pygame.draw.rect(surface, PICKED_COLOR if selected else BOARD_COLOR, button)
-        pygame.draw.rect(surface, MARK_COLOR if selected else CHALK_DIM_COLOR, button, 1)
-        label = self._text("Рецепт верный!" if recipe.solved else "Проверить рецепт", CHALK_COLOR)
-        surface.blit(label, label.get_rect(center=button.center))
+        texts = []  # (текст, цвет, точка, привязка) — в слой окна после графики доски
+        with logical_target(canvas, hires, BOARD) as surface:
+            if hires is None:
+                title = self._text(title_text, CHALK_COLOR)
+                if title_angle:
+                    title = pygame.transform.rotate(title, title_angle)
+                surface.blit(title, title.get_rect(midtop=(BOARD.centerx, BOARD.y + 2)))
+            for index, step in enumerate(recipe.order):
+                rect = self.row_rect(index)
+                if recipe.picked == index:
+                    surface.fill(PICKED_COLOR, rect)
+                if choosing and self.cursor == index:
+                    pygame.draw.rect(surface, MARK_COLOR, rect, 1)
+                color = DONE_COLOR if recipe.solved else (HUD_ACCENT_COLOR if recipe.picked == index else CHALK_COLOR)
+                draw_step_icon(surface, step, (rect.x + 20, rect.centery))
+                if hires is None:
+                    surface.blit(self._text(f"{index + 1}.", CHALK_DIM_COLOR), (rect.x + 2, rect.y))
+                    surface.blit(self._text(STEP_NAMES[step], color), (rect.x + 28, rect.y))
+                texts.append((f"{index + 1}.", CHALK_DIM_COLOR, (rect.x + 2, rect.centery), "midleft"))
+                texts.append((STEP_NAMES[step], color, (rect.x + 28, rect.centery), "midleft"))
+            button = self.row_rect(CHECK_ROW)
+            selected = choosing and self.cursor == CHECK_ROW
+            pygame.draw.rect(surface, PICKED_COLOR if selected else BOARD_COLOR, button)
+            pygame.draw.rect(surface, MARK_COLOR if selected else CHALK_DIM_COLOR, button, 1)
+            button_text = "Рецепт верный!" if recipe.solved else "Проверить рецепт"
+            if hires is None:
+                label = self._text(button_text, CHALK_COLOR)
+                surface.blit(label, label.get_rect(center=button.center))
+            texts.append((button_text, CHALK_COLOR, button.center, "center"))
+        if hires is not None:
+            hires.text(title_text, CHALK_STYLE, (BOARD.centerx, BOARD_TITLE_MIDDLE), anchor="center", angle=title_angle)
+            for text, color, point, anchor in texts:
+                hires.text(text, TextStyle(TEXT_SIZE, color), point, anchor=anchor)
 
-    def _draw_table(self, surface: pygame.Surface) -> None:
+    def _draw_table(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
         """Рабочий стол с тортом: до исправления рецепта торт стоит вверх ногами."""
+        with logical_target(canvas, hires, TABLE_AREA) as surface:
+            self._draw_table_on(surface)
+
+    def _draw_table_on(self, surface: pygame.Surface) -> None:
         pygame.draw.rect(surface, TABLE_EDGE_COLOR, (TABLE.x + 3, TABLE.bottom, 3, 8))
         pygame.draw.rect(surface, TABLE_EDGE_COLOR, (TABLE.right - 6, TABLE.bottom, 3, 8))
         pygame.draw.rect(surface, TABLE_COLOR, TABLE)
@@ -533,32 +599,58 @@ class CakesTrialScene(Scene):
             pygame.draw.rect(surface, color, (x - width // 2, bottom - height, width, height))
             bottom -= height
 
-    def _draw_hud(self, surface: pygame.Surface) -> None:
-        surface.fill(HUD_COLOR, (0, 0, WIDTH, HUD_HEIGHT))
-        surface.blit(self._text(self.task_text(), HUD_ACCENT_COLOR), (4, 1))
-        surface.blit(self._text(self.part_text(), HUD_TEXT_COLOR), (4, 12))
+    def _draw_hud(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        bar = pygame.Rect(0, 0, WIDTH, HUD_HEIGHT)
         held = self.held_text()
-        if held:
-            image = self._text(held, HUD_TEXT_COLOR)
-            surface.blit(image, image.get_rect(topright=(WIDTH - 4, 12)))
+        with logical_target(canvas, hires, bar) as surface:
+            surface.fill(HUD_COLOR, bar)
+            if hires is None:
+                surface.blit(self._text(self.task_text(), HUD_ACCENT_COLOR), (4, 1))
+                surface.blit(self._text(self.part_text(), HUD_TEXT_COLOR), (4, 12))
+                if held:
+                    image = self._text(held, HUD_TEXT_COLOR)
+                    surface.blit(image, image.get_rect(topright=(WIDTH - 4, 12)))
+        if hires is not None:
+            hires.text(self.task_text(), TASK_STYLE, (4, HUD_ROWS[0]), anchor="midleft")
+            hires.text(self.part_text(), HUD_STYLE, (4, HUD_ROWS[1]), anchor="midleft")
+            hires.text(held, HUD_STYLE, (WIDTH - 4, HUD_ROWS[1]), anchor="midright")
 
-    def _draw_status(self, surface: pygame.Surface) -> None:
-        surface.fill(HUD_COLOR, (0, STATUS_TOP, WIDTH, HEIGHT - STATUS_TOP))
-        text = self._text(self.status_text(), HUD_TEXT_COLOR)
-        surface.blit(text, text.get_rect(center=(WIDTH // 2, STATUS_TOP + (HEIGHT - STATUS_TOP) // 2)))
+    def _draw_status(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        center = (WIDTH // 2, STATUS_TOP + (HEIGHT - STATUS_TOP) // 2)
+        bar = pygame.Rect(0, STATUS_TOP, WIDTH, HEIGHT - STATUS_TOP)
+        with logical_target(canvas, hires, bar) as surface:
+            surface.fill(HUD_COLOR, bar)
+            if hires is None:
+                text = self._text(self.status_text(), HUD_TEXT_COLOR)
+                surface.blit(text, text.get_rect(center=center))
+        if hires is not None:
+            hires.text(self.status_text(), HUD_STYLE, center, anchor="center")
 
-    def _upside_down_sign(self, page: pygame.Surface, text: str, center: tuple[int, int]) -> None:
-        label = pygame.transform.rotate(render_text(self._small_font, text, SIGN_TEXT_COLOR), 180)
-        sign = label.get_rect(center=center).inflate(6, 2)
+    def sign_rect(self, text: str, center: tuple[int, int], hires: bool = False) -> pygame.Rect:
+        """Подвешенная табличка — по размеру надписи пиксельным шрифтом или шрифтом окна."""
+        if hires:
+            width, height = self.sign_metrics.size(text)
+            label = pygame.Rect(0, 0, math.ceil(width), math.ceil(height))
+        else:
+            label = render_text(self._small_font, text, SIGN_TEXT_COLOR).get_rect()
+        label.center = center
+        return label.inflate(6, 2)
+
+    def _upside_down_sign(self, page: pygame.Surface, text: str, center: tuple[int, int], labels: bool) -> None:
+        """Табличка вверх ногами, подвешенная к потолку; labels=False — без надписи (её рисует слой окна)."""
+        sign = self.sign_rect(text, center, hires=not labels)
         pygame.draw.rect(page, SIGN_COLOR, sign)
         pygame.draw.rect(page, SIGN_TEXT_COLOR, sign, 1)
-        page.blit(label, label.get_rect(center=sign.center))
+        if labels:
+            label = pygame.transform.rotate(render_text(self._small_font, text, SIGN_TEXT_COLOR), 180)
+            page.blit(label, label.get_rect(center=sign.center))
         for dx in (-sign.width // 2 + 4, sign.width // 2 - 4):  # подвешена к потолку
             pygame.draw.line(page, SIGN_TEXT_COLOR, (center[0] + dx, HUD_HEIGHT + 4), (center[0] + dx, sign.top))
 
-    def _render_bakery(self) -> pygame.Surface:
+    def _render_bakery(self, labels: bool = True) -> pygame.Surface:
         """Кондитерская вверх дном: противни и венчик свисают с потолка, полка с банками
-        прибита вверх ногами, табличка перевёрнута. Сама доска с рецептом и стол рисуются отдельно."""
+        прибита вверх ногами, табличка перевёрнута. Сама доска с рецептом и стол рисуются отдельно.
+        labels=False — табличка без надписи: её рисует слой высокого разрешения."""
         page = pygame.Surface(config.LOGICAL_SIZE)
         page.fill(WALL_COLOR)
         for x in range(0, WIDTH, 12):
@@ -586,7 +678,7 @@ class CakesTrialScene(Scene):
             jar = pygame.Rect(210 + k * 12, 61, 8, 9)
             pygame.draw.rect(page, color, jar)
             pygame.draw.rect(page, (120, 90, 80), (jar.x, jar.bottom - 2, jar.width, 2))
-        self._upside_down_sign(page, "ТОРТЫ", (296, 62))
+        self._upside_down_sign(page, *SIGNS["bakery"], labels)
         # Дверь в кладовую справа — туда сбежит клубника.
         pygame.draw.rect(page, (150, 104, 70), (WIDTH - 8, 66, 8, FLOOR_TOP - 66))
         # Внизу тоже всё наоборот: табурет ножками вверх, кастрюля дном вверх и мешок муки.
@@ -600,8 +692,9 @@ class CakesTrialScene(Scene):
         pygame.draw.line(page, (200, 180, 140), (201, 140), (213, 140))
         return page
 
-    def _render_pantry(self) -> pygame.Surface:
-        """Кладовая: дощатый пол, задняя стена, дверь из кондитерской и стеллажи-«змейка»."""
+    def _render_pantry(self, labels: bool = True) -> pygame.Surface:
+        """Кладовая: дощатый пол, задняя стена, дверь из кондитерской и стеллажи-«змейка».
+        labels=False — табличка без надписи: её рисует слой высокого разрешения."""
         page = pygame.Surface(config.LOGICAL_SIZE)
         page.fill(PANTRY_WALL_COLOR)
         for row, y in enumerate(range(MAZE_BOUNDS.top - 6, STATUS_TOP, 7)):  # доски пола
@@ -610,7 +703,7 @@ class CakesTrialScene(Scene):
                 pygame.draw.line(page, PLANK_LINE_COLOR, (x, y), (x, y + 6))
         for x in range(0, WIDTH, 16):  # стена из досок
             pygame.draw.line(page, (100, 68, 50), (x, HUD_HEIGHT), (x, MAZE_BOUNDS.top - 7))
-        self._upside_down_sign(page, "КЛАДОВАЯ", (170, 34))
+        self._upside_down_sign(page, *SIGNS["pantry"], labels)
         # Дверной проём слева, откуда пришли Алиса и Чучмек: в нём видна розовая кондитерская.
         doorway = pygame.Rect(0, 58, MAZE_BOUNDS.left - 4, 50)
         for row, y in enumerate(range(doorway.top, doorway.bottom, 6)):

@@ -335,6 +335,106 @@ class HiResLayerTest(PygameTestCase):
         self.assertEqual(screen.get_at((transform.x(50), transform.y(30))).r, 50)  # остальное на месте
         self.assertEqual(screen.get_at((transform.x(2), transform.y(13))).r, (WIDTH - 3) % 256)  # вернулось слева
 
+    def test_scaled_patches_are_reused_until_their_content_changes(self) -> None:
+        layer = HiResLayer()
+        patch = pygame.Surface((20, 10), pygame.SRCALPHA)
+        patch.fill((10, 20, 30, 255))
+        first = layer.scaled_patch(patch, (60, 30))
+        same = pygame.Surface((20, 10), pygame.SRCALPHA)
+        same.fill((10, 20, 30, 255))
+        self.assertIs(layer.scaled_patch(same, (60, 30)), first)  # то же содержимое — без нового увеличения
+        same.set_at((3, 3), (200, 0, 0, 255))
+        changed = layer.scaled_patch(same, (60, 30))
+        self.assertIsNot(changed, first)
+        self.assertEqual(tuple(changed.get_at((10, 10)))[:3], (200, 0, 0))
+        self.assertIsNot(layer.scaled_patch(patch, (120, 60)), first)  # другой размер окна — другое увеличение
+
+    def test_keyed_patch_draws_the_same_pixels_as_alpha_blending(self) -> None:
+        canvas = pygame.Surface(config.LOGICAL_SIZE)
+        for patch_color in ((255, 0, 255), (14, 18, 42)):  # даже если в заплатке есть цвет первого ключа
+            layer = HiResLayer()
+            layer.sprite(pygame.Surface((64, 64), pygame.SRCALPHA), pygame.Rect(0, 0, 64, 64))  # чтобы была заплатка
+            with layer.logical(canvas, pygame.Rect(10, 10, 40, 20)) as surface:
+                surface.fill(patch_color, (10, 10, 40, 20))
+                surface.fill((0, 0, 0, 0), (12, 12, 6, 6))  # прозрачная дырка
+                surface.fill((206, 210, 230), (30, 15, 10, 1))
+            patch = layer.commands[-1]
+            for size in (WINDOWED, FULLSCREEN):
+                transform = transform_for(size)
+                screen, expected = pygame.Surface(size), pygame.Surface(size)
+                screen.fill((90, 160, 60))
+                expected.fill((90, 160, 60))
+                layer.render(screen, transform)
+                rect = transform.rect(patch.rect)
+                expected.blit(pygame.transform.scale(patch.surface, rect.size), rect)
+                with self.subTest(color=patch_color, window=size):
+                    self.assertEqual(pygame.image.tobytes(screen, "RGB"), pygame.image.tobytes(expected, "RGB"))
+
+    def test_group_draws_like_its_commands_and_is_rebuilt_only_when_they_change(self) -> None:
+        style = TextStyle(9, (40, 30, 20), background=(250, 242, 220))
+        panel = pygame.Rect(20, 20, 200, 60)
+
+        def fill(layer: HiResLayer, text: str) -> None:
+            layer.rect((250, 242, 220), panel)
+            layer.rect((222, 176, 84), panel, 2)
+            layer.text(text, style, (30, 40), anchor="midleft")
+
+        for size in (WINDOWED, FULLSCREEN):
+            transform = transform_for(size)
+            direct, grouped = HiResLayer(), HiResLayer()
+            fill(direct, "Для Алисы")
+            with grouped.group(panel) as sheet:
+                fill(sheet, "Для Алисы")
+            expected, screen = pygame.Surface(size), pygame.Surface(size)
+            direct.render(expected, transform)
+            grouped.render(screen, transform)
+            with self.subTest(window=size):
+                self.assertEqual(pygame.image.tobytes(screen, "RGB"), pygame.image.tobytes(expected, "RGB"))
+                built = list(grouped._groups.values())
+                grouped.render(screen, transform)  # те же команды — та же картинка
+                self.assertEqual(list(grouped._groups.values()), built)
+                grouped.clear()
+                with grouped.group(panel) as sheet:
+                    fill(sheet, "Твой муж")
+                grouped.render(screen, transform)  # другие слова — новая картинка
+                self.assertEqual(len(grouped._groups), 2)
+
+    def test_group_fades_as_one_picture(self) -> None:
+        layer = HiResLayer()
+        with layer.group(pygame.Rect(0, 0, 10, 10), alpha=128) as sheet:
+            sheet.rect((200, 100, 50), pygame.Rect(0, 0, 10, 10))
+        screen = pygame.Surface(WINDOWED)
+        layer.render(screen, transform_for(WINDOWED))
+        pixel = screen.get_at((5, 5))
+        self.assertTrue(95 < pixel.r < 105 and 45 < pixel.g < 55)
+        self.assertEqual(tuple(screen.get_at((40, 40)))[:3], (0, 0, 0))
+
+    def test_text_images_are_cached_by_every_parameter(self) -> None:
+        layer = HiResLayer()
+        style = TextStyle(9, (255, 255, 255))
+        image = layer.text_image("Привет", style, 3)
+        self.assertIs(layer.text_image("Привет", style, 3), image)
+        others = (
+            layer.text_image("Привет!", style, 3),  # другой текст
+            layer.text_image("Привет", TextStyle(9, (1, 2, 3)), 3),  # цвет
+            layer.text_image("Привет", TextStyle(8, (255, 255, 255)), 3),  # размер
+            layer.text_image("Привет", style, 6),  # масштаб окна
+            layer.text_image("Привет", style, 3, 180),  # поворот
+        )
+        for other in others:
+            self.assertIsNot(other, image)
+
+    def test_rect_draws_a_border_of_window_fills(self) -> None:
+        layer = HiResLayer()
+        layer.rect((255, 0, 0), pygame.Rect(10, 10, 20, 10), 2)
+        self.assertTrue(all(isinstance(c, FillCommand) for c in layer.commands))
+        screen = pygame.Surface(WINDOWED)
+        transform = transform_for(WINDOWED)
+        layer.render(screen, transform)
+        red = pygame.mask.from_threshold(screen, (255, 0, 0), (1, 1, 1, 255))
+        self.assertEqual(red.count(), (20 * 10 - 16 * 6) * 9)  # рамка в 2 логических пикселя, внутри пусто
+        self.assertEqual(tuple(screen.get_at(transform.point((20, 15))))[:3], (0, 0, 0))
+
     def test_fill_covers_the_whole_canvas_area(self) -> None:
         layer = HiResLayer()
         layer.fill((255, 255, 255), alpha=255)
