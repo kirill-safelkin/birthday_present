@@ -149,12 +149,13 @@ def to_pantry(scene: CakesTrialScene) -> None:
 
 
 def chase_with_keys(scene: CakesTrialScene, limit: float = 90.0) -> float:
-    """Догоняет клубнику стрелками, как игрок: каждые 0,1 с смотрит, куда идти по пути к ней
-    (путь — только подсказка «игроку»; Алису двигают клавиши и столкновения сцены). Клубника
-    всё это время бегает сама. Возвращает, сколько секунд заняла погоня."""
+    """Догоняет клубнику стрелками, как игрок: каждые 0,1 с (у поворота пути — каждый кадр) смотрит,
+    куда идти по пути к ней (путь — только подсказка «игроку»; Алису двигают клавиши и столкновения
+    сцены). Клубника всё это время бегает сама. Возвращает, сколько секунд заняла погоня."""
     alice, nav = scene.alice, scene.pantry.nav()
     held: set[int] = set()
     elapsed = 0.0
+    last, frames = None, 0
 
     def hold_keys(wanted: set[int]) -> None:
         for code in held - wanted:
@@ -169,17 +170,30 @@ def chase_with_keys(scene: CakesTrialScene, limit: float = 90.0) -> float:
             hold_keys(set())
             return elapsed
         path = nav.find_path((alice.x, alice.y), scene.chase.position) or []
+        # Упёрлась: клавиши держали, а Алиса прошла меньше половины положенного (например, она на долю
+        # пикселя ниже края стеллажа, вдоль которого идёт путь). Тогда «игрок» поправляет любой сдвиг.
+        stuck = bool(held) and math.dist(last, (alice.x, alice.y)) < 0.5 * frames * alice.speed * DT
+        last = (alice.x, alice.y)
         wanted: set[int] = set()
+        frames = 6
         for x, y in path[:2]:
             dx, dy = x - alice.x, y - alice.y
-            if abs(dx) > 2:
+            ahead = max(abs(dx), abs(dy))
+            if ahead <= 0.5:  # уже у этой точки — к следующей
+                continue
+            near = ahead < 8
+            # Издалека — одна из восьми сторон: вторую стрелку, только если по второй оси сдвиг заметный.
+            # У самой точки (или упёршись) — точно в неё по обеим осям и по кадру, чтобы не проскочить.
+            slack = 0 if stuck else 0.1 if near else 0.4 * ahead
+            if abs(dx) > slack:
                 wanted.add(pygame.K_RIGHT if dx > 0 else pygame.K_LEFT)
-            if abs(dy) > 2:
+            if abs(dy) > slack:
                 wanted.add(pygame.K_DOWN if dy > 0 else pygame.K_UP)
-            if wanted:
-                break
+            if near:
+                frames = 1
+            break
         hold_keys(wanted)
-        for _ in range(6):
+        for _ in range(frames):
             scene.update(DT)
             elapsed += DT
             if scene.near_strawberry():
@@ -391,13 +405,28 @@ class EscapeTest(TrialTestCase):
         shown = finish_dialogue(self.scene)
         texts = [lines.ESCAPE.nodes[node_id].text for node_id in shown]
         self.assertEqual(texts[1:3], ["Она же клубника.", "Именно. У неё ни прописки, ни чувства ответственности."])
-        self.assertIn("Найди её", texts[-1])  # явная подсказка, что делать дальше
+        self.assertIn("Догони её", texts[-1])  # явная подсказка, что делать дальше
         self.assertEqual(self.scene.phase, MAZE)
         self.assertEqual(self.scene.area, PANTRY)
         self.assertEqual(self.scene.task_text(), "Задача: догони и поймай клубнику")
         self.assertEqual(self.scene.part_text(), "Часть 2 из 2 — клубника")
         self.assertEqual((self.scene.alice.x, self.scene.alice.y), MAZE_START)
         self.assertEqual(self.progress.fragments, 0)
+
+    def test_escape_and_chase_texts_match_the_library_pantry(self) -> None:
+        # Кладовая теперь — комната с книжными стеллажами, а не лабиринт между коробками и противнями
+        # (противни остались только на потолке кондитерской).
+        self.assertIn("книжным стеллажам", lines.ESCAPE.nodes["e_where"].text)
+        self.assertIn("библиотеку", lines.FOUND.nodes["c_planned"].text)
+        self.scene.update(ESCAPE_SECONDS + 0.1)
+        finish_dialogue(self.scene)
+        self.assertEqual(self.scene.phase, MAZE)
+        chase_texts = [node.text for script in (lines.ESCAPE, lines.FOUND) for node in script.nodes.values()]
+        chase_texts += [*lines.STRAWBERRY_LINES, CHASE_TOAST, FAR_TOAST, self.scene.task_text(),
+                        self.scene.part_text(), self.scene.prompt()]
+        for text in chase_texts:
+            for stale in ("противн", "коробк", "лабиринт"):
+                self.assertNotIn(stale, text.lower(), text)
 
     def test_keys_during_escape_do_nothing(self) -> None:
         self.scene.handle_event(key(pygame.K_DOWN))  # зажата и не отпущена
@@ -437,6 +466,27 @@ class MazeTest(TrialTestCase):
         self.assertEqual(self.scene.dialogue.node.speaker, lines.STRAWBERRY)  # сначала реакция клубники
         self.assertEqual(self.scene.area, BAKERY)  # и уже у рабочего стола
         self.assertEqual(self.progress.fragments, 0)  # поимка — ещё не награда
+
+    def test_chase_with_keys_gets_round_shelf_corners(self) -> None:
+        # Раскладки, где путь идёт вплотную к краю стеллажа: Алиса, оказавшись на долю пикселя ниже
+        # этого края, упиралась в торец, а прежний помощник погони не поправлял такой маленький сдвиг
+        # и топтался на месте — сквозной тест через App (раскладка там случайная) падал примерно в 6% запусков.
+        # Сама Алиса там не застревает: шаг вверх (или по диагонали) освобождает её.
+        for seed in (1, 23, 50, 265):
+            with self.subTest(seed=seed):
+                scene = CakesTrialScene(GameProgress(), seed=seed)
+                to_pantry(scene)
+                self.assertLess(chase_with_keys(scene), 30.0)  # остановки — не реже 9 с, догоняет на них
+                press_e(scene)
+                self.assertTrue(scene.strawberry_found)
+        scene = CakesTrialScene(GameProgress(), seed=23)
+        to_pantry(scene)
+        self.assertIn(pygame.Rect(176, 74, 16, 42), [item.rect for item in scene.pantry.items])
+        scene.alice.set_position(198, 75)  # на пиксель ниже верха стеллажа (176, 74, 16, 42), вплотную справа
+        hold(scene, [pygame.K_LEFT], 6)
+        self.assertEqual((scene.alice.x, scene.alice.y), (198, 75))  # влево — в торец
+        hold(scene, [pygame.K_UP, pygame.K_LEFT], 6)
+        self.assertLess(scene.alice.x, 198)  # а по диагонали — проходит над стеллажом
 
     def test_strawberry_cannot_be_caught_from_afar_or_through_a_shelf(self) -> None:
         scene = self.scene
