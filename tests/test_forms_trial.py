@@ -255,7 +255,7 @@ class IntroTest(TrialTestCase):
         self.assertEqual(lines[:5], [
             (GOOSE, "Стойте. Для подготовки праздника необходимо проверить реестр участников."),
             (ALICE, "Проверяйте. Лео уже здесь — спит в корзинке на площади."),
-            (GOOSE, "В реестре Страны Чудес Лео не значится: ни рождения, ни гражданства. "
+            (GOOSE, "В реестре Страны Чучмека Лео не значится: ни рождения, ни гражданства. "
                     "Есть только отметка «сопит»."),
             (GOOSE, "Присутствие не заменяет регистрацию. Регистрация не заменяет разрешение. "
                     "А разрешение не заменяет разрешение на получение разрешения."),
@@ -478,13 +478,13 @@ class TableTest(TrialTestCase):
         self.assertEqual(self.scene.task_text(), "Документы Лео приняты")
         texts = [FINAL.nodes[node_id].text for node_id in finish_dialogue(self.scene)]
         self.assertEqual(texts[0], "На основании разрешения на получение гражданства постановляю: "
-                                   "Лео признан гражданином Страны Чудес.")
+                                   "Лео признан гражданином Страны Чучмека.")
         self.assertIn("Рождение Лео зарегистрировано", texts[1])
         self.assertEqual(texts[3], "Поздравляю Лео! Теперь можно отмечать день рождения?")
         self.assertIn("за сон во время официальных мероприятий", texts[4])
         self.assertIn("фрагмент праздничного плана", texts[-1])
         self.assertTrue(self.scene.puzzle.citizen)
-        self.assertEqual(self.scene.task_text(), "Лео — гражданин Страны Чудес")
+        self.assertEqual(self.scene.task_text(), "Лео — гражданин Страны Чучмека")
 
     def test_table_is_locked_after_acceptance(self) -> None:
         arrange(self.scene)
@@ -559,8 +559,8 @@ class LeoProcedureTest(TrialTestCase):
         self.assertTrue(scene.puzzle.citizen)
         self.assertEqual(scene.goose_pose, "celebrate")
         self.assertEqual(self.sheet_texts(), ["СВИДЕТЕЛЬСТВО", "Рождение Лео зарегистрировано",
-                                              "Лео — гражданин Страны Чудес"])
-        self.assertEqual(scene.task_text(), "Лео — гражданин Страны Чудес")
+                                              "Лео — гражданин Страны Чучмека"])
+        self.assertEqual(scene.task_text(), "Лео — гражданин Страны Чучмека")
         self.assertEqual(self.progress.fragments, 0)  # гражданство — ещё не награда
         until_node(scene, "f_fragment")
         self.assertEqual(self.progress.fragments, 0)
@@ -599,6 +599,50 @@ class LeoProcedureTest(TrialTestCase):
                     self.assertFalse(ISSUED_SHEET.colliderect(self.scene.alice.rect), (x, y))
                     checked += 1
         self.assertGreater(checked, 50)
+
+
+class CountryNameTest(TrialTestCase):
+    """Лео становится гражданином Страны Чучмека — в постановлении, на свидетельстве и в итоге испытания."""
+
+    def test_decree_and_certificate_name_the_land_of_chuchmek(self) -> None:
+        self.assertEqual(FINAL.nodes["f_decree"].text, "На основании разрешения на получение гражданства постановляю: "
+                                                       "Лео признан гражданином Страны Чучмека.")
+        self.assertIn("«Рождение Лео зарегистрировано. Лео — гражданин Страны Чучмека».",
+                      FINAL.nodes["f_certificate"].text)
+        self.assertEqual(ISSUED_LINES["citizenship"],
+                         ("СВИДЕТЕЛЬСТВО", "Рождение Лео зарегистрировано", "Лео — гражданин Страны Чучмека"))
+
+    def test_no_wonderland_citizenship_left_in_the_procedure(self) -> None:
+        texts = [node.text for script in all_scripts() for node in script.nodes.values()]
+        texts += [line for lines in ISSUED_LINES.values() for line in lines]
+        for text in texts:
+            self.assertNotIn("Страны Чудес", text)
+            self.assertNotIn("стране чудес", text.lower())
+        citizenship = [text for text in texts if "гражданин" in text and "Страны" in text]
+        self.assertGreaterEqual(len(citizenship), 3)  # постановление, свидетельство в реплике и на листе
+        self.assertTrue(all("Страны Чучмека" in text for text in citizenship))
+
+    def test_whole_procedure_shows_the_new_name_and_rewards_only_at_the_end(self) -> None:
+        scene = self.scene
+        finish_dialogue(scene)
+        find_all(scene)
+        arrange(scene)
+        talk_to_goose(scene)
+        finish_dialogue(scene)  # приём документов и разрешение на получение гражданства
+        until_node(scene, "f_certificate")
+        self.assertEqual(scene.task_text(), "Лео — гражданин Страны Чучмека")
+        texts = [c.text for c in drawn_texts(scene) if c.style in (ISSUED_TITLE_STYLE, ISSUED_TEXT_STYLE)]
+        self.assertEqual(texts, ["СВИДЕТЕЛЬСТВО", "Рождение Лео зарегистрировано", "Лео — гражданин Страны Чучмека"])
+        self.assertTrue(all("Чудес" not in c.text for c in drawn_texts(scene)))
+        self.assertEqual(self.progress.fragments, 0)  # свидетельство — ещё не награда
+        finish_dialogue(scene)
+        self.assertEqual(self.progress.completed, ("forms",))
+        self.assertTrue(scene.reward_given)
+
+    def test_intro_parody_keeps_wonderland(self) -> None:
+        # Вступление намеренно начинается как «Алиса в стране чудес» — это не трогаем.
+        from game.story import intro_dialogue
+        self.assertEqual(intro_dialogue.TITLE_CLASSIC, "Алиса в стране чудес")
 
 
 class RewardTest(TrialTestCase):
@@ -824,7 +868,7 @@ class LayoutTest(TrialTestCase):
         names = list(DOCUMENT_NAMES.values())
         # Верхняя строка — задача, а с документом в руках — его полное название.
         for task in ("Задача: найди документы Лео 2/3", "Задача: сложи по порядку и сдай гусю", "Документы Лео приняты",
-                     "Лео — гражданин Страны Чудес", *(f"В руках: {title}" for title in DOCUMENT_TITLES.values())):
+                     "Лео — гражданин Страны Чучмека", *(f"В руках: {title}" for title in DOCUMENT_TITLES.values())):
             self.assertLessEqual(font.size(task)[0], WIDTH - 8, task)
         statuses = ["Стрелки/WASD — идти   E — действие   Backspace — уйти", "Гусь-инспектор   E — спросить совета",
                     "Все документы на столе — разложи их по порядку", "Стол подачи   найдено документов: 2/3"]

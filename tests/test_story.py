@@ -204,7 +204,7 @@ class BirthdayGoalTest(unittest.TestCase):
         self.assertIn("Сладкая часть праздника", cakes_dialogue.INTRO.nodes[cakes_dialogue.CHECK_CHOICE_ID].text)
         self.assertIn("сладкую часть праздника", cakes_dialogue.FINAL.nodes["f_fragment"].text)
 
-    def test_forms_trial_registers_leo_in_wonderland(self) -> None:
+    def test_forms_trial_registers_leo_in_the_land_of_chuchmek(self) -> None:
         intro = " ".join(node.text for node in forms_dialogue.INTRO.nodes.values())
         for words in ("реестр участников", "Лео не значится", "ни рождения, ни гражданства",
                       "Присутствие не заменяет регистрацию"):
@@ -213,7 +213,8 @@ class BirthdayGoalTest(unittest.TestCase):
         self.assertIn("разрешение на получение гражданства", inspection["r_almost"].text)
         self.assertIn("Разрешение на получение гражданства Лео", inspection["r_stamp"].text)
         final = forms_dialogue.FINAL.nodes
-        self.assertIn("Лео признан гражданином Страны Чудес", final["f_decree"].text)
+        self.assertIn("Лео признан гражданином Страны Чучмека", final["f_decree"].text)
+        self.assertIn("Лео — гражданин Страны Чучмека", final["f_certificate"].text)
         self.assertIn("Рождение Лео зарегистрировано", final["f_certificate"].text)
         # Сказочная бюрократия, а не настоящие правила какой-либо страны.
         everything = " ".join(node.text for script in forms_dialogue.all_scripts() for node in script.nodes.values())
