@@ -7,15 +7,22 @@
 CollisionMap, как на площади), шкафы-разделы, стол подачи с тремя местами, гусь, лист
 выданного документа и интерфейс.
 
+Комната компактная и вся доступна: у задней стены пять шкафов, в середине — большой стол подачи,
+справа у стены — гусь, слева внизу — вход. Документы — листы бумаги примерно формата A4 с полным
+названием (draw_paper): найденный документ Алиса рассматривает крупным листом рядом с собой, в руках
+несёт маленький лист того же вида, а на столе он лежит листом, где название читается целиком.
+Разговоры начинаются только выше окна реплики (у шкафов, у гуся и у входа), поэтому окно
+никогда не закрывает персонажей, хотя ходить можно до самого низа комнаты.
+
 Этапы: вступление → поиск и раскладка документов → приём документов и разрешение на получение
 гражданства → гражданство Лео и финал → награда. Фрагмент (GameProgress.complete("forms"))
 выдаётся только после финальной реплики; отмена (Backspace) в любой момент до этого
 возвращает на площадь без награды. Оформление временное: архив нарисован геометрией.
 
 Со слоем высокого разрешения (game/graphics/hires.py) Алиса и гусь рисуются из исходных
-кадров 64×64, а надписи (таблички шкафов и барьера, карточки документов, интерфейс) —
-шрифтом размера окна; архив остаётся пиксельным. Лист выданного документа над столом —
-логическая графика, его надписи — тоже шрифтом окна.
+кадров 64×64, а надписи (таблички шкафов, стола и плаката, названия на листах документов,
+интерфейс) — шрифтом размера окна; архив остаётся пиксельным. Листы документов и лист
+выданного документа над столом — логическая графика, их надписи — тоже шрифтом окна.
 """
 
 from __future__ import annotations
@@ -51,6 +58,7 @@ from game.story.forms_dialogue import (
 )
 from game.trials.forms_puzzle import (
     DOCUMENT_NAMES,
+    DOCUMENT_TITLES,
     DOCUMENTS,
     SECTIONS,
     CheckResult,
@@ -77,27 +85,31 @@ DONE = "done"
 WIDTH, HEIGHT = config.LOGICAL_SIZE
 SPRITE_SIZE = 32  # как на площади
 WALK_SPEED = 64
-HUD_HEIGHT = 24  # две строки: задача и порядок на столе
+HUD_HEIGHT = 12  # одна строка: задача, а пока документ в руках — его полное название
 STATUS_TOP = 168
-SHELVES = pygame.Rect(0, HUD_HEIGHT, WIDTH, 40)  # ряд высоких шкафов у задней стены
-# Ноги Алисы: между шкафами и барьером приёма. Нижняя граница выше любого окна
-# реплики, поэтому окно никогда не закрывает персонажей.
-WALK_BOUNDS = pygame.Rect(10, SHELVES.bottom, WIDTH - 20, 108 - SHELVES.bottom)
+SHELVES = pygame.Rect(0, HUD_HEIGHT, WIDTH, 44)  # задняя стена со шкафами
+# Ноги Алисы: весь пол комнаты, от шкафов до низа. Внизу только пол вокруг стола — разговоров там
+# не бывает: их начинают у шкафов, у гуся и у входа, а это всё выше окна реплики.
+WALK_BOUNDS = pygame.Rect(10, SHELVES.bottom, WIDTH - 20, STATUS_TOP - 4 - SHELVES.bottom)
 CABINET_WIDTH = 50
-CABINET_XS = (35, 95, 155, 215, 275)  # центры шкафов, по одному на раздел архива
+CABINET_XS = (30, 83, 136, 189, 242)  # центры шкафов, по одному на раздел архива; справа — место гуся
 CABINET_POINT_Y = WALK_BOUNDS.top + 6  # точка взаимодействия — вплотную к шкафу
-CABINET_REACH = 14
-TABLE = pygame.Rect(100, 88, 120, 20)  # стол подачи: столешница и передняя стенка
-SLOT_XS = (124, 156, 188)  # места 1, 2, 3 на столе
-SLOT_Y = TABLE.top - 2  # Алиса стоит за столом, лицом к залу
-SLOT_REACH = 10
-GOOSE_POSITION = (284, 104)
+CABINET_REACH = 12
+# Главный стол подачи — в середине комнаты: столешница с тремя листами и передняя стенка с табличкой.
+TABLE = pygame.Rect(66, 78, 188, 88)
+TABLE_TOP = pygame.Rect(TABLE.x, TABLE.y, TABLE.width, 78)  # столешница; ниже — передняя стенка
+PAPER_SIZE = (48, 64)  # лист на столе — примерно A4, название в нём читается целиком
+SLOT_XS = (104, 160, 216)  # места 1, 2, 3 на столе: середины листов
+PAPER_TOP = TABLE.top + 4
+SLOT_Y = TABLE.top - 2  # Алиса стоит за столом, лицом к залу, листы — перед ней
+SLOT_REACH = 12
+GOOSE_POSITION = (292, 82)  # у правой стены, рядом со столом; подойти можно слева и снизу
 GOOSE_REACH = 24
 # Шире самого гуся: Алиса останавливается на шаг от него, и спрайты не наползают друг на друга.
-GOOSE_OBSTACLE = pygame.Rect(268, 94, 30, 12)
-PAPER_STACKS = (pygame.Rect(10, 80, 12, 10), pygame.Rect(298, 66, 12, 10))  # стопки бумаг у стен
-COUNTER = pygame.Rect(0, 116, WIDTH, 14)  # барьер приёма документов (декорация)
+GOOSE_OBSTACLE = pygame.Rect(276, 72, 30, 12)
+PAPER_STACKS = (pygame.Rect(16, 148, 14, 12), pygame.Rect(288, 146, 16, 14))  # стопки бумаг в углах
 SPAWN = (30, 104)  # у входа в архив, вдали от шкафов и стола
+DOORMAT = pygame.Rect(16, 99, 28, 9)  # коврик у входа
 TOAST_SECONDS = 3.0
 TOAST_PRIORITY_SECONDS = 1.5  # столько свежее сообщение показывается вместо подсказки у цели
 
@@ -110,13 +122,17 @@ PLAQUE_COLOR = (236, 222, 180)
 PLAQUE_TEXT_COLOR = (60, 44, 36)
 FOLDER_COLORS = ((196, 170, 110), (150, 170, 196), (196, 132, 112), (170, 190, 140), (214, 200, 160))
 FLOOR_COLORS = ((150, 124, 96), (138, 112, 86))
+BASEBOARD_COLOR = (58, 44, 40)
+DOORMAT_COLOR = (150, 60, 56)
+DOORMAT_EDGE_COLOR = (226, 196, 120)
 TABLE_COLOR = (170, 128, 88)
+TABLE_LIGHT_COLOR = (186, 144, 102)
 TABLE_FRONT_COLOR = (124, 88, 60)
 TABLE_EDGE_COLOR = (96, 66, 46)
-COUNTER_COLOR = (96, 64, 46)
-COUNTER_TOP_COLOR = (140, 100, 70)
 PAPER_COLOR = (248, 244, 230)
 PAPER_EDGE_COLOR = (170, 160, 140)
+PAPER_SHADOW_COLOR = (112, 78, 52)
+INK_COLOR = (150, 140, 126)  # строки бланка и штрихи вместо мелкого текста
 SIGN_COLOR = (230, 220, 190)
 DOCUMENT_COLORS = {"form_request": (60, 90, 170), "filing_permit": (190, 50, 50), "leo_application": (120, 70, 150)}
 STAMP_COLOR = (190, 50, 50)  # штемпельная подушка и печать на разрешении
@@ -131,37 +147,56 @@ HUD_COLOR = (44, 38, 58)
 HUD_TEXT_COLOR = (240, 230, 206)
 HUD_ACCENT_COLOR = (250, 206, 108)
 DONE_COLOR = (140, 220, 150)
-TODO_COLOR = (200, 196, 214)
 EMPTY_COLOR = (130, 124, 146)
 MARK_COLOR = (255, 236, 140)
-# Короткие надписи на карточках документов — канцелярские аббревиатуры полных названий:
-# Заявление на Выдачу Бланка Заявления, Разрешение на Подачу Заявления,
-# Заявление о Регистрации и Гражданстве Лео.
-DOCUMENT_ABBREVIATIONS = {"form_request": "ЗВБЗ", "filing_permit": "РПЗ", "leo_application": "ЗРГЛ"}
+# Названия на листах — целиком, по смыслу разбитые на строки: предлог остаётся со своим словом.
+PAPER_TITLE_LINES = {
+    "form_request": ("Заявление", "на выдачу", "бланка", "заявления"),
+    "filing_permit": ("Разрешение", "на подачу", "заявления"),
+    "leo_application": ("Заявление", "о регистрации", "рождения", "и гражданстве", "Лео"),
+}
 # Лист выданного документа над столом подачи: заголовок и строки под ним.
-ISSUED_SHEET = pygame.Rect(86, 61, 148, 26)
+ISSUED_SHEET = pygame.Rect(86, 50, 148, 26)  # над столом, в проходе у шкафов: листы на столе видны
 ISSUED_LINES = {
     "citizenship_permit": ("РАЗРЕШЕНИЕ", "на получение гражданства Лео"),
     "citizenship": ("СВИДЕТЕЛЬСТВО", "Рождение Лео зарегистрировано", "Лео — гражданин Страны Чудес"),
 }
 ISSUED_LINE_HEIGHT = 7
-COUNTER_SIGNS = (("ПРИЁМ ДОКУМЕНТОВ: ВЧЕРА", 80), ("ТИХО! ИДЁТ СОГЛАСОВАНИЕ", 240))
+APRON_SIGN = "ПРИЁМ ДОКУМЕНТОВ: ВЧЕРА"  # табличка на передней стенке стола подачи
+POSTER = pygame.Rect(270, 15, 46, 32)  # плакат на стене над гусем
+POSTER_LINES = ("ТИХО!", "ИДЁТ", "СОГЛАСОВАНИЕ")
 
 # Надписи в разрешении окна (слой высокого разрешения); размер — в логических пикселях.
 TEXT_SIZE = 8  # интерфейс, как на площади
-SMALL_SIZE = 6  # таблички шкафов и барьера, номера мест на столе
-CARD_SIZE = 5.5  # сокращение на карточке: между краем карточки и пометкой вида документа
+SMALL_SIZE = 6  # таблички шкафов и стола, номера мест на столе
+PAPER_TITLE_SIZE = 5  # название на листе, лежащем на столе
+PREVIEW_TITLE_SIZE = 6  # название на крупном листе, который Алиса рассматривает
+POSTER_SIZE = 4.5
+ISSUED_SIZE = 5.5
 HUD_STYLE = TextStyle(TEXT_SIZE, HUD_TEXT_COLOR, background=HUD_COLOR)  # полосы вверху и внизу
 TASK_STYLE = TextStyle(TEXT_SIZE, HUD_ACCENT_COLOR, background=HUD_COLOR)
 PLAQUE_STYLE = TextStyle(SMALL_SIZE, PLAQUE_TEXT_COLOR, background=PLAQUE_COLOR)  # табличка шкафа
-COUNTER_SIGN_STYLE = TextStyle(SMALL_SIZE, PLAQUE_TEXT_COLOR)  # таблички барьера — впритык к надписи
+SIGN_STYLE = TextStyle(SMALL_SIZE, PLAQUE_TEXT_COLOR, background=SIGN_COLOR)  # табличка стола
+POSTER_STYLE = TextStyle(POSTER_SIZE, STAMP_COLOR, bold=True, background=SIGN_COLOR)
 SLOT_NUMBER_STYLE = TextStyle(SMALL_SIZE, PAPER_COLOR)
-CARD_STYLES = {document: TextStyle(CARD_SIZE, color) for document, color in DOCUMENT_COLORS.items()}
-ISSUED_TITLE_STYLE = TextStyle(CARD_SIZE, ISSUED_TITLE_COLOR)
-ISSUED_TEXT_STYLE = TextStyle(CARD_SIZE, ISSUED_TEXT_COLOR)
-HUD_ROWS = (6.5, 17.5)  # середины двух строк верхней полосы
-# Где рисуется стол подачи: столешница, карточки, рамка у выбранного места и сияющая печать.
-TABLE_AREA = TABLE.inflate(4, 8)
+ISSUED_TITLE_STYLE = TextStyle(ISSUED_SIZE, ISSUED_TITLE_COLOR)
+ISSUED_TEXT_STYLE = TextStyle(ISSUED_SIZE, ISSUED_TEXT_COLOR)
+# Где рисуется стол подачи: столешница, листы, рамка у выбранного места и сияющая печать.
+TABLE_AREA = TABLE.inflate(4, 4)
+PREVIEW_SIZE = (58, 78)  # найденный документ крупно — Алиса рассматривает его рядом с собой
+HELD_PAPER_SIZE = (12, 16)  # тот же лист в руках, над головой Алисы
+
+
+def paper_style(document: str, size: float) -> TextStyle:
+    """Шрифт названия на листе: цвет вида документа, фон — бумага (строки стоят на чистом листе)."""
+    return TextStyle(size, DOCUMENT_COLORS[document], background=PAPER_COLOR)
+
+
+def slot_paper(index: int) -> pygame.Rect:
+    """Лист на месте index стола подачи."""
+    rect = pygame.Rect((0, 0), PAPER_SIZE)
+    rect.midtop = (SLOT_XS[index], PAPER_TOP)
+    return rect
 
 
 @dataclass(frozen=True)
@@ -223,13 +258,13 @@ class FormsTrialScene(Scene):
         self.toast = ""
         self._toast_time = 0.0
         self._toast_after_dialogue = ""  # сообщение, которое появится, когда закроется реплика
+        self.found_document: str | None = None  # только что найденный документ: Алиса его рассматривает
         self.time = 0.0
         self._font = load_font(9)
         self._small_font = load_font(7)
         self._text_cache: dict[tuple[str, config.Color, bool], pygame.Surface] = {}
         self._fonts = TextFonts()
         self.text_metrics = self._fonts.metrics(HUD_STYLE)
-        self.small_metrics = self._fonts.metrics(PLAQUE_STYLE)
         self._background = self._render_background()
         self._background_plain = self._render_background(labels=False)  # надписи рисует слой окна
         self._open_dialogue(INTRO)
@@ -270,24 +305,26 @@ class FormsTrialScene(Scene):
         return "Задача: сложи по порядку и сдай гусю"
 
     def held_text(self) -> str:
+        """Документ в руках — полным названием (строка интерфейса вместо задачи)."""
         held = self.puzzle.held
-        return f"В руках: {DOCUMENT_NAMES[held]}" if held else ""
+        return f"В руках: {DOCUMENT_TITLES[held]}" if held else ""
 
-    def order_parts(self) -> list[tuple[str, config.Color]]:
-        """Вторая строка интерфейса по кусочкам: что лежит на местах стола 1, 2, 3."""
-        color = DONE_COLOR if self.puzzle.solved else TODO_COLOR
-        parts: list[tuple[str, config.Color]] = [("Стол:", HUD_TEXT_COLOR)]
-        for index, document in enumerate(self.puzzle.order):
-            if index:
-                parts.append(("→", HUD_TEXT_COLOR))
-            if document is None:
-                parts.append((f"{index + 1} —", EMPTY_COLOR))
-            else:
-                parts.append((f"{index + 1} {DOCUMENT_NAMES[document]}", color))
-        return parts
+    def hud_text(self) -> str:
+        """Верхняя строка: документ в руках, а без него — текущая задача."""
+        return self.held_text() or self.task_text()
 
-    def order_text(self) -> str:
-        return " ".join(text for text, _ in self.order_parts())
+    def preview_rect(self) -> pygame.Rect:
+        """Где Алиса рассматривает найденный документ: крупный лист сбоку от неё, где больше места,
+        выше окна реплики и ниже полосы интерфейса."""
+        rect = pygame.Rect((0, 0), PREVIEW_SIZE)
+        alice = self.alice.rect
+        if alice.centerx < WIDTH // 2:
+            rect.left = alice.right + 2
+        else:
+            rect.right = alice.left - 2
+        rect.clamp_ip(pygame.Rect(4, HUD_HEIGHT + 4, WIDTH - 8, STATUS_TOP))
+        rect.top = HUD_HEIGHT + 8
+        return rect
 
     def prompt(self) -> str | None:
         target = self.nearby() if self.phase == EXPLORE and self.dialogue is None else None
@@ -354,7 +391,7 @@ class FormsTrialScene(Scene):
         result = self.puzzle.search(section_id)
         if result is SearchResult.FOUND:
             found, total = self.puzzle.found_count, len(DOCUMENTS)
-            document = self.puzzle.found[-1]
+            document = self.found_document = self.puzzle.found[-1]
             if found < total:
                 self._toast_after_dialogue = f"На столе подачи: {DOCUMENT_NAMES[document]} ({found}/{total})"
             else:
@@ -405,6 +442,7 @@ class FormsTrialScene(Scene):
     def _dialogue_finished(self) -> None:
         """Реплика закрыта: следующий этап испытания."""
         self.dialogue = None
+        self.found_document = None  # рассмотрела — документ уже лежит на столе
         self.goose_pose = GOOSE_IDLE_POSE
         if self._toast_after_dialogue:
             self._show_toast(self._toast_after_dialogue)
@@ -452,8 +490,8 @@ class FormsTrialScene(Scene):
         if hires is not None:  # надписи фона — под персонажами
             for cabinet in CABINETS:
                 hires.text(cabinet.section.label, PLAQUE_STYLE, self.cabinet_plaque(cabinet).center, anchor="center")
-            for text, x in COUNTER_SIGNS:
-                hires.text(text, COUNTER_SIGN_STYLE, self.counter_sign(text, x, hires=True).center, anchor="center")
+            for text, center in poster_layout():
+                hires.text(text, POSTER_STYLE, center, anchor="center")
         near_goose = target is not None and target.kind == "goose"
         drawables = [
             (TABLE.bottom, lambda: self._draw_table(surface, target, hires)),
@@ -464,6 +502,8 @@ class FormsTrialScene(Scene):
             draw()
         if self.puzzle.issued:
             self._draw_issued(surface, self.puzzle.issued[-1], hires)
+        if self.found_document is not None and self.dialogue is not None:
+            self._draw_preview(surface, self.found_document, hires)
         self._draw_hud(surface, hires)
         if self.dialogue is not None and not self.dialogue.is_finished:
             self.box.draw(surface, self.dialogue, hires)
@@ -491,88 +531,98 @@ class FormsTrialScene(Scene):
             pygame.draw.rect(surface, MARK_COLOR, rect.inflate(2, 0), 1)
 
     def held_icon_center(self) -> tuple[int, int]:
-        """Где рисуется документ в руках: над головой Алисы (шкафы ниже полосы интерфейса)."""
+        """Где рисуется документ в руках: маленький лист над головой Алисы (шкафы ниже полосы интерфейса)."""
         rect = self.alice.rect
-        return rect.centerx, rect.top - 5
+        return rect.centerx, rect.top - HELD_PAPER_SIZE[1] // 2 - 1
 
     def _draw_alice(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
         self.alice.draw(canvas, hires)
         held = self.puzzle.held
         if held is not None:
             x, y = self.held_icon_center()
-            center = (x, y - round(abs(math.sin(self.time * 4))))
-            with logical_target(canvas, hires, pygame.Rect(x - 14, y - 8, 29, 15)) as surface:
-                self._draw_card(surface, held, center, with_text=hires is None)
-            if hires is not None:
-                self._card_text(hires, held, center)
+            paper = pygame.Rect((0, 0), HELD_PAPER_SIZE)
+            paper.center = (x, y - round(abs(math.sin(self.time * 4))))
+            with logical_target(canvas, hires, paper.inflate(2, 4)) as surface:
+                draw_paper(surface, paper, held)  # тот же лист, что на столе; название — в строке интерфейса
 
-    def _draw_card(
-        self, surface: pygame.Surface, document: str, center: tuple[int, int], with_text: bool = True
-    ) -> None:
-        """Карточка документа: лист с сокращённым названием и цветной пометкой своего вида.
-
-        with_text=False — без сокращения: его рисует слой окна (_card_text) поверх карточки."""
-        card = pygame.Rect(0, 0, 26, 11)
-        card.center = center
-        pygame.draw.rect(surface, PAPER_COLOR, card)
-        pygame.draw.rect(surface, PAPER_EDGE_COLOR, card, 1)
-        color = DOCUMENT_COLORS[document]
-        if with_text:
-            surface.blit(self._text(DOCUMENT_ABBREVIATIONS[document], color, small=True), (card.x + 2, card.y + 1))
-        draw_document_mark(surface, document, (card.right - 4, card.centery))
-
-    @staticmethod
-    def _card_text(hires: HiResLayer, document: str, center: tuple[int, int]) -> None:
-        """Сокращение на карточке в разрешении окна: слева, до пометки вида документа."""
-        text, style = DOCUMENT_ABBREVIATIONS[document], CARD_STYLES[document]
-        hires.text(text, style, (center[0] - 11, center[1]), anchor="midleft")
+    def _draw_preview(self, canvas: pygame.Surface, document: str, hires: HiResLayer | None = None) -> None:
+        """Найденный документ крупно: Алиса рассматривает лист, пока звучит реплика о находке."""
+        rect = self.preview_rect()
+        with logical_target(canvas, hires, rect.inflate(4, 4)) as surface:
+            draw_paper(surface, rect, document, PREVIEW_TITLE_SIZE, with_title=hires is None)
+        if hires is not None:
+            for text, center in paper_title_layout(rect, document, PREVIEW_TITLE_SIZE):
+                hires.text(text, paper_style(document, PREVIEW_TITLE_SIZE), center, anchor="center")
 
     def _draw_table(self, canvas: pygame.Surface, target: Target | None, hires: HiResLayer | None = None) -> None:
         with logical_target(canvas, hires, TABLE_AREA) as surface:
-            front_center = self._draw_table_on(surface, target, with_text=hires is None)
-        if hires is not None:  # номера мест и сокращения на карточках — поверх стола
-            for index, x in enumerate(SLOT_XS):
-                hires.text(str(index + 1), SLOT_NUMBER_STYLE, (x, front_center), anchor="center")
+            self._draw_table_on(surface, target, with_text=hires is None)
+        if hires is not None:  # номера мест, табличка и названия на листах — поверх стола
+            for index in range(len(SLOT_XS)):
+                hires.text(str(index + 1), SLOT_NUMBER_STYLE, self.slot_number(index).center, anchor="center")
                 document = self.puzzle.order[index]
                 if document is not None:
-                    self._card_text(hires, document, (x, TABLE.y + 6))
+                    for text, center in paper_title_layout(slot_paper(index), document, PAPER_TITLE_SIZE):
+                        hires.text(text, paper_style(document, PAPER_TITLE_SIZE), center, anchor="center")
+            hires.text(APRON_SIGN, SIGN_STYLE, self.apron_sign(hires=True).center, anchor="center")
 
-    def _draw_table_on(self, surface: pygame.Surface, target: Target | None, with_text: bool) -> int:
-        """Стол подачи; возвращает середину передней стенки по высоте (там номера мест)."""
-        top = pygame.Rect(TABLE.x, TABLE.y, TABLE.width, 12)
-        front = pygame.Rect(TABLE.x + 2, top.bottom, TABLE.width - 4, TABLE.height - top.height)
+    @staticmethod
+    def slot_number(index: int) -> pygame.Rect:
+        """Табличка с номером места — на столешнице под листом."""
+        plate = pygame.Rect(0, 0, 9, 8)
+        plate.midtop = (SLOT_XS[index], PAPER_TOP + PAPER_SIZE[1] + 1)
+        return plate
+
+    def apron_sign(self, hires: bool = False) -> pygame.Rect:
+        """Табличка на передней стенке стола — по размеру надписи пиксельным шрифтом или шрифтом окна."""
+        if hires:
+            width, height = self._fonts.metrics(SIGN_STYLE).size(APRON_SIGN)
+            label = pygame.Rect(0, 0, math.ceil(width), math.ceil(height))
+        else:
+            label = render_text(self._small_font, APRON_SIGN, PLAQUE_TEXT_COLOR).get_rect()
+        label.center = (TABLE.centerx, (TABLE_TOP.bottom + TABLE.bottom) // 2)
+        return label.inflate(6, 2)
+
+    def _draw_table_on(self, surface: pygame.Surface, target: Target | None, with_text: bool) -> None:
+        """Большой стол подачи: столешница с тремя местами, передняя стенка с табличкой."""
+        top, front = TABLE_TOP, pygame.Rect(TABLE.x + 2, TABLE_TOP.bottom, TABLE.width - 4, TABLE.bottom - TABLE_TOP.bottom)
         pygame.draw.rect(surface, TABLE_FRONT_COLOR, front)
         pygame.draw.rect(surface, TABLE_EDGE_COLOR, front, 1)
         pygame.draw.rect(surface, TABLE_COLOR, top)
+        for y in range(top.y + 6, top.bottom - 2, 9):  # доски столешницы
+            pygame.draw.line(surface, TABLE_LIGHT_COLOR, (top.x + 2, y), (top.right - 3, y))
         pygame.draw.rect(surface, TABLE_EDGE_COLOR, top, 1)
-        # Стопка бумаг слева, штемпельная подушка и штамп справа.
-        for k in range(3):
-            pygame.draw.rect(surface, PAPER_COLOR, (TABLE.x + 3, top.y + 6 - k * 2, 9, 3))
-            pygame.draw.rect(surface, PAPER_EDGE_COLOR, (TABLE.x + 3, top.y + 6 - k * 2, 9, 3), 1)
-        pygame.draw.rect(surface, (40, 40, 60), (TABLE.right - 15, top.y + 6, 10, 4))
-        pygame.draw.rect(surface, STAMP_COLOR, (TABLE.right - 14, top.y + 7, 8, 2))
-        pygame.draw.rect(surface, (90, 60, 40), (TABLE.right - 11, top.y + 1, 3, 4))
-        pygame.draw.rect(surface, (40, 30, 26), (TABLE.right - 13, top.y + 4, 7, 2))
-        for index, x in enumerate(SLOT_XS):
+        sign = self.apron_sign(hires=not with_text)
+        pygame.draw.rect(surface, SIGN_COLOR, sign)
+        if with_text:
+            label = render_text(self._small_font, APRON_SIGN, PLAQUE_TEXT_COLOR)
+            surface.blit(label, label.get_rect(center=sign.center))
+        # Слева на столешнице — стопка чистых бланков, справа — штемпельная подушка и штамп.
+        for k in range(4):
+            sheet = pygame.Rect(top.x + 3 + (k % 2), top.y + 30 - k * 2, 9, 12)
+            pygame.draw.rect(surface, PAPER_COLOR, sheet)
+            pygame.draw.rect(surface, PAPER_EDGE_COLOR, sheet, 1)
+        pygame.draw.rect(surface, (40, 40, 60), (top.right - 13, top.y + 34, 10, 5))
+        pygame.draw.rect(surface, STAMP_COLOR, (top.right - 12, top.y + 35, 8, 3))
+        pygame.draw.rect(surface, (90, 60, 40), (top.right - 10, top.y + 26, 4, 6))
+        pygame.draw.rect(surface, (40, 30, 26), (top.right - 12, top.y + 31, 8, 3))
+        for index in range(len(SLOT_XS)):
+            plate = self.slot_number(index)
+            pygame.draw.rect(surface, TABLE_EDGE_COLOR, plate)
             if with_text:
                 number = self._text(str(index + 1), PAPER_COLOR, small=True)
-                surface.blit(number, number.get_rect(center=(x, front.centery)))
+                surface.blit(number, number.get_rect(center=plate.center))
+            paper = slot_paper(index)
             document = self.puzzle.order[index]
-            center = (x, top.centery)
             if document is None:
-                slot = pygame.Rect(0, 0, 26, 11)
-                slot.center = center
-                pygame.draw.rect(surface, TABLE_EDGE_COLOR, slot, 1)
+                draw_dashed_rect(surface, TABLE_EDGE_COLOR, paper)  # место ждёт свой лист
             else:
-                self._draw_card(surface, document, center, with_text)
+                draw_paper(surface, paper, document, with_title=with_text)
             if target is not None and target.kind == "slot" and target.slot == index:
-                mark = pygame.Rect(0, 0, 30, 15)
-                mark.center = center
-                pygame.draw.rect(surface, MARK_COLOR, mark, 1)
+                pygame.draw.rect(surface, MARK_COLOR, paper.inflate(4, 4), 1)
         if self.puzzle.solved:  # принято: на столе сияет печать
             radius = 4 + round(abs(math.sin(self.time * 5)))
-            pygame.draw.circle(surface, DONE_COLOR, (SLOT_XS[-1] + 12, top.y + 2), radius, 1)
-        return front.centery
+            pygame.draw.circle(surface, DONE_COLOR, (top.right - 8, top.y + 12), radius, 1)
 
     def _draw_goose(self, canvas: pygame.Surface, highlighted: bool, hires: HiResLayer | None = None) -> None:
         source, image = self._goose_frame()
@@ -643,41 +693,17 @@ class FormsTrialScene(Scene):
             self._goose_frames[pose] = (source, image)
         return self._goose_frames[pose]
 
-    def order_layout(self, hires: bool = False) -> list[tuple[str, config.Color, int]]:
-        """Вторая строка интерфейса: (кусочек, цвет, x) — с промежутком в пробел, измеренным
-        тем шрифтом, которым строка будет нарисована."""
-        if hires:
-            space = self.text_metrics.width(" ")
-            width = self.text_metrics.width
-        else:
-            space = self._font.size(" ")[0]
-
-            def width(text: str) -> float:
-                return self._text(text, HUD_TEXT_COLOR).get_width()
-
-        result, x = [], 4.0
-        for text, color in self.order_parts():
-            result.append((text, color, round(x)))
-            x += width(text) + space
-        return result
-
     def _draw_hud(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Одна строка вверху: задача, а пока документ в руках — его полное название."""
         bar = pygame.Rect(0, 0, WIDTH, HUD_HEIGHT)
         held = self.held_text()
+        text, style = (held, HUD_STYLE) if held else (self.task_text(), TASK_STYLE)
         with logical_target(canvas, hires, bar) as surface:
             surface.fill(HUD_COLOR, bar)
             if hires is None:
-                surface.blit(self._text(self.task_text(), HUD_ACCENT_COLOR), (4, 1))
-                if held:
-                    image = self._text(held, HUD_TEXT_COLOR)
-                    surface.blit(image, image.get_rect(topright=(WIDTH - 4, 1)))
-                for text, color, x in self.order_layout():
-                    surface.blit(self._text(text, color), (x, 12))
+                surface.blit(self._text(text, style.color), (4, 1))
         if hires is not None:
-            hires.text(self.task_text(), TASK_STYLE, (4, HUD_ROWS[0]), anchor="midleft")
-            hires.text(held, HUD_STYLE, (WIDTH - 4, HUD_ROWS[0]), anchor="midright")
-            for text, color, x in self.order_layout(hires=True):
-                hires.text(text, TextStyle(TEXT_SIZE, color, background=HUD_COLOR), (x, HUD_ROWS[1]), anchor="midleft")
+            hires.text(text, style, (4, HUD_HEIGHT / 2), anchor="midleft")
 
     def _draw_status(self, canvas: pygame.Surface, hires: HiResLayer | None = None) -> None:
         center = (WIDTH // 2, STATUS_TOP + (HEIGHT - STATUS_TOP) // 2)
@@ -696,40 +722,32 @@ class FormsTrialScene(Scene):
         rect = cabinet.rect
         return pygame.Rect(rect.x + 3, rect.y + 2, rect.width - 6, 9)
 
-    def counter_sign(self, text: str, x: int, hires: bool = False) -> pygame.Rect:
-        """Табличка на барьере приёма — по размеру надписи пиксельным шрифтом или шрифтом окна."""
-        if hires:
-            width, height = self.small_metrics.size(text)
-            label = pygame.Rect(0, 0, math.ceil(width), math.ceil(height))
-        else:
-            label = render_text(self._small_font, text, PLAQUE_TEXT_COLOR).get_rect()
-        label.center = (x, COUNTER.y + 9)
-        return label.inflate(6, 0)
-
     def _render_background(self, labels: bool = True) -> pygame.Surface:
-        """Стена со шкафами, паркет, стопки бумаг, барьер приёма с табличками.
+        """Стена со шкафами и плакатом, паркет до самого низа комнаты, коврик у входа, стопки бумаг.
 
-        labels=False — без надписей на табличках: их рисует слой высокого разрешения."""
+        labels=False — без надписей на табличках и плакате: их рисует слой высокого разрешения."""
         page = pygame.Surface(config.LOGICAL_SIZE)
         page.fill(WALL_COLOR)
         for row, y in enumerate(range(SHELVES.bottom, STATUS_TOP, 6)):  # паркет «ёлочкой» попроще
             for column, x in enumerate(range(-(row % 2) * 8, WIDTH, 16)):
                 page.fill(FLOOR_COLORS[(row + column) % 2], (x, y, 16, 6))
+        page.fill(BASEBOARD_COLOR, (0, SHELVES.bottom, WIDTH, 2))  # плинтус у задней стены
         for cabinet in CABINETS:
             self._draw_cabinet(page, cabinet, labels)
+        # Плакат над гусем: «ТИХО! ИДЁТ СОГЛАСОВАНИЕ».
+        pygame.draw.rect(page, CABINET_DARK_COLOR, POSTER.inflate(2, 2))
+        pygame.draw.rect(page, SIGN_COLOR, POSTER)
+        for x in (POSTER.x + 2, POSTER.right - 3):  # кнопки
+            page.set_at((x, POSTER.y + 1), STAMP_COLOR)
+        if labels:  # на холсте мелкий текст не читается — вместо него строки
+            for text, (x, y) in poster_layout():
+                width = min(POSTER.width - 6, len(text) * 3)
+                page.fill(STAMP_COLOR, (round(x - width / 2), round(y), width, 1))
+        # Коврик у входа и стопки бумаг в углах.
+        pygame.draw.rect(page, DOORMAT_COLOR, DOORMAT, border_radius=2)
+        pygame.draw.rect(page, DOORMAT_EDGE_COLOR, DOORMAT, 1, border_radius=2)
         for stack in PAPER_STACKS:
             draw_paper_stack(page, stack)
-        # Барьер приёма документов с табличками, под ним — ещё бумаги.
-        pygame.draw.rect(page, COUNTER_COLOR, COUNTER)
-        pygame.draw.rect(page, COUNTER_TOP_COLOR, (COUNTER.x, COUNTER.y, COUNTER.width, 4))
-        for text, x in COUNTER_SIGNS:
-            sign = self.counter_sign(text, x, hires=not labels)
-            pygame.draw.rect(page, SIGN_COLOR, sign)
-            if labels:
-                label = render_text(self._small_font, text, PLAQUE_TEXT_COLOR)
-                page.blit(label, label.get_rect(center=sign.center))
-        for rect in (pygame.Rect(20, 140, 18, 16), pygame.Rect(150, 146, 14, 10), pygame.Rect(276, 138, 20, 18)):
-            draw_paper_stack(page, rect)
         return page
 
     def _draw_cabinet(self, page: pygame.Surface, cabinet: Cabinet, labels: bool = True) -> None:
@@ -778,6 +796,65 @@ class FormsTrialScene(Scene):
         top_shelf = pygame.Rect(rect.x + 4, rect.y + 13, rect.width - 8, 3)
         for k in range(3):  # бумаги, торчащие с верхней полки
             pygame.draw.rect(page, PAPER_COLOR, (top_shelf.x + 2 + k * 14, top_shelf.y, 9, 3))
+
+
+def paper_title_layout(rect: pygame.Rect, document: str, size: float) -> list[tuple[str, tuple[float, float]]]:
+    """Строки полного названия на листе rect шрифтом размера size: (строка, её середина).
+
+    Строки идут под цветной шапкой бланка, по середине листа; шаг — с запасом, чтобы строки
+    любого шрифта не задевали друг друга."""
+    step = size * 1.3
+    top = rect.y + _band_height(rect) + 3 + step / 2
+    return [(text, (rect.centerx, top + index * step)) for index, text in enumerate(PAPER_TITLE_LINES[document])]
+
+
+def _band_height(rect: pygame.Rect) -> int:
+    return max(1, rect.height // 14)
+
+
+def draw_paper(surface: pygame.Surface, rect: pygame.Rect, document: str, title_size: float = PAPER_TITLE_SIZE,
+               with_title: bool = False) -> None:
+    """Лист документа примерно формата A4 — один вид везде: на столе, в руках и крупно при находке.
+
+    Кремовая бумага с тонким контуром и тенью, цветная шапка бланка (цвет вида документа), место
+    под название, строки для заполнения и пометка вида в углу. Название пишет слой окна
+    (paper_title_layout); with_title=True — без слоя окна: вместо мелкого текста штрихи."""
+    surface.fill(PAPER_SHADOW_COLOR, rect.move(1, 1))
+    pygame.draw.rect(surface, PAPER_COLOR, rect)
+    pygame.draw.rect(surface, PAPER_EDGE_COLOR, rect, 1)
+    color = DOCUMENT_COLORS[document]
+    band = _band_height(rect)
+    surface.fill(color, (rect.x + 2, rect.y + 2, rect.width - 4, band))
+    if rect.height < 30:  # маленький лист в руках: только штрихи под цветной шапкой
+        for k, y in enumerate(range(rect.y + band + 4, rect.bottom - 2, 3)):
+            surface.fill(INK_COLOR, (rect.x + 2, y, rect.width - 4 - (k % 2) * 3, 1))
+        return
+    lines = paper_title_layout(rect, document, title_size)
+    if with_title:
+        for text, (x, y) in lines:
+            width = min(rect.width - 8, len(text) * 3)
+            surface.fill(color, (round(x - width / 2), round(y), width, 1))
+    # Строки для заполнения и подпись — под названием, пометка вида — в нижнем правом углу.
+    first = round(lines[-1][1][1]) + 6
+    for y in range(first, rect.bottom - 6, 4):
+        surface.fill(INK_COLOR, (rect.x + 4, y, rect.width - 16, 1))
+    draw_document_mark(surface, document, (rect.right - 6, rect.bottom - 6))
+
+
+def draw_dashed_rect(surface: pygame.Surface, color: config.Color, rect: pygame.Rect, dash: int = 3) -> None:
+    """Пунктирный контур пустого места на столе."""
+    for x in range(rect.left, rect.right, dash * 2):
+        surface.fill(color, (x, rect.top, min(dash, rect.right - x), 1))
+        surface.fill(color, (x, rect.bottom - 1, min(dash, rect.right - x), 1))
+    for y in range(rect.top, rect.bottom, dash * 2):
+        surface.fill(color, (rect.left, y, 1, min(dash, rect.bottom - y)))
+        surface.fill(color, (rect.right - 1, y, 1, min(dash, rect.bottom - y)))
+
+
+def poster_layout() -> list[tuple[str, tuple[float, float]]]:
+    """Строки плаката над гусем: (строка, середина)."""
+    step = POSTER.height / (len(POSTER_LINES) + 1)
+    return [(text, (POSTER.centerx, POSTER.y + step * (index + 1))) for index, text in enumerate(POSTER_LINES)]
 
 
 def draw_document_mark(surface: pygame.Surface, document: str, center: tuple[int, int]) -> None:

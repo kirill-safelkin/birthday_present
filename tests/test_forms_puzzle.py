@@ -51,7 +51,7 @@ class DataTest(unittest.TestCase):
             "Заявление о регистрации рождения и гражданстве Лео",
         ])
         self.assertEqual([DOCUMENT_NAMES[document] for document in CORRECT_ORDER],
-                         ["Заявл. на бланк", "Разр. на подачу", "Заявл. о Лео"])
+                         ["Заявление на бланк", "Разрешение на подачу", "Заявление о Лео"])
         self.assertEqual(len(set(DOCUMENT_NAMES.values())), 3)  # короткие названия не путаются между собой
 
     def test_required_sections_exist_and_each_document_is_hidden_once(self) -> None:

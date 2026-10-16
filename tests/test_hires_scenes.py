@@ -54,7 +54,7 @@ from game.trials import cakes_scene as cakes  # noqa: E402
 from game.trials import forms_scene as forms  # noqa: E402
 from game.trials import sushi_scene as sushi  # noqa: E402
 from game.trials.cakes_puzzle import STEP_NAMES, STEP_SHORT_NAMES  # noqa: E402
-from game.trials.forms_puzzle import DOCUMENT_NAMES, SECTIONS  # noqa: E402
+from game.trials.forms_puzzle import DOCUMENT_NAMES, DOCUMENT_TITLES, SECTIONS  # noqa: E402
 from game.trials.sushi_orders import INGREDIENT_NAMES, RECIPES, SushiOrders  # noqa: E402
 from game.world.hub import PORTALS, HubScene  # noqa: E402
 from game.world.progress import TRIALS, GameProgress  # noqa: E402
@@ -406,17 +406,18 @@ class LayerOrderTest(SceneTestCase):
         self.assertLess(label, alice)  # подпись станции — часть фона
         self.assertLess(alice, hud)
 
-    def test_forms_table_covers_alice_behind_it_and_cards_are_on_top(self) -> None:
+    def test_forms_table_covers_alice_behind_it_and_papers_are_on_top(self) -> None:
         scene = forms.FormsTrialScene()
         play_forms_until_table(scene)
         scene.alice.set_position(forms.SLOT_XS[1], forms.SLOT_Y)  # за столом
         layer, _ = self.draw(scene)
         alice = self.index(layer, lambda c: isinstance(c, SpriteCommand) and c.rect == scene.alice.rect)
         table = self.index(layer, lambda c: isinstance(c, PatchCommand) and c.rect == forms.TABLE_AREA)
-        cards = [i for i, c in enumerate(layer.commands) if isinstance(c, TextCommand)
-                 and c.text in forms.DOCUMENT_ABBREVIATIONS.values()]
+        titles = [i for i, c in enumerate(layer.commands) if isinstance(c, TextCommand)
+                  and c.style.size == forms.PAPER_TITLE_SIZE and c.style.background == forms.PAPER_COLOR]
         self.assertLess(alice, table)
-        self.assertTrue(cards and min(cards) > table)
+        self.assertEqual(len(titles), sum(len(lines) for lines in forms.PAPER_TITLE_LINES.values()))
+        self.assertTrue(min(titles) > table)  # названия — поверх листов на столе
 
     def test_cakes_strawberry_and_dialogue_order(self) -> None:
         scene = cakes.CakesTrialScene()
@@ -608,19 +609,19 @@ class TextFitTest(SceneTestCase):
                 for cabinet in forms.CABINETS:
                     plaque = scene.cabinet_plaque(cabinet)
                     self.assert_fits(fonts, forms.PLAQUE_STYLE, cabinet.section.label, plaque.width - 2)
-                for abbreviation in forms.DOCUMENT_ABBREVIATIONS.values():
-                    self.assert_fits(fonts, forms.CARD_STYLES["form_request"], abbreviation, 17)  # до пометки вида
-                metrics = fonts.metrics(forms.HUD_STYLE)
-                task = metrics.width("Задача: сложи по порядку и сдай гусю")
-                held = max(metrics.width(f"В руках: {d}") for d in documents)
-                self.assertLess(task + held + 8, WIDTH)
-                order = "Стол: " + " → ".join(f"{i + 1} {d}" for i, d in enumerate(documents))
-                self.assertLess(metrics.width(order) + 8, WIDTH)
+                for title in DOCUMENT_TITLES.values():  # верхняя строка с документом в руках — полное название
+                    self.assert_fits(fonts, forms.HUD_STYLE, f"В руках: {title}", WIDTH - 8)
+                for document, lines in forms.PAPER_TITLE_LINES.items():  # названия на листах — без обрезки
+                    for size in (forms.PAPER_TITLE_SIZE, forms.PREVIEW_TITLE_SIZE):
+                        paper = forms.slot_paper(0) if size == forms.PAPER_TITLE_SIZE else scene.preview_rect()
+                        for text in lines:
+                            self.assert_fits(fonts, forms.paper_style(document, size), text, paper.width - 6)
                 for document, lines in forms.ISSUED_LINES.items():  # лист выданного документа над столом
                     for text, style, (x, _) in scene.issued_layout(document):
                         self.assertLessEqual(x + fonts.metrics(style).width(text), forms.ISSUED_SHEET.right - 18)
-                for text, x in forms.COUNTER_SIGNS:
-                    self.assert_fits(fonts, forms.PLAQUE_STYLE, text, 150)
+                self.assert_fits(fonts, forms.SIGN_STYLE, forms.APRON_SIGN, forms.TABLE.width - 8)
+                for text in forms.POSTER_LINES:
+                    self.assert_fits(fonts, forms.POSTER_STYLE, text, forms.POSTER.width - 2)
 
     def test_cakes_texts(self) -> None:
         scene = cakes.CakesTrialScene()
@@ -753,6 +754,13 @@ class SolidBackgroundTextTest(SceneTestCase):
         forms_scene = forms.FormsTrialScene()
         finish_dialogue(forms_scene)
         self.assert_like_transparent(forms_scene, "формуляры")
+        forms_scene.alice.set_position(*forms.CABINETS[2].point)
+        press_e(forms_scene)  # нашла заявление о Лео — крупный лист рядом с Алисой
+        forms_scene.update(30.0)
+        self.assert_like_transparent(forms_scene, "формуляры: находка")
+        finish_dialogue(forms_scene)
+        play_forms_until_table(forms_scene)
+        self.assert_like_transparent(forms_scene, "формуляры: листы на столе")
         cakes_scene = cakes.CakesTrialScene()
         cakes_scene.update(30.0)
         self.assert_like_transparent(cakes_scene, "торты: реплика")

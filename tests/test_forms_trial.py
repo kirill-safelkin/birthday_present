@@ -7,8 +7,9 @@ import os
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
-import itertools  # noqa: E402
+import math  # noqa: E402
 import tempfile  # noqa: E402
+from collections import deque  # noqa: E402
 import unittest  # noqa: E402
 from pathlib import Path  # noqa: E402
 
@@ -33,7 +34,14 @@ from game.story.forms_dialogue import (  # noqa: E402
     all_scripts,
 )
 from game.story.intro_dialogue import ALICE  # noqa: E402
-from game.trials.forms_puzzle import CORRECT_ORDER, DOCUMENT_NAMES, DOCUMENTS, ISSUED, SECTIONS  # noqa: E402
+from game.trials.forms_puzzle import (  # noqa: E402
+    CORRECT_ORDER,
+    DOCUMENT_NAMES,
+    DOCUMENT_TITLES,
+    DOCUMENTS,
+    ISSUED,
+    SECTIONS,
+)
 from game.trials.forms_scene import (  # noqa: E402
     CABINETS,
     DONE,
@@ -46,15 +54,26 @@ from game.trials.forms_scene import (  # noqa: E402
     INTRO_PHASE,
     ISSUED_LINES,
     ISSUED_SHEET,
+    ISSUED_TEXT_STYLE,
+    ISSUED_TITLE_STYLE,
+    DOCUMENT_COLORS,
+    HUD_STYLE,
     PAPER_COLOR,
+    PAPER_SIZE,
+    PAPER_TITLE_LINES,
+    PAPER_TITLE_SIZE,
+    PREVIEW_TITLE_SIZE,
     REACTION,
     SLOT_XS,
     SLOT_Y,
     SPAWN,
     SPRITE_SIZE,
     STATUS_TOP,
+    TABLE,
     WALK_BOUNDS,
     FormsTrialScene,
+    paper_title_layout,
+    slot_paper,
 )
 from game.trials.sushi_orders import RECIPES  # noqa: E402
 from game.trials.sushi_scene import STATIONS, TABLE as SUSHI_TABLE, SushiTrialScene  # noqa: E402
@@ -65,7 +84,7 @@ DT = 1 / 60
 CABINET = {cabinet.section.id: cabinet for cabinet in CABINETS}
 SECTION_OF = {section.document: section.id for section in SECTIONS if section.document}
 GOOSE_SPOT = (GOOSE_POSITION[0] - 22, GOOSE_POSITION[1])  # слева от гуся, вплотную к препятствию
-WIDTH = config.LOGICAL_SIZE[0]
+WIDTH, HEIGHT = config.LOGICAL_SIZE
 
 
 def key(code: int, scancode: int = 0, event_type: int = pygame.KEYDOWN) -> pygame.event.Event:
@@ -175,6 +194,29 @@ def answer(scene: FormsTrialScene, index: int) -> list[str]:
     raise AssertionError(f"диалог не заканчивается: {shown}")
 
 
+def drawn_texts(scene: FormsTrialScene) -> list[TextCommand]:
+    """Надписи кадра в слое высокого разрешения."""
+    layer = HiResLayer()
+    scene.draw(pygame.Surface(config.LOGICAL_SIZE), layer)
+    return [command for command in layer.commands if isinstance(command, TextCommand)]
+
+
+def paper_titles(scene: FormsTrialScene, size: float) -> list[TextCommand]:
+    """Строки названий на листах документов шрифтом size (на столе или крупный лист находки)."""
+    return [c for c in drawn_texts(scene) if c.style.size == size and c.style.background == PAPER_COLOR]
+
+
+def table_titles(scene: FormsTrialScene) -> list[str | None]:
+    """Что написано на листах стола подачи, место за местом: название целиком или None (место пустое)."""
+    texts = paper_titles(scene, PAPER_TITLE_SIZE)
+    titles = []
+    for index in range(len(SLOT_XS)):
+        paper = slot_paper(index)
+        lines = [c.text for c in texts if paper.collidepoint(c.pos)]
+        titles.append(" ".join(lines) or None)
+    return titles
+
+
 def hold(scene: FormsTrialScene, codes: list[int], frames: int) -> None:
     for code in codes:
         scene.handle_event(key(code))
@@ -252,9 +294,9 @@ class SearchTest(TrialTestCase):
         self.assertIn("без бланка его не напишешь", self.scene.dialogue.node.text)
         finish_dialogue(self.scene)
         self.assertEqual(self.scene.puzzle.order, (None, None, "form_request"))
-        self.assertEqual(self.scene.status_text(), "На столе подачи: Заявл. на бланк (1/3)")
+        self.assertEqual(self.scene.status_text(), "На столе подачи: Заявление на бланк (1/3)")
         self.assertEqual(self.scene.task_text(), "Задача: найди документы Лео 1/3")
-        self.assertEqual(self.scene.order_text(), "Стол: 1 — → 2 — → 3 Заявл. на бланк")
+        self.assertEqual(table_titles(self.scene), [None, None, "Заявление на выдачу бланка заявления"])
 
     def test_each_document_is_in_its_section(self) -> None:
         texts = {document: search(self.scene, SECTION_OF[document]) for document in CORRECT_ORDER}
@@ -266,7 +308,8 @@ class SearchTest(TrialTestCase):
         self.assertTrue(self.scene.puzzle.all_found)
         self.assertEqual(self.scene.toast, "Все документы на столе — разложи их по порядку")
         self.assertEqual(self.scene.task_text(), "Задача: сложи по порядку и сдай гусю")
-        self.assertEqual(self.scene.order_text(), "Стол: 1 Разр. на подачу → 2 Заявл. о Лео → 3 Заявл. на бланк")
+        self.assertEqual(table_titles(self.scene), [DOCUMENT_TITLES["filing_permit"], DOCUMENT_TITLES["leo_application"],
+                                                    DOCUMENT_TITLES["form_request"]])
 
     def test_wrong_shelf_is_a_joke_without_side_effects(self) -> None:
         jokes = [search(self.scene, "cakes") for _ in range(4)]
@@ -342,23 +385,27 @@ class TableTest(TrialTestCase):
         stand_at(self.scene, (SLOT_XS[0], SLOT_Y))
         self.assertEqual(self.scene.status_text(), "Все документы на столе — разложи их по порядку")  # свежее
         self.scene.update(2.0)  # сообщение о находке уже не важнее подсказки
-        self.assertEqual(self.scene.status_text(), "Место 1: Разр. на подачу   E — взять")
+        self.assertEqual(self.scene.status_text(), "Место 1: Разрешение на подачу   E — взять")
         press_e(self.scene)
-        self.assertEqual(self.scene.held_text(), "В руках: Разр. на подачу")
-        self.assertEqual(self.scene.status_text(), "Взяла: Разр. на подачу")
-        self.assertEqual(self.scene.order_text(), "Стол: 1 — → 2 Заявл. о Лео → 3 Заявл. на бланк")
+        self.assertEqual(self.scene.held_text(), "В руках: Разрешение на подачу заявления")  # полное название
+        self.assertEqual(self.scene.hud_text(), self.scene.held_text())
+        self.assertEqual(self.scene.status_text(), "Взяла: Разрешение на подачу")
+        self.assertEqual(table_titles(self.scene), [None, DOCUMENT_TITLES["leo_application"],
+                                                    DOCUMENT_TITLES["form_request"]])
         self.scene.update(2.0)
         self.assertEqual(self.scene.status_text(), "Место 1   E — положить обратно")
         press_e(self.scene)
         self.assertEqual(self.scene.held_text(), "")
-        self.assertEqual(self.scene.status_text(), "Положила обратно: Разр. на подачу")
+        self.assertEqual(self.scene.hud_text(), self.scene.task_text())
+        self.assertEqual(self.scene.status_text(), "Положила обратно: Разрешение на подачу")
         use_slot(self.scene, 2)
         stand_at(self.scene, (SLOT_XS[0], SLOT_Y))
         self.scene.update(2.0)
-        self.assertEqual(self.scene.status_text(), "Место 1: Разр. на подачу   E — поменять местами")
+        self.assertEqual(self.scene.status_text(), "Место 1: Разрешение на подачу   E — поменять местами")
         press_e(self.scene)
-        self.assertEqual(self.scene.status_text(), "Поменяла местами: Заявл. на бланк и Разр. на подачу")
-        self.assertEqual(self.scene.order_text(), "Стол: 1 Заявл. на бланк → 2 Заявл. о Лео → 3 Разр. на подачу")
+        self.assertEqual(self.scene.status_text(), "Поменяла местами: Заявление на бланк и Разрешение на подачу")
+        self.assertEqual(table_titles(self.scene), [DOCUMENT_TITLES["form_request"], DOCUMENT_TITLES["leo_application"],
+                                                    DOCUMENT_TITLES["filing_permit"]])
 
     def test_wrong_order_is_rejected_and_can_be_fixed(self) -> None:
         stand_at(self.scene, GOOSE_SPOT)
@@ -410,9 +457,10 @@ class TableTest(TrialTestCase):
             self.scene.update(0.25)  # значок не «подпрыгивает»
             self.scene.draw(self.canvas)
             x, y = self.scene.held_icon_center()
-            self.assertGreaterEqual(y - 6, HUD_HEIGHT)  # не под полосой интерфейса
-            self.assertLessEqual(x + 13, WIDTH)  # и не за краем экрана
-            self.assertEqual(tuple(self.canvas.get_at((x - 12, y)))[:3], PAPER_COLOR)  # левый край карточки
+            self.assertGreaterEqual(y - 9, HUD_HEIGHT)  # не под полосой интерфейса
+            self.assertLessEqual(x + 7, WIDTH)  # и не за краем экрана
+            self.assertLessEqual(y + 8, self.scene.alice.rect.top)  # над головой, а не на лице
+            self.assertEqual(tuple(self.canvas.get_at((x - 4, y + 4)))[:3], PAPER_COLOR)  # тот же лист бумаги
 
     def test_reaction_then_final_check(self) -> None:
         arrange(self.scene)
@@ -523,7 +571,7 @@ class LeoProcedureTest(TrialTestCase):
         layer = HiResLayer()
         self.scene.draw(self.canvas, layer)
         return [command.text for command in layer.commands if isinstance(command, TextCommand)
-                and ISSUED_SHEET.collidepoint(command.pos)]
+                and command.style in (ISSUED_TITLE_STYLE, ISSUED_TEXT_STYLE) and ISSUED_SHEET.collidepoint(command.pos)]
 
     def test_issued_sheet_fits_and_covers_nobody(self) -> None:
         fonts = TextFonts()
@@ -678,11 +726,26 @@ class RewardTest(TrialTestCase):
 
 class LayoutTest(TrialTestCase):
     def test_dialogue_box_never_covers_characters(self) -> None:
+        # Ходить можно по всей комнате, но разговор начинается только у входа, у шкафов и у гуся —
+        # и где бы Алиса там ни стояла, её ноги (и гусь) выше любого окна реплики. Во время реплик
+        # она не двигается.
         box = DialogueBox()
         lowest_box = min((box.layout(node).name_tab or box.layout(node).box).top
                          for script in all_scripts() for node in script.nodes.values())
-        self.assertLessEqual(WALK_BOUNDS.bottom, lowest_box)  # ноги Алисы всегда выше окна
+        self.assertLessEqual(SPAWN[1], lowest_box)  # вступление — у входа
         self.assertLessEqual(GOOSE_POSITION[1], lowest_box)
+        scene = self.scene
+        talks = 0
+        for x in range(WALK_BOUNDS.left, WALK_BOUNDS.right + 1):
+            for y in range(WALK_BOUNDS.top, WALK_BOUNDS.bottom + 1):
+                if not scene.collision.is_free(x, y):
+                    continue
+                stand_at(scene, (x, y))
+                target = scene.nearby()
+                if target is not None and target.kind in ("cabinet", "goose"):  # здесь E открывает реплику
+                    self.assertLessEqual(y, lowest_box, (x, y))
+                    talks += 1
+        self.assertGreater(talks, 1000)
 
     def test_alice_stays_between_interface_strips(self) -> None:
         for keys in ([pygame.K_UP], [pygame.K_DOWN], [pygame.K_LEFT], [pygame.K_RIGHT, pygame.K_UP],
@@ -727,7 +790,8 @@ class LayoutTest(TrialTestCase):
 
     def test_alice_keeps_a_step_from_the_goose(self) -> None:
         finish_dialogue(self.scene)
-        stand_at(self.scene, (230, GOOSE_POSITION[1]))
+        stand_at(self.scene, (TABLE.right + 8, GOOSE_POSITION[1]))  # между столом и гусем
+        self.assertTrue(self.scene.collision.is_free(self.scene.alice.x, self.scene.alice.y))
         hold(self.scene, [pygame.K_RIGHT], 90)  # упереться в гуся слева
         self.assertLessEqual(self.scene.alice.x, GOOSE_POSITION[0] - 20)  # спрайты почти не перекрываются
         self.assertEqual(self.scene.nearby().kind, "goose")  # но поговорить можно
@@ -758,23 +822,16 @@ class LayoutTest(TrialTestCase):
     def test_texts_fit_on_screen(self) -> None:
         font = self.scene._font
         names = list(DOCUMENT_NAMES.values())
-        widest_held = max(font.size(f"В руках: {name}")[0] for name in names)
+        # Верхняя строка — задача, а с документом в руках — его полное название.
         for task in ("Задача: найди документы Лео 2/3", "Задача: сложи по порядку и сдай гусю", "Документы Лео приняты",
-                     "Лео — гражданин Страны Чудес"):
-            self.assertLessEqual(font.size(task)[0] + widest_held, WIDTH - 16, task)
-        # Строка стола — для каждой раскладки, которая бывает в игре: каждый документ лежит на столе
-        # один раз, в любом порядке, и одно место может быть пустым (документ в руках).
-        for order in itertools.permutations(DOCUMENTS):
-            for empty in (None, 0, 1, 2):
-                parts = [f"{index + 1} —" if index == empty else f"{index + 1} {DOCUMENT_NAMES[document]}"
-                         for index, document in enumerate(order)]
-                text = "Стол: " + " → ".join(parts)
-                self.assertLessEqual(font.size(text)[0], WIDTH - 8, text)
+                     "Лео — гражданин Страны Чудес", *(f"В руках: {title}" for title in DOCUMENT_TITLES.values())):
+            self.assertLessEqual(font.size(task)[0], WIDTH - 8, task)
         statuses = ["Стрелки/WASD — идти   E — действие   Backspace — уйти", "Гусь-инспектор   E — спросить совета",
                     "Все документы на столе — разложи их по порядку", "Стол подачи   найдено документов: 2/3"]
         statuses += [f"«{section.name}»   E — искать" for section in SECTIONS]
         statuses += [f"Поменяла местами: {a} и {b}" for a in names for b in names]
         statuses += [f"Место 1: {name}   E — поменять местами" for name in names]
+        statuses += [f"На столе подачи: {name} (2/3)" for name in names]
         for text in statuses:
             self.assertLessEqual(font.size(text)[0], WIDTH - 8, text)
         for cabinet in CABINETS:  # надпись на табличке шкафа
@@ -811,6 +868,159 @@ class LayoutTest(TrialTestCase):
             scene.draw(self.canvas)
             play(scene)
             self.assertTrue(scene.completed)
+
+
+class RoomTest(TrialTestCase):
+    """Компактная комната: весь пол доступен, большой стол в середине, шкафы и гусь на своих местах."""
+
+    def reachable(self) -> set[tuple[int, int]]:
+        """Точки сетки с шагом 2, куда Алиса доходит ногами от входа."""
+        collision = self.scene.collision
+        start = SPAWN
+        seen, queue = {start}, deque([start])
+        while queue:
+            x, y = queue.popleft()
+            for nx, ny in ((x + 2, y), (x - 2, y), (x, y + 2), (x, y - 2)):
+                if (nx, ny) not in seen and collision.is_free(nx, ny):
+                    seen.add((nx, ny))
+                    queue.append((nx, ny))
+        return seen
+
+    def test_table_is_big_central_and_reachable(self) -> None:
+        self.assertGreaterEqual(TABLE.width * TABLE.height, 5 * 120 * 20)  # прежний стол был 120×20
+        self.assertGreaterEqual(TABLE.width, WIDTH // 2)
+        self.assertLessEqual(abs(TABLE.centerx - WIDTH // 2), 2)  # посередине комнаты
+        self.assertTrue(TABLE.top < (HUD_HEIGHT + STATUS_TOP) // 2 < TABLE.bottom)
+        reachable = self.reachable()
+        for index, x in enumerate(SLOT_XS):
+            paper = slot_paper(index)
+            self.assertTrue(TABLE.contains(paper), index)
+            self.assertIn((x, SLOT_Y), reachable)  # за столом у каждого места можно встать
+        self.assertIn(CABINETS[0].point, reachable)
+        self.assertTrue(any(math.dist(point, GOOSE_POSITION) <= 24 for point in reachable))
+
+    def test_whole_floor_is_walkable_and_nothing_is_cut_off(self) -> None:
+        # Каждая свободная точка пола доступна от входа: ни отрезанных углов, ни пустой недоступной полосы.
+        reachable = self.reachable()
+        collision = self.scene.collision
+        free = {(x, y) for x in range(SPAWN[0] % 2, WIDTH, 2) for y in range(SPAWN[1] % 2, HEIGHT, 2)
+                if collision.is_free(x, y)}
+        self.assertEqual(free, reachable)
+        lower = [point for point in reachable if point[1] > (HUD_HEIGHT + STATUS_TOP) // 2]
+        self.assertTrue(any(x < TABLE.left for x, _ in lower) and any(x > TABLE.right for x, _ in lower))
+        self.assertGreaterEqual(max(y for _, y in reachable), STATUS_TOP - 6)  # пол — до самого низа комнаты
+        self.assertGreaterEqual(TABLE.bottom, STATUS_TOP - 6)  # под столом нет пустой полосы
+        self.assertEqual(HUD_HEIGHT, 12)  # одна строка интерфейса: комнате больше места
+
+    def test_lower_half_is_floor_not_a_dark_strip(self) -> None:
+        background = self.scene._background_plain
+        for y in range((HUD_HEIGHT + STATUS_TOP) // 2, STATUS_TOP, 4):
+            for x in (WALK_BOUNDS.left + 4, WALK_BOUNDS.right - 30):
+                color = tuple(background.get_at((x, y)))[:3]
+                self.assertNotEqual(color, (0, 0, 0), (x, y))
+                self.assertGreater(sum(color), 300, (x, y))  # светлый паркет, а не тёмная полоса
+
+
+class PaperTest(TrialTestCase):
+    """Документы — листы примерно A4 с полными названиями: на столе, в руках и при находке."""
+
+    def test_full_titles_are_split_logically_and_fit_the_paper(self) -> None:
+        width, height = PAPER_SIZE
+        self.assertTrue(1.25 <= height / width <= 1.5)  # вертикальный лист, почти A4
+        self.assertGreaterEqual(width, 44)
+        for document, lines in PAPER_TITLE_LINES.items():
+            with self.subTest(document=document):
+                self.assertEqual(" ".join(lines), DOCUMENT_TITLES[document])  # целиком, ни одного сокращения
+                for line in lines[:-1]:
+                    self.assertNotIn(line.split()[-1], ("о", "и", "на", "в"))  # предлог не висит в конце строки
+        fonts = {"системный": TextFonts(), "встроенный": TextFonts(None)}
+        for name, font_set in fonts.items():
+            for size, paper in ((PAPER_TITLE_SIZE, slot_paper(0)), (PREVIEW_TITLE_SIZE, self.scene.preview_rect())):
+                for document in DOCUMENTS:
+                    layout = paper_title_layout(paper, document, size)
+                    for text, (x, y) in layout:
+                        with self.subTest(font=name, size=size, text=text):
+                            for scale in (3, 6):
+                                line_width = font_set.font(size, scale, False).size(text)[0] / scale
+                                self.assertLessEqual(x + line_width / 2, paper.right - 3)  # не обрезано справа
+                                self.assertGreaterEqual(x - line_width / 2, paper.left + 3)  # и слева
+                            self.assertLessEqual(y + size, paper.bottom - 12)  # под названием — строки бланка
+
+    def test_titles_on_the_table_are_full_and_readable(self) -> None:
+        finish_dialogue(self.scene)
+        find_all(self.scene)
+        texts = drawn_texts(self.scene)
+        for document in DOCUMENTS:
+            lines = [c for c in texts if c.text in PAPER_TITLE_LINES[document] and c.style.size == PAPER_TITLE_SIZE
+                     and c.style.color == DOCUMENT_COLORS[document]]
+            self.assertEqual(len(lines), len(PAPER_TITLE_LINES[document]), document)
+        self.assertGreaterEqual(PAPER_TITLE_SIZE, 5)  # в окне 960×540 — не меньше 15 пикселей
+        self.assertEqual(table_titles(self.scene), [DOCUMENT_TITLES[d] for d in ("filing_permit", "leo_application",
+                                                                                  "form_request")])
+
+    def test_found_document_is_shown_big_while_alice_talks_about_it(self) -> None:
+        finish_dialogue(self.scene)
+        box = DialogueBox()
+        for document in CORRECT_ORDER:
+            with self.subTest(document=document):
+                stand_at(self.scene, CABINET[SECTION_OF[document]].point)
+                press_e(self.scene)
+                self.assertEqual(self.scene.found_document, document)
+                preview = self.scene.preview_rect()
+                titles = paper_titles(self.scene, PREVIEW_TITLE_SIZE)
+                self.assertEqual(" ".join(c.text for c in titles), DOCUMENT_TITLES[document])
+                self.assertTrue(all(preview.collidepoint(c.pos) for c in titles))
+                self.assertGreater(preview.width, PAPER_SIZE[0])  # крупнее листа на столе
+                self.assertFalse(preview.colliderect(self.scene.alice.rect))  # Алису не закрывает
+                self.assertGreaterEqual(preview.top, HUD_HEIGHT)
+                node = self.scene.dialogue.node
+                layout = box.layout(node, hires=True)
+                self.assertLessEqual(preview.bottom, (layout.name_tab or layout.box).top)  # над окном реплики
+                finish_dialogue(self.scene)
+                self.assertIsNone(self.scene.found_document)  # рассмотрела — лист лёг на стол
+                self.assertFalse(paper_titles(self.scene, PREVIEW_TITLE_SIZE))
+        search(self.scene, "births")  # повторный поиск — без находки и без листа
+        self.assertIsNone(self.scene.found_document)
+
+    def test_held_document_is_the_same_paper_and_named_in_full(self) -> None:
+        finish_dialogue(self.scene)
+        find_all(self.scene)
+        use_slot(self.scene, 1)
+        held = self.scene.puzzle.held
+        self.scene.draw(self.canvas)
+        x, y = self.scene.held_icon_center()
+        colors = {tuple(self.canvas.get_at((px, py)))[:3] for px in range(x - 6, x + 6) for py in range(y - 9, y + 9)}
+        self.assertIn(PAPER_COLOR, colors)
+        self.assertIn(DOCUMENT_COLORS[held], colors)  # цветная шапка того же бланка
+        hud = [c.text for c in drawn_texts(self.scene) if c.style == HUD_STYLE and c.pos[1] < HUD_HEIGHT]
+        self.assertEqual(hud, [f"В руках: {DOCUMENT_TITLES[held]}"])
+
+    def test_no_abbreviations_anywhere_in_a_full_run(self) -> None:
+        scene = self.scene
+        seen = set()
+        original = scene.draw
+
+        def record(surface, hires=None):
+            layer = HiResLayer()
+            original(surface, layer)
+            seen.update(c.text for c in layer.commands if isinstance(c, TextCommand))
+
+        scene.draw = record
+        finish_dialogue(scene)
+        for document in CORRECT_ORDER:
+            stand_at(scene, CABINET[SECTION_OF[document]].point)
+            press_e(scene)
+            scene.draw(self.canvas)
+            finish_dialogue(scene)
+            scene.draw(self.canvas)
+        use_slot(scene, 2)
+        scene.draw(self.canvas)
+        use_slot(scene, 0)
+        scene.draw(self.canvas)
+        for text in seen:
+            for short in ("ЗВБЗ", "РПЗ", "ЗРГЛ", "Заявл.", "Разр."):
+                self.assertNotIn(short, text)
+        self.assertTrue(seen)
 
 
 class AppIntegrationTest(unittest.TestCase):
