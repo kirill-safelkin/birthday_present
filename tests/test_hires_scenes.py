@@ -311,17 +311,18 @@ class CharacterTest(SceneTestCase):
         self.assertEqual(pygame.image.tobytes(first, "RGBA"), pygame.image.tobytes(second, "RGBA"))
 
     def test_npcs_use_their_own_manifest_frames_unmirrored_on_the_same_place(self) -> None:
+        # Ведущий тортов — Тортище: он крупнее (кадр GREAT_CAKE_SIZE), но тоже из исходного кадра 64×64.
         cases = [
-            (sushi.SushiTrialScene(), "cat_chef", "chef_pose", sushi.CHEF_POSITION),
-            (forms.FormsTrialScene(), "goose_inspector", "goose_pose", forms.GOOSE_POSITION),
-            (cakes.CakesTrialScene(), "chuchmek", "chuchmek_pose", cakes.CHUCHMEK_SPOT),
+            (sushi.SushiTrialScene(), "cat_chef", "chef_pose", sushi.CHEF_POSITION, 32),
+            (forms.FormsTrialScene(), "goose_inspector", "goose_pose", forms.GOOSE_POSITION, 32),
+            (cakes.CakesTrialScene(), "great_cake", "great_cake_pose", cakes.GREAT_CAKE_SPOT, cakes.GREAT_CAKE_SIZE),
         ]
-        for scene, char_id, pose_attr, feet in cases:
+        for scene, char_id, pose_attr, feet, size in cases:
             manifest = load_character_sprites(CHARACTERS_DIR / char_id)
             for frame in manifest.frames[:6]:
                 setattr(scene, pose_attr, frame.id)
                 layer, canvas = self.draw(scene)
-                rect = pygame.Rect(0, 0, 32, 32)
+                rect = pygame.Rect(0, 0, size, size)
                 rect.midbottom = feet
                 npc = [c for c in self.sprites(layer) if c.rect == rect]
                 with self.subTest(character=char_id, pose=frame.id):

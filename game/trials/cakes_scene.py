@@ -1,4 +1,4 @@
-"""Испытание тортов: перевёрнутая кондитерская Чучмека и сбежавшая клубника.
+"""Испытание тортов: перевёрнутая кондитерская Тортища и сбежавшая клубника.
 
 Две части в одной сцене:
 1. Рецепт на доске перепутан задом наперёд — этапы переставляются стрелками и E/Enter
@@ -17,12 +17,14 @@
 финальной реплики; отмена (Backspace) в любой момент до этого возвращает на площадь без награды.
 Оформление временное: кондитерская и кладовая нарисованы геометрией.
 
-Тортище (манифест great_cake) — неподвижный NPC кондитерской: стоит на своей подставке над
-дверью кладовой, крупнее Алисы, и меняет позы (CharacterSprites.pose) по репликам. Заговаривает
-один раз — после первой перестановки этапов; рецепт, клубника и награда от него не зависят.
-Черновые группы ходьбы не используются, кадры не отражаются.
+Тортище (манифест great_cake) — хозяин кондитерской и единственный ведущий испытания: стоит на
+своей подставке над дверью кладовой, крупнее Алисы, ведёт все главные разговоры (вступление,
+шутки на неверный рецепт, успех, побег и поимка клубники, финал) и меняет позы
+(CharacterSprites.pose) по репликам. После первой перестановки этапов он ещё и требует объяснений;
+рецепт, клубника и награда от его разговоров не зависят. Черновые группы ходьбы не используются,
+кадры не отражаются. Чучмека в испытании нет — он ждёт на центральной площади.
 
-Со слоем высокого разрешения (game/graphics/hires.py) Алиса, Чучмек и Тортище рисуются из
+Со слоем высокого разрешения (game/graphics/hires.py) Алиса и Тортище рисуются из
 исходных кадров 64×64, а надписи — шрифтом размера окна; перевёрнутые надписи (заголовок доски
 до исправления рецепта, таблички «ТОРТЫ» и «КЛАДОВАЯ») — тем же шрифтом, повёрнутым на 180°.
 Кондитерская, кладовая, подставка Тортища, торт и клубника остаются пиксельными, облачко
@@ -61,7 +63,7 @@ TRIAL_ID = "cakes"
 # Этапы испытания.
 INTRO_PHASE = "intro"
 ORDERING = "ordering"  # перестановка этапов рецепта
-SUCCESS_PHASE = "success"  # реакция Чучмека на правильный рецепт
+SUCCESS_PHASE = "success"  # реакция Тортища на правильный рецепт
 ESCAPE_PHASE = "escape"  # клубника убегает, затем реплики о побеге
 MAZE = "maze"  # погоня за клубникой в кладовой
 FOUND_PHASE = "found"  # клубника поймана — короткая реакция у рабочего стола
@@ -77,7 +79,7 @@ WALK_SPEED = 64
 HUD_HEIGHT = 24  # две строки: задача и часть испытания
 STATUS_TOP = 168
 # Доска с рецептом. Нижний край — выше любого окна реплики, поэтому, пока Алиса слушает
-# Чучмека, порядок этапов виден целиком.
+# Тортище, порядок этапов виден целиком.
 BOARD = pygame.Rect(6, 26, 196, 84)
 ROW_TOP = 40
 ROW_HEIGHT = 11
@@ -85,10 +87,8 @@ CHECK_ROW = len(STEPS)  # шестая строка доски — кнопка 
 CHECK_BUTTON = pygame.Rect(BOARD.x + 38, ROW_TOP + CHECK_ROW * ROW_HEIGHT + 2, 120, ROW_HEIGHT)
 FLOOR_TOP = 98  # где в кондитерской стена переходит в пол
 ALICE_SPOT = (222, 106)  # у доски и рабочего стола; ноги выше окна реплики
-CHUCHMEK_SPOT = (298, 106)
-CHUCHMEK_DOOR = (22, 100)  # в дверях кладовой — за границей комнаты с погоней
 # Тортище: кадр GREAT_CAKE_SIZE×GREAT_CAKE_SIZE, привязанный серединой нижнего края к GREAT_CAKE_SPOT,
-# — на золотой подставке над дверью кладовой, над головой Чучмека и правее стола с клубникой.
+# — на золотой подставке над дверью кладовой, правее стола с клубникой: его видно над окном реплики.
 # Голова не заходит под верхнюю полосу, ноги — выше любого окна реплики.
 GREAT_CAKE_SIZE = 44
 GREAT_CAKE_SPOT = (296, 68)
@@ -235,9 +235,6 @@ class CakesTrialScene(Scene):
             speed=WALK_SPEED,
             direction=Direction.RIGHT,
         )
-        self.chuchmek_sprites = try_load_character_sprites(root / "chuchmek")
-        self.chuchmek_pose = lines.CHUCHMEK_IDLE_POSE
-        self._chuchmek_frames: dict[str, tuple[pygame.Surface, pygame.Surface]] = {}  # поза → (исходник, на холсте)
         self.great_cake_sprites = try_load_character_sprites(root / "great_cake")
         self.great_cake_pose = lines.GREAT_CAKE_IDLE_POSE
         self._great_cake_frames: dict[str, tuple[pygame.Surface, pygame.Surface]] = {}
@@ -448,8 +445,6 @@ class CakesTrialScene(Scene):
 
     def _sync_dialogue(self) -> None:
         node = self.dialogue.node if self.dialogue is not None else None
-        if node is not None and node.id in lines.CHUCHMEK_POSES:
-            self.chuchmek_pose = lines.CHUCHMEK_POSES[node.id]
         if node is not None and node.id in lines.GREAT_CAKE_POSES:
             self.great_cake_pose = lines.GREAT_CAKE_POSES[node.id]
 
@@ -465,13 +460,11 @@ class CakesTrialScene(Scene):
     def _dialogue_finished(self) -> None:
         """Реплика закрыта: следующий этап испытания."""
         self.dialogue = None
-        self.chuchmek_pose = lines.CHUCHMEK_IDLE_POSE
         if self.phase == INTRO_PHASE:
             self.phase = ORDERING
         elif self.phase == SUCCESS_PHASE:
             self.phase = ESCAPE_PHASE  # клубника убегает — дальше в update
             self.escape_time = 0.0
-            self.chuchmek_pose = lines.CHUCHMEK_PANIC_POSE
         elif self.phase == ESCAPE_PHASE:
             self._enter_pantry()
         elif self.phase == FOUND_PHASE:
@@ -542,17 +535,12 @@ class CakesTrialScene(Scene):
             surface.blit(self._bakery if hires is None else self._bakery_plain, (0, 0))
             self._draw_table(surface, hires)
             self._draw_board(surface, hires)
-            chuchmek_spot = CHUCHMEK_SPOT
         else:
             surface.blit(self._pantry if hires is None else self._pantry_plain, (0, 0))
-            chuchmek_spot = CHUCHMEK_DOOR
         if hires is not None:  # перевёрнутая табличка — часть фона, под персонажами
             text, center = SIGNS[self.area]
             hires.text(text, SIGN_STYLE, self.sign_rect(text, center, hires=True).center, anchor="center", angle=180)
-        drawables = [
-            (chuchmek_spot[1], lambda: self._draw_chuchmek(surface, chuchmek_spot, hires)),
-            (self.alice.y + 0.1, lambda: self._draw_alice(surface, hires)),
-        ]
+        drawables = [(self.alice.y + 0.1, lambda: self._draw_alice(surface, hires))]
         if self.area == BAKERY:  # в кладовую Тортище не ходит
             drawables.append((GREAT_CAKE_SPOT[1], lambda: self._draw_great_cake(surface, hires)))
         strawberry = self.strawberry_position()
@@ -655,34 +643,6 @@ class CakesTrialScene(Scene):
             for row, line in enumerate(text_lines):
                 middle = rect.y + SPEECH_PADDING[1] + row * line_height + line_height / 2
                 hires.text(line, SPEECH_STYLE, (rect.x + SPEECH_PADDING[0], middle), anchor="midleft")
-
-    def _draw_chuchmek(self, canvas: pygame.Surface, spot: tuple[int, int], hires: HiResLayer | None = None) -> None:
-        source, image = self._chuchmek_frame()
-        rect = image.get_rect(midbottom=spot)
-        if hires is not None:
-            hires.sprite(source, rect)  # исходный кадр на том же месте и того же размера, без отражения
-        else:
-            canvas.blit(image, rect)
-
-    def _chuchmek_image(self) -> pygame.Surface:
-        """Поза Чучмека из манифеста chuchmek, уменьшенная ближайшим соседом; без отражения."""
-        return self._chuchmek_frame()[1]
-
-    def _chuchmek_frame(self) -> tuple[pygame.Surface, pygame.Surface]:
-        """Поза Чучмека: исходный кадр манифеста chuchmek (без отражения) и он же на холсте."""
-        pose = self.chuchmek_pose
-        if pose not in self._chuchmek_frames:
-            sprites: CharacterSprites | None = self.chuchmek_sprites
-            if sprites is None:
-                source = image = placeholder_animations().default.frames[0]
-            else:
-                try:
-                    source = sprites.frame(pose).image
-                except KeyError:
-                    source = sprites.frames[0].image
-                image = pygame.transform.scale(source, (SPRITE_SIZE, SPRITE_SIZE))
-            self._chuchmek_frames[pose] = (source, image)
-        return self._chuchmek_frames[pose]
 
     def great_cake_rect(self) -> pygame.Rect:
         """Где стоит Тортище на холсте: одно и то же место и размер при любой позе."""
@@ -905,7 +865,7 @@ class CakesTrialScene(Scene):
             self._draw_spines(page, shelf.inflate(0, -2).move(0, -1), seed=left)
             pygame.draw.rect(page, SHELF_WOOD_COLOR, (shelf.x, shelf.bottom - 2, shelf.width, 2))
         self._upside_down_sign(page, *SIGNS["pantry"], labels)
-        # Дверной проём слева, откуда пришли Алиса и Чучмек: в нём видна розовая кондитерская.
+        # Дверной проём слева, откуда пришла Алиса: в нём видна розовая кондитерская.
         doorway = pygame.Rect(0, 58, MAZE_BOUNDS.left - 4, 50)
         for row, y in enumerate(range(doorway.top, doorway.bottom, 6)):
             for column, x in enumerate(range(doorway.left, doorway.right, 6)):

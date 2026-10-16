@@ -35,8 +35,6 @@ from game.trials.cakes_scene import (  # noqa: E402
     CATCH_REACH,
     CHASE_TOAST,
     CHECK_ROW,
-    CHUCHMEK_DOOR,
-    CHUCHMEK_SPOT,
     DONE,
     ESCAPE_PHASE,
     ESCAPE_SECONDS,
@@ -143,7 +141,7 @@ def to_pantry(scene: CakesTrialScene) -> None:
     """От вступления до кладовой: рецепт, реакция, побег, реплики о побеге."""
     finish_dialogue(scene)
     solve_recipe(scene)
-    finish_dialogue(scene)  # реакция Чучмека
+    finish_dialogue(scene)  # реакция Тортища
     scene.update(ESCAPE_SECONDS + 0.1)  # клубника убегает
     finish_dialogue(scene)  # «Клубника сбежала!»
 
@@ -252,12 +250,12 @@ class TrialTestCase(unittest.TestCase):
 
 
 class IntroTest(TrialTestCase):
-    def test_starts_in_the_bakery_with_confident_chuchmek(self) -> None:
+    def test_starts_in_the_bakery_with_the_great_cake_as_host(self) -> None:
         self.assertEqual(self.scene.phase, INTRO_PHASE)
         self.assertEqual(self.scene.area, BAKERY)
         self.assertIs(self.scene.dialogue.script, lines.INTRO)
-        self.assertEqual(self.scene.dialogue.node.speaker, CHUCHMEK)
-        self.assertEqual(self.scene.chuchmek_pose, "clipboard_confident")
+        self.assertEqual(self.scene.dialogue.node.speaker, lines.GREAT_CAKE)
+        self.assertEqual(self.scene.great_cake_pose, "smug")  # «Чучмек лично проверил рецепт» — не верит
         self.assertEqual((self.scene.alice.x, self.scene.alice.y), ALICE_SPOT)
         self.assertEqual(self.scene.recipe.order, START_ORDER)
 
@@ -265,10 +263,12 @@ class IntroTest(TrialTestCase):
         shown = finish_dialogue(self.scene)
         said = [(lines.INTRO.nodes[node_id].speaker, lines.INTRO.nodes[node_id].text) for node_id in shown]
         self.assertEqual(said[:3], [
-            (CHUCHMEK, "Всё готово! Я лично проверил рецепт, ингредиенты и саму реальность."),
+            (lines.GREAT_CAKE,
+             "Добро пожаловать в мою кондитерскую! Чучмек лично проверил рецепт, ингредиенты и саму реальность."),
             (ALICE, "Почему противень висит на потолке?"),
-            (CHUCHMEK, "Экономия места. И тесто теперь не падает вниз. Обычно."),
+            (lines.GREAT_CAKE, "Экономия места. И тесто теперь не падает вниз. Обычно."),
         ])
+        self.assertEqual({speaker for speaker, _ in said}, {lines.GREAT_CAKE, ALICE})
         self.assertIn("Здесь всё наоборот", said[3][1])
         self.assertIn("в обратном порядке", said[4][1])
         self.assertEqual(self.scene.phase, ORDERING)
@@ -337,8 +337,8 @@ class RecipeTest(TrialTestCase):
     def test_wrong_order_is_not_accepted_and_game_goes_on(self) -> None:
         check_recipe(self.scene)
         self.assertEqual(self.scene.phase, ORDERING)
-        self.assertEqual(self.scene.dialogue.node.speaker, CHUCHMEK)
-        self.assertEqual(self.scene.chuchmek_pose, "confused")
+        self.assertEqual(self.scene.dialogue.node.speaker, lines.GREAT_CAKE)
+        self.assertEqual(self.scene.great_cake_pose, "smug")
         shown = finish_dialogue(self.scene)
         self.assertEqual(shown, ["wrong_joke", "wrong_hint"])
         self.assertEqual(lines.wrong_order(1, 0).nodes["wrong_hint"].speaker, ALICE)  # ошибку замечает Алиса
@@ -389,7 +389,7 @@ class EscapeTest(TrialTestCase):
         solve_recipe(self.scene)
         finish_dialogue(self.scene)
 
-    def test_strawberry_runs_away_then_chuchmek_panics(self) -> None:
+    def test_strawberry_runs_away_then_the_great_cake_raises_the_alarm(self) -> None:
         self.assertEqual(self.scene.phase, ESCAPE_PHASE)
         self.assertEqual(self.scene.task_text(), "Клубника сбежала!")
         start = self.scene.strawberry_position()
@@ -401,7 +401,8 @@ class EscapeTest(TrialTestCase):
         self.assertGreater(self.scene.strawberry_position()[0], WIDTH)  # убежала за край
         self.assertIs(self.scene.dialogue.script, lines.ESCAPE)
         self.assertEqual(self.scene.dialogue.node.text, "Клубника сбежала!")
-        self.assertEqual(self.scene.chuchmek_pose, "arms_up_panic")
+        self.assertEqual(self.scene.dialogue.node.speaker, lines.GREAT_CAKE)
+        self.assertEqual(self.scene.great_cake_pose, "angry")
         shown = finish_dialogue(self.scene)
         texts = [lines.ESCAPE.nodes[node_id].text for node_id in shown]
         self.assertEqual(texts[1:3], ["Она же клубника.", "Именно. У неё ни прописки, ни чувства ответственности."])
@@ -623,6 +624,84 @@ class MazeTest(TrialTestCase):
         self.assertIsNone(self.scene.strawberry_position())  # она у Алисы над головой, а не на полу
 
 
+class HostTest(TrialTestCase):
+    """Хозяин и ведущий испытания — Тортище; Чучмек остаётся на центральной площади."""
+
+    HOST_SCRIPTS = ("INTRO", "SUCCESS", "ESCAPE", "FOUND", "FINAL")
+
+    def test_chuchmek_never_speaks_in_the_trial(self) -> None:
+        speakers = {node.speaker for script in lines.all_scripts() for node in script.nodes.values()}
+        self.assertNotIn(CHUCHMEK, speakers)
+        self.assertEqual(speakers, {lines.GREAT_CAKE, ALICE, lines.STRAWBERRY})
+
+    def test_great_cake_leads_every_main_dialogue(self) -> None:
+        for name in self.HOST_SCRIPTS:
+            script = getattr(lines, name)
+            hosts = {node.speaker for node in script.nodes.values()} - {ALICE, lines.STRAWBERRY}
+            with self.subTest(script=name):
+                self.assertEqual(hosts, {lines.GREAT_CAKE})
+        for attempt in range(1, len(lines.WRONG_JOKES) + 1):
+            self.assertEqual(lines.wrong_order(attempt, 0).nodes["wrong_joke"].speaker, lines.GREAT_CAKE)
+        # Вступление и объяснение задачи — его: приветствие, выбор и ответы на него.
+        intro = lines.INTRO.nodes
+        for node_id in ("i_ready", lines.CHECK_CHOICE_ID, "i_check", "i_ceiling", "i_oven"):
+            self.assertEqual(intro[node_id].speaker, lines.GREAT_CAKE, node_id)
+        self.assertEqual(lines.FINAL.nodes["f_fragment"].speaker, lines.GREAT_CAKE)  # и фрагмент вручает он
+
+    def test_his_own_talk_and_answers_are_kept(self) -> None:
+        talk_nodes = lines.GREAT_CAKE_TALK.nodes
+        self.assertEqual([choice.text for choice in talk_nodes[lines.EVENT_CHOICE_ID].choices],
+                         ["Тебе сделать отдельную тарелку?", "А можно просто нормально приготовить торт?"])
+        self.assertEqual(talk_nodes["g_halt"].text,
+                         "Стоп! Прежде чем продолжить приготовление, я должен знать, кто отвечает за этот рецепт.")
+        self.assertEqual(talk_nodes[lines.EVENT_CHOICE_ID].text, "Я не десерт. Я событие!")
+        self.assertIn("Рецептам Чучмека я не доверяю", talk_nodes["g_watch"].text)
+        self.assertEqual([choice.text for choice in lines.INTRO.nodes[lines.CHECK_CHOICE_ID].choices],
+                         ["Сначала проверим рецепт.", "Почему даже потолок выглядит подозрительно?"])
+
+    def test_only_alice_and_the_great_cake_are_drawn_through_the_whole_trial(self) -> None:
+        scene = self.scene
+        counts = []
+        original = scene.draw
+
+        def record(surface, hires=None):
+            layer = HiResLayer()
+            original(surface, layer)
+            sprites = [c for c in layer.commands if isinstance(c, SpriteCommand)]
+            cake = [c for c in sprites if c.rect == scene.great_cake_rect()]
+            counts.append((scene.area, len(sprites), len(cake)))
+
+        scene.draw = record
+        scene.draw(self.canvas)
+        finish_dialogue(scene)
+        solve_recipe(scene)
+        scene.draw(self.canvas)
+        finish_dialogue(scene)
+        scene.update(ESCAPE_SECONDS + 0.1)
+        scene.draw(self.canvas)
+        finish_dialogue(scene)
+        scene.draw(self.canvas)
+        catch_strawberry(scene)
+        scene.draw(self.canvas)
+        self.assertFalse(hasattr(scene, "chuchmek_sprites"))
+        for area, sprites, cake in counts:
+            if area == BAKERY:
+                self.assertEqual((sprites, cake), (2, 1))  # Алиса и Тортище
+            else:
+                self.assertEqual((sprites, cake), (1, 0))  # в кладовой — только Алиса
+        self.assertIn(PANTRY, {area for area, _, _ in counts})
+
+    def test_chuchmek_still_waits_on_the_square(self) -> None:
+        play(self.scene)
+        self.assertIs(self.manager.current, self.hub)
+        self.assertEqual(self.progress.completed, ("cakes",))
+        hub = self.hub
+        hub.alice.set_position(hub._chuchmek_point()[0], hub._chuchmek_point()[1] + 10)
+        self.assertEqual(hub.nearby().kind, "chuchmek")
+        press_e(hub)
+        self.assertEqual(hub.dialogue.node.speaker, CHUCHMEK)
+
+
 class RewardTest(TrialTestCase):
     def test_back_at_the_table_for_the_final_lines(self) -> None:
         play(self.scene, stop_before_final_end=True)
@@ -722,7 +801,7 @@ class LayoutTest(TrialTestCase):
         lowest_box = min((box.layout(node).name_tab or box.layout(node).box).top
                          for script in lines.all_scripts() for node in script.nodes.values())
         # В кладовой окон реплик нет (см. test_no_dialogue_box_in_the_pantry): поймали — реакция у стола.
-        for y in (ALICE_SPOT[1], CHUCHMEK_SPOT[1], CHUCHMEK_DOOR[1], MAZE_START[1], BOARD.bottom):
+        for y in (ALICE_SPOT[1], GREAT_CAKE_SPOT[1], MAZE_START[1], BOARD.bottom):
             self.assertLessEqual(y, lowest_box)
 
     def test_pantry_keeps_alice_between_interface_strips(self) -> None:
@@ -750,14 +829,6 @@ class LayoutTest(TrialTestCase):
             self.assertLessEqual(28 + font.size(name)[0], row.width, name)
         self.assertLessEqual(self.scene.row_rect(CHECK_ROW).bottom, BOARD.bottom)
 
-    def test_chuchmek_is_drawn_from_manifest_without_mirroring(self) -> None:
-        sprites = load_character_sprites(CHARACTERS_DIR / "chuchmek")
-        expected = pygame.transform.scale(sprites.frame("clipboard_confident").image, (SPRITE_SIZE, SPRITE_SIZE))
-        actual = self.scene._chuchmek_image()
-        self.assertEqual(pygame.image.tobytes(actual, "RGBA"), pygame.image.tobytes(expected, "RGBA"))
-        frames = {frame.id for frame in sprites.frames}
-        poses = set(lines.CHUCHMEK_POSES.values()) | {lines.CHUCHMEK_IDLE_POSE, lines.CHUCHMEK_PANIC_POSE}
-        self.assertLessEqual(poses, frames)  # все позы есть в манифесте
 
     def test_draws_every_phase(self) -> None:
         scene = self.scene
@@ -896,7 +967,7 @@ class ChaseSceneTest(TrialTestCase):
             self.assertTrue(rect.collidepoint(command.pos))
         sprites = [c for c in layer.commands if isinstance(c, SpriteCommand)]
         self.assertEqual(len([c for c in sprites if c.rect == scene.alice.rect]), 1)
-        self.assertEqual(len(sprites), 2)  # Алиса и Чучмек в дверях — по одному разу
+        self.assertEqual(len(sprites), 1)  # в кладовой только Алиса: Тортище остался на подставке, Чучмек — на площади
         scene.draw(self.canvas)  # и без слоя — пиксельным шрифтом, без ошибок
 
 
@@ -1176,15 +1247,14 @@ class GreatCakeSpritesTest(TrialTestCase):
     def test_broken_or_missing_manifest_shows_a_placeholder_and_the_trial_goes_on(self) -> None:
         for case in ("нет кадра одной позы", "нет папки"):
             with self.subTest(case=case), tempfile.TemporaryDirectory() as root:
-                for char_id in ("alice", "chuchmek"):
-                    shutil.copytree(CHARACTERS_DIR / char_id, Path(root) / char_id)
+                shutil.copytree(CHARACTERS_DIR / "alice", Path(root) / "alice")
                 if case == "нет кадра одной позы":
                     shutil.copytree(CHARACTERS_DIR / "great_cake", Path(root) / "great_cake")
                     (Path(root) / "great_cake" / self.sprites.frame("angry_shout").file).unlink()
                 progress = GameProgress()
                 scene = CakesTrialScene(progress, characters_dir=root)
                 self.assertIsNone(scene.great_cake_sprites)
-                self.assertIsNotNone(scene.chuchmek_sprites)  # остальные персонажи на месте
+                self.assertEqual(scene.alice.player.source.get_size(), (64, 64))  # Алиса — из своего манифеста
                 for pose in USED_GREAT_CAKE_POSES:
                     scene.great_cake_pose = pose
                     layer = HiResLayer(strict=True)
@@ -1276,10 +1346,6 @@ class GreatCakeDrawingTest(TrialTestCase):
         box = DialogueBox()
         dialogue_areas = [box.layout(node, hires).area for script in lines.all_scripts()
                           for node in script.nodes.values() for hires in (False, True)]
-        chuchmek = load_character_sprites(CHARACTERS_DIR / "chuchmek")
-        chuchmek_rect = pygame.Rect(0, 0, SPRITE_SIZE, SPRITE_SIZE)
-        chuchmek_rect.midbottom = CHUCHMEK_SPOT
-        chuchmek_poses = {*lines.CHUCHMEK_POSES.values(), lines.CHUCHMEK_IDLE_POSE, lines.CHUCHMEK_PANIC_POSE}
         # Клубника на столе, весь её побег до края экрана и она же на вершине торта в финале.
         scene = CakesTrialScene()
         finish_dialogue(scene)
@@ -1301,8 +1367,6 @@ class GreatCakeDrawingTest(TrialTestCase):
                 self.assertFalse(cake.colliderect(self.scene.alice.rect))
                 self.assertEqual(cake.collidelist(dialogue_areas), -1)
                 self.assertEqual(cake.collidelist(strawberries), -1)
-                for chuchmek_pose in chuchmek_poses:
-                    self.assertFalse(cake.colliderect(body(chuchmek.frame(chuchmek_pose).image, chuchmek_rect)))
         lowest = min(area.top for area in dialogue_areas)
         self.assertLessEqual(GREAT_CAKE_SPOT[1], lowest)  # ноги выше любого окна реплики
 
@@ -1310,17 +1374,18 @@ class GreatCakeDrawingTest(TrialTestCase):
 class GreatCakeTalkTest(TrialTestCase):
     def setUp(self) -> None:
         super().setUp()
-        finish_dialogue(self.scene)  # вступление Чучмека — без Тортища
+        finish_dialogue(self.scene)  # вступление Тортища
 
-    def test_quiet_until_alice_first_changes_the_recipe(self) -> None:
+    def test_demands_explanations_only_when_alice_first_changes_the_recipe(self) -> None:
         self.assertEqual(self.scene.phase, ORDERING)
         choose(self.scene, 0)
         self.assertIsNone(self.scene.dialogue)  # взять этап — ещё не изменить рецепт
         choose(self.scene, 0)
         self.assertIsNone(self.scene.dialogue)
         check_recipe(self.scene)
-        self.assertIsNot(self.scene.dialogue.script, lines.GREAT_CAKE_TALK)  # отказ — реплики Чучмека
-        self.assertEqual(self.scene.dialogue.node.speaker, CHUCHMEK)
+        self.assertIsNot(self.scene.dialogue.script, lines.GREAT_CAKE_TALK)  # отказ — обычная шутка ведущего
+        self.assertEqual(self.scene.dialogue.node.id, "wrong_joke")
+        self.assertEqual(self.scene.dialogue.node.speaker, lines.GREAT_CAKE)
         finish_dialogue(self.scene)
         first_swap(self.scene)
         dialogue = self.scene.dialogue
