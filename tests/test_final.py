@@ -17,7 +17,7 @@ import pygame  # noqa: E402
 import config  # noqa: E402
 from game.core.app import App  # noqa: E402
 from game.core.scenes import Scene, SceneManager  # noqa: E402
-from game.dialogue.box import DialogueBox  # noqa: E402
+from game.dialogue.box import HANGING_WORDS, DialogueBox  # noqa: E402
 from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites  # noqa: E402
 from game.story import cakes_dialogue  # noqa: E402
 from game.story import final_dialogue as text  # noqa: E402
@@ -417,6 +417,15 @@ class TextTest(FinaleTestCase):
                 words = re.sub(r"\s+", " ", " ".join(lines)).strip()
                 self.assertEqual(words, re.sub(r"\s+", " ", page).strip())  # всё до последнего слова
         self.assertLessEqual(len(self.scene._gift_lines), self.scene.max_letter_lines())
+
+    def test_no_letter_line_ends_with_a_hanging_short_word(self) -> None:
+        # «…идти по» / «жизни…» — нет: короткий предлог или союз переходит вместе со следующим словом.
+        for hires in (False, True):
+            for index, page in enumerate((*text.LETTER_PAGES, text.GIFT_TEXT)):
+                with self.subTest(hires=hires, page=index):
+                    for line in self.scene._wrap(page, hires=hires):
+                        if line.strip():
+                            self.assertNotIn(line.split()[-1].lower(), HANGING_WORDS, line)
 
     def test_gift_stays_a_secret(self) -> None:
         self.assertEqual(text.GIFT_TEXT, (

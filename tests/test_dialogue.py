@@ -21,7 +21,14 @@ from game.dialogue.model import (  # noqa: E402
     DialogueNode,
     DialogueScript,
 )
-from game.dialogue.box import CHOICES_GAP, PADDING_Y, DialogueBox, wrap_spans, wrap_text  # noqa: E402
+from game.dialogue.box import (  # noqa: E402
+    CHOICES_GAP,
+    HANGING_WORDS,
+    PADDING_Y,
+    DialogueBox,
+    wrap_spans,
+    wrap_text,
+)
 from game.graphics.hires import HiResLayer, TextCommand  # noqa: E402
 from game.graphics.fonts import load_font  # noqa: E402
 
@@ -529,6 +536,28 @@ class LongTextTest(unittest.TestCase):
                 self.assertFalse(any(line.startswith("—") for line in lines), lines)
                 self.assertEqual(" ".join(lines).split(), text.split())
         self.assertEqual(wrap_text("— Привет!", self.font, 300), ["— Привет!"])  # тире прямой речи — на месте
+
+    def test_short_word_never_ends_a_line(self) -> None:
+        text = "И мне очень повезло идти по жизни рядом с тобой, а ты всё равно дошла до последней страницы."
+        for width in range(60, 320, 5):
+            lines = wrap_text(text, self.font, width)
+            with self.subTest(width=width):
+                for line, following in zip(lines, lines[1:]):
+                    last = line.split()[-1]
+                    if last.lower() in HANGING_WORDS:
+                        # Висеть короткое слово может, только если вместе со следующим оно шире строки:
+                        # иначе пришлось бы резать слово по буквам.
+                        pair = f"{last} {following.split()[0]}"
+                        self.assertGreater(self.font.size(pair)[0], width, lines)
+                self.assertEqual(" ".join(lines).split(), text.split())  # ни одно слово не потеряно и не разрезано
+        lines = wrap_text(text, self.font, 120)
+        self.assertIn("до последней", lines)  # раньше было «…дошла до» / «последней…»
+        self.assertIn("идти по жизни рядом", lines)
+        # Только целые короткие слова: «повезло», «до.» и конец абзаца не склеиваются.
+        self.assertEqual(wrap_text("до", self.font, 300), ["до"])
+        self.assertEqual(wrap_text("Иду в", self.font, 300), ["Иду в"])
+        lines = wrap_text("вот и всё", self.font, self.font.size("вот и")[0])
+        self.assertEqual(lines, ["вот", "и всё"])
 
     def test_newline_starts_new_line(self) -> None:
         self.assertEqual(wrap_text("Раз.\nДва три.", self.font, 300), ["Раз.", "Два три."])

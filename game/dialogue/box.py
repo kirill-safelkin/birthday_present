@@ -45,9 +45,28 @@ CHOICE_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_CHOICE_COLOR, background=con
 SELECTED_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_SELECTED_COLOR, background=config.DIALOGUE_SELECTED_BG_COLOR)
 HINT_STYLE = TextStyle(TEXT_SIZE, config.DIALOGUE_CHOICE_COLOR, background=config.DIALOGUE_BOX_COLOR)
 
-# Слово для переноса. Отдельно стоящее тире прилипает к предыдущему слову: по правилам русской
-# типографики строка не начинается с тире посреди фразы («Что это — / пока секрет», а не «— пока…»).
-_WORD = re.compile(r"\S+(?:[ \u00a0]+[—–](?=\s|$))*")
+# Слово для переноса — по правилам русской типографики. Отдельно стоящее тире прилипает
+# к предыдущему слову: строка не начинается с тире посреди фразы («Что это — / пока секрет»,
+# а не «— пока…»). Короткие предлоги, союзы и частицы прилипают к следующему: строка
+# не заканчивается висячим «в», «и», «по» («идти / по жизни», а не «идти по / жизни»).
+HANGING_WORDS = ("а", "в", "и", "к", "о", "с", "у", "во", "ко", "со", "об", "от", "до", "на", "по", "за", "из",
+                 "не", "ни", "но")
+_SINGLE_WORD = re.compile(r"\S+(?:[ \u00a0]+[—–](?=\s|$))*")
+_WORD = re.compile(
+    r"(?:(?<!\S)(?:" + "|".join(HANGING_WORDS) + r")[ \u00a0]+(?=\S))*" + _SINGLE_WORD.pattern,
+    re.IGNORECASE,
+)
+
+
+def _words(paragraph: str, font: pygame.font.Font | TextMetrics, max_width: int):
+    """Куски строки для переноса: слово вместе со своими короткими словами и тире. Если такой кусок
+    шире строки, он делится обратно на слова — лучше висячий предлог, чем слово, разрезанное по буквам."""
+    for match in _WORD.finditer(paragraph):
+        if " " in match.group().strip() and font.size(match.group())[0] > max_width:
+            for word in _SINGLE_WORD.finditer(match.group()):
+                yield match.start() + word.start(), match.start() + word.end()
+        else:
+            yield match.start(), match.end()
 
 
 def wrap_spans(text: str, font: pygame.font.Font | TextMetrics, max_width: int) -> list[tuple[int, int]]:
@@ -58,7 +77,9 @@ def wrap_spans(text: str, font: pygame.font.Font | TextMetrics, max_width: int) 
 
     Возвращает границы строк (начало, конец) в исходном тексте. Так печатающийся
     текст сразу появляется на своей строке, и слова не перескакивают при переносе.
-    Переносы делаются по пробелам, но тире посреди фразы не переносится в начало строки.
+    Переносы делаются по пробелам, но тире посреди фразы не переносится в начало строки,
+    а короткий предлог или союз — в конец строки (он переходит вместе со следующим словом,
+    если пара помещается в строку).
     Слово, которое не помещается в строку целиком, режется по буквам. Символ \\n начинает
     новую строку.
     """
@@ -66,8 +87,8 @@ def wrap_spans(text: str, font: pygame.font.Font | TextMetrics, max_width: int) 
     paragraph_start = 0
     for paragraph in text.split("\n"):
         line: tuple[int, int] | None = None
-        for match in _WORD.finditer(paragraph):
-            start, end = paragraph_start + match.start(), paragraph_start + match.end()
+        for word_start, word_end in _words(paragraph, font, max_width):
+            start, end = paragraph_start + word_start, paragraph_start + word_end
             if line is not None and font.size(text[line[0] : end])[0] <= max_width:
                 line = (line[0], end)
                 continue
