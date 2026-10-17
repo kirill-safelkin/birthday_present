@@ -1,7 +1,7 @@
 {
   "format": 1,
   "id": "cat_chef",
-  "display_name": "Кот-повар",
+  "display_name": "Майкл-повар",
   "source": {
     "archive": "cat_chef_sprite_assets.zip",
     "id": "cat_chef",

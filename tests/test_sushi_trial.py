@@ -330,7 +330,7 @@ class LayoutTest(TrialTestCase):
             self.assertLessEqual(font.size(order)[0] + font.size("В руках: Авокадо")[0], width - 16, order)
             chips = sum(font.size(INGREDIENT_NAMES[item])[0] + 22 for item in recipe.ingredients)
             self.assertLessEqual(chips, width - 8)
-        statuses = ["Стрелки/WASD — идти   E — действие   Backspace — уйти", "Кот-повар   E — спросить про заказ",
+        statuses = ["Стрелки/WASD — идти   E — действие   Backspace — уйти", "Майкл-повар   E — спросить про заказ",
                     "Руки пусты — сначала возьми ингредиент", "Тарелка   сначала возьми ингредиент"]
         names = list(INGREDIENT_NAMES.values())
         statuses += [f"Вернула на место: {a}. Взяла: {b}" for a in names for b in names]
@@ -497,6 +497,21 @@ class AppIntegrationTest(unittest.TestCase):
         self.assertEqual(self.app.scenes.current.fragments_text(), "Фрагменты праздника: 1/3")
         self.assertIs(self.app.scenes.current.progress, self.app.progress)
         self.assertEqual(HUB_SCENE, "hub")
+
+
+class ChefNameTest(unittest.TestCase):
+    """Повар зовётся Майкл-повар везде, где его имя видит игрок; технический id остаётся cat_chef."""
+
+    def test_chef_is_called_michael_everywhere(self) -> None:
+        self.assertEqual(CHEF, "Майкл-повар")
+        speakers = {node.speaker for script in all_scripts() for node in script.nodes.values()}
+        self.assertIn(CHEF, speakers)
+        sprites = load_character_sprites(CHARACTERS_DIR / "cat_chef")
+        self.assertEqual(sprites.display_name, "Майкл-повар")
+
+    def test_old_name_is_gone_from_dialogues(self) -> None:
+        texts = [node.speaker + " " + node.text for script in all_scripts() for node in script.nodes.values()]
+        self.assertFalse([t for t in texts if "Кот-повар" in t or "кот-повар" in t])
 
 
 if __name__ == "__main__":

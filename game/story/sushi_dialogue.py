@@ -3,7 +3,7 @@
 Суши — вкусная часть праздничного плана. Во вступлении у Алисы выбор (чему она доверяет
 на кухне): повар отвечает по-разному, а правила и заказы одни и те же при любом ответе.
 Показывает их game/trials/sushi_scene.py через существующую систему диалогов.
-CHEF_POSES — какую позу (кадр cat_chef) принимает кот-повар на реплике.
+CHEF_POSES — какую позу (кадр cat_chef) принимает Майкл-повар на реплике.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 from game.dialogue.model import DialogueChoice, DialogueNode, DialogueScript
 from game.story.intro_dialogue import ALICE
 
-CHEF = "Кот-повар"
+CHEF = "Майкл-повар"
 TRUST_CHOICE_ID = "s_trust"  # выбор Алисы во вступлении
 
 

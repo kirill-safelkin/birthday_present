@@ -92,8 +92,9 @@ TRIAL_SPOILERS = re.compile(
 )
 
 # Тексты письма, секрета подарка, реакции на F-17, титров и последнего экрана — как в коммите
-# до этого этапа (5bdfc28…f9e55d9). Сумма меняется только при правке самих текстов.
-LETTER_SHA256 = "fb2685c46c8af91e2d29cb0895982850769be76dfed72901cda9a9dfba0307aa"
+# до этого этапа (5bdfc28…f9e55d9); единственная правка — «Кот-повар» → «Майкл-повар» в титрах.
+# Сумма меняется только при правке самих текстов.
+LETTER_SHA256 = "06cb4ff97f7f8a5953ee8eba481a19eaaebcc186355be337da6be6831907d199"
 
 
 def key(code: int, scancode: int = 0, event_type: int = pygame.KEYDOWN) -> pygame.event.Event:
@@ -194,7 +195,7 @@ class BirthdayGoalTest(unittest.TestCase):
                 self.assertIsNone(TRIAL_SPOILERS.search(node.text), node.text)
                 for choice in node.choices or ():
                     self.assertIsNone(TRIAL_SPOILERS.search(choice.text), choice.text)
-        self.assertIsNotNone(TRIAL_SPOILERS.search("Кот-повар, торт и гусь"))  # сам фильтр работает
+        self.assertIsNotNone(TRIAL_SPOILERS.search("Майкл-повар, торт и гусь"))  # сам фильтр работает
         self.assertIsNone(TRIAL_SPOILERS.search("который готовит праздник"))
         # Что внутри, Алиса узнаёт в самих испытаниях.
         self.assertIn("вкусная часть праздника", sushi_dialogue.INTRO.nodes["s_tasty"].text)

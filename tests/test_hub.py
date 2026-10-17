@@ -368,7 +368,7 @@ class PortalTest(HubTestCase):
         self.assertIs(manager.current, base)
 
     def test_portal_messages_match_the_trials(self) -> None:
-        self.assertIn("Кот-повар точит нож. Надеюсь, для суши", PORTAL_NOT_READY["sushi"].nodes["p_sushi"].text)
+        self.assertIn("Майкл-повар точит нож. Надеюсь, для суши", PORTAL_NOT_READY["sushi"].nodes["p_sushi"].text)
         self.assertIn("форму на разрешение входа", PORTAL_NOT_READY["forms"].nodes["p_forms"].text)
         self.assertIn("с тортами всё под контролем. Это тревожный знак", PORTAL_NOT_READY["cakes"].nodes["p_cakes"].text)
 

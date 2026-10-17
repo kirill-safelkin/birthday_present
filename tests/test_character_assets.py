@@ -156,7 +156,7 @@ GREAT_CAKE_PNG_DIGEST = "b62d04eeef93fffb2b28ebd77cf3afef248db2cbb205ed314818eb9
 # а пиксели утверждённых кадров вообще не меняются (assets/README.md).
 APPROVED_DIGESTS = {
     "alice": "0e67311fdad00e1e654031c8784b57b2954568d8722f6fe27814e539118e641e",
-    "cat_chef": "323c4c06ce0f8895048198f0673536ca2d9dda50fb7cd80f56296be89c5ab610",
+    "cat_chef": "7108e1e2d95eb2f853938b0da4a5c36cde1641b3d11889afd88e6cdb7468c22e",
     "chuchmek": "9ed5e7332d20a565f79e70e28c0b3dd4422c4598c3461bda0c95ad624e7f01f5",
     "goose_inspector": "84d7cb51641fa0cf2c493a5a221329afe2680da2b424c06d609242d886638124",
     "hamster_official": "4cc1b281230218f26cf3c3c5e48da521fa69688bbf080904477496f7c3e9ac93",

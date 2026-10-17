@@ -86,7 +86,7 @@ def leo_script(text: str) -> DialogueScript:
 PORTAL_NOT_READY = {
     "sushi": DialogueScript(
         "p_sushi",
-        [DialogueNode("p_sushi", CHUCHMEK, "Портал пока не готов. Кот-повар точит нож. Надеюсь, для суши.")],
+        [DialogueNode("p_sushi", CHUCHMEK, "Портал пока не готов. Майкл-повар точит нож. Надеюсь, для суши.")],
     ),
     "forms": DialogueScript(
         "p_forms",

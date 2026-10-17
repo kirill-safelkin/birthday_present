@@ -1,4 +1,4 @@
-# Кот-повар (`cat_chef`) — спрайты
+# Майкл-повар (`cat_chef`) — спрайты
 
 - Источник: архив `cat_chef_sprite_assets.zip`.
   Исходные описание и README без изменений: `art/characters/cat_chef/original/`.
