@@ -4,21 +4,27 @@
 Тексты — в game/story/final_dialogue.py. Сцена ничего не меняет в GameProgress: она
 только показывает собранные фрагменты.
 
-Этапы: страница восстанавливается (фрагменты становятся символами, поляна украшается) →
+Этапы: праздник собирается (три фрагмента слетаются над столом и складываются в одну светящуюся
+мозаику, появляются стол с тортом и суши, загораются фонарики, в небе начинается фейерверк) →
 разговор с Чучмеком → письмо по страницам → тихая пауза → секрет настоящего подарка →
 реплика Чучмека → титры → последний экран. На последнем экране E или Enter завершает
 прохождение: сцена просит приложение закрыться (SceneManager.request_quit). Backspace до
 этого возвращает на площадь — прогресс не трогается, мозаика по-прежнему светится.
 Все паузы и анимации идут по dt, без ожиданий и своих циклов.
 
-На странице вместе с Алисой и Чучмеком — Лео: он сидит на мягком покрывале между Алисой
-и подставкой с фрагментами. Он не говорит и не ходит — только меняет позы из своего манифеста
+На поляне вместе с Алисой и Чучмеком — Лео: он сидит на мягком покрывале между Алисой
+и праздничным столом. Он не говорит и не ходит — только меняет позы из своего манифеста
 (удивляется, смеётся), когда Чучмек даёт слово «комиссии». В письмо и секрет подарка он не вмешивается.
 
 Со слоем высокого разрешения (game/graphics/hires.py) Алиса, Чучмек и Лео рисуются из исходных
 кадров 64×64, а все надписи — письмо, секрет подарка, штамп, титры, последний экран и
 подсказки — шрифтом размера окна. Письмо для этого переносится по метрикам того же шрифта
-(своя раскладка, те же листы и те же границы строк); страница и символы остаются пиксельными.
+(своя раскладка, те же листы и те же границы строк); небо, поляна и мелочи остаются пиксельными,
+а стол, торт, фонарики, шарики и фрагменты рисуются вдвое подробнее холста (game/story/final_art.py).
+
+Фейерверк (game/graphics/fireworks.py) идёт короткими залпами, пока Чучмек говорит, и прекращается,
+когда открывается письмо: во время чтения ничто в небе не мешает тексту, а искры, оставшиеся
+в небе, догорают под листом.
 """
 
 from __future__ import annotations
@@ -33,11 +39,13 @@ from game.core.input import Action, actions_for
 from game.core.scenes import Scene
 from game.dialogue.box import DialogueBox, wrap_text
 from game.dialogue.model import DialogueController, DialogueScript
+from game.graphics.fireworks import FireworkShow
 from game.graphics.fonts import TextFonts, TextStyle, load_font, render_text
-from game.graphics.hires import HiResLayer, logical_target
+from game.graphics.hires import HiResLayer, logical_target, scale_sprite
+from game.graphics.pixel_art import Piece, mix, sparkle_sprite
 from game.graphics.placeholder import placeholder_animations
 from game.graphics.sprite_manifest import CHARACTERS_DIR, CharacterSprites, try_load_character_sprites
-from game.story import final_dialogue as text
+from game.story import final_art, final_dialogue as text
 from game.world.hub import FINALE_SCENE
 from game.world.progress import TRIALS, GameProgress
 
@@ -56,14 +64,17 @@ DONE = "done"  # прохождение завершено, игра закры�
 
 WIDTH, HEIGHT = config.LOGICAL_SIZE
 SPRITE_SIZE = 48  # как во вступлении: страница книги, персонажи крупнее, чем на площади
-ALICE_POSITION = (104, 108)  # точки под ногами; выше любого окна реплики
-CHUCHMEK_POSITION = (218, 108)
-LEO_POSITION = (134, 108)  # на покрывале рядом с Алисой, у подставки с фрагментами
+ALICE_POSITION = (64, 108)  # точки под ногами; выше любого окна реплики (оно начинается с y=111)
+CHUCHMEK_POSITION = (256, 108)
+LEO_POSITION = (100, 108)  # на покрывале рядом с Алисой, у края стола
 LEO_SIZE = 32  # малыш меньше взрослых: как персонажи на площади
 BLANKET = pygame.Rect(LEO_POSITION[0] - 17, LEO_POSITION[1] - 6, 34, 9)
-# Где собираются три фрагмента: суши, документ с печатью, торт.
-SYMBOL_POSITIONS = {"sushi": (136, 64), "forms": (160, 52), "cakes": (184, 64)}
-FRAGMENT_STARTS = {"sushi": (-12, 90), "forms": (160, -14), "cakes": (WIDTH + 12, 90)}
+# Где над столом собираются три фрагмента: суши, документ с печатью, торт.
+SYMBOL_POSITIONS = final_art.EMBLEM_SPOTS
+EMBLEM_CENTER = final_art.EMBLEM_CENTER
+FRAGMENT_STARTS = {"sushi": (-12, 90), "forms": (-12, 18), "cakes": (WIDTH + 12, 90)}
+FRAGMENT_ARCS = {"sushi": -10, "forms": 6, "cakes": -10}  # изгиб пути: фрагмент с документом идёт под ленточкой
+FRAGMENT_TILE = 14  # сторона плитки фрагмента над столом, логических пикселей
 ARRIVAL_SECONDS = 3.6
 PAGE_FADE_SECONDS = 0.5  # страница письма проявляется; первое нажатие проявляет её сразу
 PAUSE_SECONDS = 2.5  # тишина между письмом и шуткой про подарок — её не пропустить
@@ -80,21 +91,19 @@ LETTER_MARGINS = (
     pygame.Rect(0, PANEL.top, PANEL.left, PANEL.height),
     pygame.Rect(PANEL.right, PANEL.top, WIDTH - PANEL.right, PANEL.height),
 )
-GARLAND_FLAGS = 15
+FIREWORKS_START = 0.6  # доля появления, с которой в небе начинается фейерверк
+VEIL_SHARE = 0.18  # доля появления, за которую ночь «рассеивается» в начале
 
-PAGE_COLOR = (246, 236, 208)
 PAGE_EDGE_COLOR = (196, 160, 112)
-SKY_COLOR = (238, 232, 246)
-HILL_COLORS = ((178, 206, 146), (154, 188, 126))
 INK_COLOR = (96, 64, 46)
 PARCHMENT_COLOR = (250, 242, 220)
 PLUM_COLOR = (128, 74, 126)
 GOLD_COLOR = (222, 176, 84)
 CREAM_COLOR = (252, 238, 204)
 NIGHT_COLOR = (52, 38, 74)
+VEIL_COLOR = (16, 12, 40)
 GLOW_COLOR = (255, 236, 140)
 FLAG_COLORS = ((232, 120, 140), (250, 214, 110), (150, 200, 230), (170, 220, 150), (200, 160, 230))
-FRAGMENT_COLORS = {"sushi": (250, 170, 150), "forms": (176, 196, 236), "cakes": (252, 196, 226)}
 STAMP_COLOR = (196, 52, 60)
 BLANKET_COLOR = (186, 206, 240)
 BLANKET_EDGE_COLOR = (132, 156, 204)
@@ -194,8 +203,10 @@ class FinalScene(Scene):
         self.completed = False  # последний экран подтверждён: прохождение закончено
         self.time = 0.0
         self.shown: list[str] = []  # что игрок увидел, по порядку (для проверки сценария)
-        self._background = self._render_page()
-        self._background_plain = self._render_page(label=False)  # подпись ленточки рисует слой окна
+        self.art = final_art.finale_art()
+        self.show = FireworkShow()  # фейерверк: запускается, когда фрагменты сложились
+        self._scaled_tiles: dict[tuple[str, int], pygame.Surface] = {}
+        self._sparkles = [sparkle_sprite(color, 3) for color in ((255, 244, 190), (255, 190, 220), (190, 226, 255))]
 
     # --- Состояние ---
 
@@ -204,14 +215,29 @@ class FinalScene(Scene):
         return self.page_time >= PAGE_FADE_SECONDS
 
     @property
-    def festive(self) -> float:
-        """Насколько поляна уже украшена: 0 — пустая страница, 1 — праздник."""
+    def arrival_progress(self) -> float:
+        """Как далеко зашло появление праздника: от 0 до 1 (после него всегда 1)."""
         if self.phase != ARRIVAL:
             return 1.0
-        return _ease((self.phase_time / ARRIVAL_SECONDS - 0.55) / 0.4)
+        return min(1.0, self.phase_time / ARRIVAL_SECONDS)
+
+    @property
+    def festive(self) -> float:
+        """Насколько поляна уже украшена: 0 — гирлянды погашены, 1 — праздник (горят фонарики, шарики на месте)."""
+        return _ease((self.arrival_progress - 0.55) / 0.4)
+
+    @property
+    def table_reveal(self) -> float:
+        """Насколько уже проявился праздничный стол с тортом и суши: 0 — нет, 1 — накрыт."""
+        return _ease((self.arrival_progress - 0.42) / 0.25)
 
     def symbols_assembled(self) -> bool:
-        return self.phase != ARRIVAL or self.phase_time >= ARRIVAL_SECONDS * 0.65
+        """Фрагменты уже слились в одну мозаику над столом."""
+        return self.arrival_progress >= 0.65
+
+    @property
+    def fireworks_started(self) -> bool:
+        return self.show.running or self.show.bursts_fired > 0
 
     def hint(self) -> str:
         """Подсказка внизу экрана (кроме реплик — у них своя стрелка «дальше»)."""
@@ -298,6 +324,7 @@ class FinalScene(Scene):
         self.dialogue = None
         if self.phase == TALK:
             self._set_phase(LETTER)
+            self.show.stop()  # письмо читают без фейерверка: новые залпы не начинаются
             self.page = 0
             self.page_time = 0.0
             self.shown.append("letter_0")
@@ -318,6 +345,9 @@ class FinalScene(Scene):
         self.time += dt
         self.phase_time += dt
         self.page_time += dt
+        if self.phase in (ARRIVAL, TALK) and self.arrival_progress >= FIREWORKS_START:
+            self.show.start()  # повторный вызов ничего не запускает: фейерверк один
+        self.show.update(dt)
         if self.dialogue is not None:
             self.dialogue.update(dt)
         elif self.phase == ARRIVAL and self.phase_time >= ARRIVAL_SECONDS:
@@ -331,8 +361,11 @@ class FinalScene(Scene):
     # --- Отрисовка ---
 
     def draw(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
-        """Рисует финал на холсте; со слоем hires персонажи и надписи уходят в него
-        (см. game/graphics/hires.py), а порядок слоёв и экранов остаётся тем же."""
+        """Рисует финал на холсте; со слоем hires персонажи, надписи и подробные предметы уходят в него
+        (см. game/graphics/hires.py), а порядок слоёв и экранов остаётся тем же.
+
+        Порядок слоёв, снизу вверх: небо и звёзды → фейерверк → поляна → гирлянды и ленточка →
+        шарики и фонарики → стол с блюдами и тортом → фрагменты → герои → затемнение и письмо."""
         if self.phase in (CREDITS, THE_END, DONE):
             self._draw_night(surface)
             if self.phase == CREDITS:
@@ -341,25 +374,26 @@ class FinalScene(Scene):
                 self._draw_the_end(surface, hires)
             self._draw_hint(surface, hires)
             return
-        surface.blit(self._background if hires is None else self._background_plain, (0, 0))
+        self._draw_backdrop(surface)
         self._draw_festive(surface)
-        self._draw_symbols(surface)
-        if hires is not None:  # подпись ленточки — часть страницы, под героями
-            hires.text("Последняя страница", RIBBON_STYLE, self.ribbon_rect(hires=True).center, anchor="center")
+        self._draw_ribbon(surface, hires)
+        self._draw_decorations(surface, hires)
+        self._draw_table(surface, hires)
+        self._draw_symbols(surface, hires)
         self._draw_blanket(surface)
         self._draw_actor(surface, "chuchmek", CHUCHMEK_POSITION, hires)
         self._draw_actor(surface, "leo", LEO_POSITION, hires)
         self._draw_actor(surface, "alice", ALICE_POSITION, hires)
         if self.phase == ARRIVAL:
-            # Страница «проявляется» из белого листа.
-            whiteness = 1 - _ease(self.phase_time / (ARRIVAL_SECONDS * 0.25))
-            if whiteness > 0:
+            # Праздник «проявляется» из ночной темноты.
+            darkness = 1 - _ease(self.phase_time / (ARRIVAL_SECONDS * VEIL_SHARE))
+            if darkness > 0:
                 if hires is not None:
-                    hires.fill(PARCHMENT_COLOR, alpha=round(255 * whiteness))  # закрывает и героев
+                    hires.fill(VEIL_COLOR, alpha=round(255 * darkness))  # закрывает и героев
                 else:
                     veil = pygame.Surface(config.LOGICAL_SIZE)
-                    veil.fill(PARCHMENT_COLOR)
-                    veil.set_alpha(round(255 * whiteness))
+                    veil.fill(VEIL_COLOR)
+                    veil.set_alpha(round(255 * darkness))
                     surface.blit(veil, (0, 0))
         if self.phase in (LETTER, GIFT):
             self._draw_letter(surface, hires)
@@ -463,56 +497,201 @@ class FinalScene(Scene):
         for dx in (-9, 0, 9):  # звёздочки на покрывале
             surface.set_at((BLANKET.centerx + dx, BLANKET.centery + 1), CREAM_COLOR)
 
-    def _draw_symbols(self, surface: pygame.Surface) -> None:
-        """Три фрагмента: в начале летят к центру страницы и превращаются в символы."""
-        t = self.phase_time / ARRIVAL_SECONDS if self.phase == ARRIVAL else 1.0
-        # Подставка, над которой они парят.
-        pygame.draw.ellipse(surface, PAGE_EDGE_COLOR, (138, 96, 44, 10))
-        pygame.draw.ellipse(surface, CREAM_COLOR, (140, 96, 40, 7))
-        for index, trial_id in enumerate(TRIALS):
-            goal = SYMBOL_POSITIONS[trial_id]
-            if t < 0.65:
-                k = _ease((t - 0.15 - index * 0.06) / 0.4)
-                start = FRAGMENT_STARTS[trial_id]
-                x = start[0] + (goal[0] - start[0]) * k
-                y = start[1] + (goal[1] - start[1]) * k
-                size = 3 + round(k * 2)
-                color = FRAGMENT_COLORS[trial_id]
-                diamond = [(x, y - size), (x + size, y), (x, y + size), (x - size, y)]
-                pygame.draw.polygon(surface, color, diamond)
-                pygame.draw.polygon(surface, GLOW_COLOR, diamond, 1)
+    def _draw_backdrop(self, surface: pygame.Surface) -> None:
+        """Вечернее небо со звёздами, за ним — фейерверк, перед ним — холмы, деревья и поляна."""
+        surface.blit(self.art.sky, (0, 0))
+        for index, (x, y, color) in enumerate(self.art.stars):  # часть звёзд мерцает
+            glint = math.sin(self.time * 2.4 + index * 1.9)
+            if glint > 0.35:
+                surface.set_at((x, y), color)
+                if glint > 0.9:  # яркая вспышка звезды крестиком
+                    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                        surface.set_at((x + dx, y + dy), mix(color, final_art.SKY_STOPS[1][1], 0.45))
+            elif glint < -0.5:
+                surface.set_at((x, y), final_art.SKY_STOPS[1][1])
+        self.show.draw(surface)
+        surface.blit(self.art.land, (0, 0))
+        surface.blit(self.art.vignette, (0, 0))
+        k = self.festive
+        for index, (x, y) in enumerate(self.art.lights):  # огоньки гирлянд в листве деревьев
+            if index / len(self.art.lights) >= k:
                 continue
-            bob = math.sin(self.time * 2 + index) * 1.5
-            center = (goal[0], goal[1] + bob)
-            glow = 11 + round(abs(math.sin(self.time * 2.5 + index)) * 2)
-            pygame.draw.circle(surface, GLOW_COLOR, (round(center[0]), round(center[1])), glow, 1)
-            if self.phase == ARRIVAL and t < 0.72:  # вспышка превращения
-                pygame.draw.circle(surface, GLOW_COLOR, (round(center[0]), round(center[1])), 9)
-            draw_symbol(surface, trial_id, center)
+            lit = math.sin(self.time * 3.1 + index * 2.3) > -0.3
+            surface.set_at((x, y), final_art.WARM_LIGHT if lit else mix(final_art.WARM_LIGHT, (60, 90, 80), 0.6))
+            if lit and index % 3 == 0:
+                surface.set_at((x + 1, y), mix(final_art.WARM_LIGHT, (60, 90, 80), 0.5))
+        for x, y, reach, phase in self.art.motes:  # волшебные огоньки плавают над поляной
+            if k <= 0:
+                break
+            px = x + math.sin(self.time * 0.5 + phase) * reach
+            py = y + math.cos(self.time * 0.7 + phase * 1.3) * reach * 0.6
+            pulse = 0.5 + 0.5 * math.sin(self.time * 2.2 + phase * 3)
+            color = mix((120, 150, 140), (255, 240, 170), pulse * k)
+            surface.set_at((round(px), round(py)), color)
+            if pulse > 0.8:
+                surface.set_at((round(px) + 1, round(py)), mix(color, (60, 80, 90), 0.5))
 
     def _draw_festive(self, surface: pygame.Surface) -> None:
-        """Гирлянда флажков и огоньки: появляются по мере того, как страница становится праздничной."""
+        """Гирлянды разноцветных флажков: зажигаются по мере того, как праздник собирается."""
         k = self.festive
-        if k <= 0:
+        count = final_art.GARLAND_FLAG_COUNT
+        visible = round(count * k)
+        for garland in range(len(final_art.GARLANDS)):
+            points = [final_art.garland_point(garland, i / (count * 2)) for i in range(count * 2 + 1)]
+            pygame.draw.lines(surface, INK_COLOR, False, points)
+            for i in range(count):
+                s = (i + 0.5) / count
+                x, y = final_art.garland_point(garland, s)
+                if i < visible or k >= 1:
+                    color = FLAG_COLORS[(i + garland * 2) % len(FLAG_COLORS)]
+                    flag = [(x - 4, y), (x + 4, y), (x, y + 8)]
+                    pygame.draw.polygon(surface, mix(color, (40, 24, 60), 0.3), [(px, py + 1) for px, py in flag])
+                    pygame.draw.polygon(surface, color, flag)
+                    surface.set_at((round(x) - 2, round(y) + 1), mix(color, (255, 255, 255), 0.6))
+
+    def _draw_ribbon(self, surface: pygame.Surface, hires: HiResLayer | None) -> None:
+        """Ленточка с названием страницы: небо и искры проходят позади неё, ничто не закрывает надпись."""
+        ribbon = self.ribbon_rect(hires=hires is not None)
+        pygame.draw.rect(surface, CREAM_COLOR, ribbon)
+        pygame.draw.rect(surface, PLUM_COLOR, ribbon, 1)
+        if hires is not None:
+            hires.text("Последняя страница", RIBBON_STYLE, ribbon.center, anchor="center")
+        else:
+            image = render_text(self._font, "Последняя страница", PLUM_COLOR)
+            surface.blit(image, image.get_rect(center=ribbon.center))
+
+    def _draw_piece(self, surface: pygame.Surface, hires: HiResLayer | None, piece: Piece,
+                    dx: float = 0.0, dy: float = 0.0, alpha: int = 255) -> None:
+        """Подробная картинка на своём месте (со сдвигом). Без слоя прозрачность не рисуется:
+        картинка просто появляется, когда проявилась больше чем наполовину."""
+        if alpha <= 0 or (hires is None and alpha < 128):
             return
-        visible = round(GARLAND_FLAGS * k)
-        for i in range(GARLAND_FLAGS):
-            x = 18 + i * (WIDTH - 36) / (GARLAND_FLAGS - 1)
-            sag = math.sin(math.pi * i / (GARLAND_FLAGS - 1)) * 10
-            y = 24 + sag
-            if i + 1 < GARLAND_FLAGS:
-                nx = 18 + (i + 1) * (WIDTH - 36) / (GARLAND_FLAGS - 1)
-                ny = 24 + math.sin(math.pi * (i + 1) / (GARLAND_FLAGS - 1)) * 10
-                pygame.draw.line(surface, INK_COLOR, (x, y), (nx, ny))
-            if i < visible:
-                color = FLAG_COLORS[i % len(FLAG_COLORS)]
-                pygame.draw.polygon(surface, color, [(x - 4, y), (x + 4, y), (x, y + 8)])
-        for i in range(12):  # огоньки на кустах вдоль края страницы мерцают по очереди
-            if i / 12 >= k:
-                break
-            x, y = 22 + i * 25, 132 + (i % 2) * 6
-            lit = math.sin(self.time * 3 + i * 1.7) > -0.2
-            pygame.draw.circle(surface, GLOW_COLOR if lit else CREAM_COLOR, (x, y), 2)
+        rect = piece.rect.move(round(dx), round(dy))
+        piece.draw(surface, hires, alpha, center=rect.center)
+
+    def _draw_decorations(self, surface: pygame.Surface, hires: HiResLayer | None) -> None:
+        """Шарики у стола и фонарики на гирляндах: качаются, зажигаются вместе с гирляндами."""
+        k = self.festive
+        alpha = round(255 * k)
+        if alpha <= 0:
+            return
+        for index, balloon in enumerate(self.art.balloons):
+            bob = math.sin(self.time * 1.7 + index * 1.1) * 1.4
+            rise = (1 - k) * 12  # шарики поднимаются к своим местам
+            self._draw_piece(surface, hires, balloon.piece, math.sin(self.time * 0.9 + index) * 0.8, bob + rise, alpha)
+        for index, (lamp, glow) in enumerate(self.art.lamps):  # фонари на шестах у краёв поляны
+            flicker = 0.8 + 0.2 * math.sin(self.time * 5.3 + index * 2.0) * math.sin(self.time * 1.9 + index)
+            self._draw_piece(surface, hires, glow, 0, 0, round(alpha * 0.6 * flicker))
+            self._draw_piece(surface, hires, lamp, 0, 0, alpha)
+        for lantern in self.art.lanterns:
+            sway = math.sin(self.time * 1.5 + lantern.sway) * 0.9
+            flicker = 0.78 + 0.22 * math.sin(self.time * 7.3 + lantern.sway * 3) * math.sin(self.time * 2.9 + lantern.sway)
+            self._draw_piece(surface, hires, lantern.glow, sway, 0, round(alpha * 0.55 * flicker))
+            self._draw_piece(surface, hires, lantern.piece, sway * 0.5, 0, alpha)
+
+    def _draw_table(self, surface: pygame.Surface, hires: HiResLayer | None) -> None:
+        """Праздничный стол: скатерть, дорожка, цветы, суши на тарелках и торт со свечами."""
+        k = self.table_reveal
+        alpha = round(255 * k)
+        if alpha <= 0:
+            return
+        lift = (1 - k) * 6  # стол «накрывается»: слегка поднимается на место
+        self._draw_piece(surface, hires, self.art.table, 0, lift, alpha)
+        for plate in self.art.plates:
+            self._draw_piece(surface, hires, plate, 0, lift, alpha)
+        self._draw_piece(surface, hires, self.art.cake, 0, lift, alpha)
+        if k < 1:
+            return
+        flicker = 0.62 + 0.38 * math.sin(self.time * 6.1) * math.sin(self.time * 2.3 + 1)
+        self._draw_piece(surface, hires, self.art.cake_glow, 0, 0, round(150 * flicker))
+        for index, (x, y) in enumerate(self.art.flame_spots):
+            frame = self.art.flame_frames[int(self.time * 9 + index * 1.7) % 3]
+            self._draw_piece(surface, hires, frame, x - frame.rect.centerx, y - frame.rect.centery - 3, 255)
+
+    def _tile(self, trial_id: str, size: int) -> pygame.Surface:
+        key = (trial_id, size)
+        if key not in self._scaled_tiles:
+            self._scaled_tiles[key] = scale_sprite(self.art.tiles[trial_id].image, (size, size))
+        return self._scaled_tiles[key]
+
+    def _draw_symbols(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
+        """Три фрагмента: слетаются к столу из разных сторон, вспыхивают и складываются в одну
+        светящуюся мозаику над тортом. Это те самые плитки, что игрок собрал на площади."""
+        t = self.arrival_progress
+        done = t >= 0.65
+        centers: dict[str, tuple[float, float]] = {}
+        for index, trial_id in enumerate(TRIALS):
+            if not self.progress.is_completed(trial_id):
+                continue  # на праздник слетаются только настоящие, уже собранные фрагменты
+            goal = SYMBOL_POSITIONS[trial_id]
+            if not done:
+                k = _ease((t - 0.10 - index * 0.05) / 0.38)
+                start = FRAGMENT_STARTS[trial_id]
+                x = start[0] + (goal[0] - start[0]) * k
+                y = start[1] + (goal[1] - start[1]) * k + math.sin(k * math.pi) * FRAGMENT_ARCS[trial_id]
+                for trail in range(1, 5):  # хвост из огоньков за летящим фрагментом
+                    back = max(0.0, k - trail * 0.045)
+                    tx = start[0] + (goal[0] - start[0]) * back
+                    ty = start[1] + (goal[1] - start[1]) * back + math.sin(back * math.pi) * FRAGMENT_ARCS[trial_id]
+                    surface.set_at((round(tx), round(ty)), mix(final_art.WARM_LIGHT, (60, 40, 100), trail / 5))
+                    if trail < 3:
+                        surface.set_at((round(tx) + 1, round(ty)), mix(final_art.WARM_LIGHT, (60, 40, 100), trail / 4))
+                centers[trial_id] = (x, y)
+            else:
+                bob = math.sin(self.time * 2 + index) * 1.4
+                centers[trial_id] = (goal[0], goal[1] + bob)
+        if t < 0.1:
+            return
+        if done:
+            self._draw_emblem(surface, hires, centers)
+        elif hires is not None or t > 0.2:
+            for trial_id, center in centers.items():
+                self._draw_tile(surface, hires, trial_id, center, FRAGMENT_TILE - 4)
+
+    def _draw_tile(self, surface: pygame.Surface, hires: HiResLayer | None, trial_id: str,
+                   center: tuple[float, float], size: int) -> None:
+        rect = pygame.Rect(0, 0, size, size)
+        rect.center = (round(center[0]), round(center[1]))
+        if hires is not None:
+            hires.sprite(self.art.tiles[trial_id].image, rect)
+        else:
+            surface.blit(self._tile(trial_id, size), rect, special_flags=pygame.BLEND_PREMULTIPLIED)
+
+    def _draw_emblem(self, surface: pygame.Surface, hires: HiResLayer | None,
+                     centers: dict[str, tuple[float, float]]) -> None:
+        """Сложившаяся мозаика: золотые лучи между плитками, мягкое свечение, искры по кругу."""
+        since = (self.phase_time - ARRIVAL_SECONDS * 0.65) if self.phase == ARRIVAL else 99.0
+        ex, ey = EMBLEM_CENTER
+        order = [centers[trial_id] for trial_id in TRIALS if trial_id in centers]
+        links = min(1.0, since / 0.35)  # лучи «протягиваются» от плитки к плитке
+        for index, a in enumerate(order if len(order) == len(TRIALS) else ()):  # лучи — только у целой мозаики
+            b = order[(index + 1) % 3]
+            end = (a[0] + (b[0] - a[0]) * links, a[1] + (b[1] - a[1]) * links)
+            pygame.draw.line(surface, mix(GOLD_COLOR, (60, 40, 100), 0.35), (a[0], a[1] + 1), (end[0], end[1] + 1))
+            pygame.draw.line(surface, GLOW_COLOR, a, end)
+            if links >= 1:  # на середине каждого луча — звёздочка
+                surface.set_at((round((a[0] + b[0]) / 2), round((a[1] + b[1]) / 2)), (255, 255, 255))
+        if since < 0.7:  # волна света при слиянии
+            radius = 6 + since * 60
+            fade = 1 - since / 0.7
+            color = mix((60, 40, 100), GLOW_COLOR, fade)
+            pygame.draw.circle(surface, color, (ex, ey + 4), round(radius), 1)
+            if radius > 12:
+                pygame.draw.circle(surface, mix((60, 40, 100), GLOW_COLOR, fade * 0.5), (ex, ey + 4), round(radius - 4), 1)
+        pulse = 0.78 + 0.22 * math.sin(self.time * 2.6)
+        self._draw_piece(surface, hires, self.art.emblem_glow, 0, 4, round(190 * pulse))
+        for trial_id, center in centers.items():
+            self._draw_tile(surface, hires, trial_id, center, FRAGMENT_TILE)
+        for index in range(6):  # искры кружат вокруг мозаики
+            angle = self.time * 1.2 + index * math.tau / 6
+            x = ex + math.cos(angle) * 25
+            y = ey + 4 + math.sin(angle) * 13
+            sparkle = self._sparkles[index % 3]
+            rect = sparkle.get_rect(center=(round(x), round(y)))
+            if hires is not None:
+                hires.sprite(sparkle, rect)
+            else:
+                surface.blit(sparkle, rect)
 
     def _draw_letter(self, surface: pygame.Surface, hires: HiResLayer | None = None) -> None:
         """Лист письма поверх притушенной страницы; проявляется за PAGE_FADE_SECONDS."""
@@ -591,7 +770,7 @@ class FinalScene(Scene):
         line = self.hint()
         if not line:
             return
-        dark = self.phase in (CREDITS, THE_END, DONE)
+        dark = True  # подсказка вне письма — на тёмном небе, поляне или ночных титрах
         if self.phase in (LETTER, GIFT):
             # Подсказка — внизу листа письма, чтобы не закрывать текст.
             if hires is not None:
@@ -677,31 +856,3 @@ class FinalScene(Scene):
             label = render_text(self._font, "Последняя страница", PLUM_COLOR).get_rect()
         label.midtop = (WIDTH // 2, 6)
         return label.inflate(10, 2)
-
-    def _render_page(self, label: bool = True) -> pygame.Surface:
-        """Восстановленная страница книги: небо, холмы, тропинка, цветы — как на первой странице сказки.
-
-        label=False — ленточка без подписи: её рисует слой высокого разрешения."""
-        page = pygame.Surface(config.LOGICAL_SIZE)
-        page.fill(PAGE_EDGE_COLOR)
-        inner = pygame.Rect(4, 4, WIDTH - 8, HEIGHT - 8)
-        pygame.draw.rect(page, PAGE_COLOR, inner)
-        pygame.draw.rect(page, SKY_COLOR, (inner.x + 4, inner.y + 4, inner.width - 8, 86))
-        pygame.draw.circle(page, GOLD_COLOR, (270, 46), 10)
-        pygame.draw.ellipse(page, HILL_COLORS[1], (-40, 86, 220, 70))
-        pygame.draw.ellipse(page, HILL_COLORS[0], (120, 82, 240, 70))
-        pygame.draw.rect(page, HILL_COLORS[0], (inner.x, 112, inner.width, inner.bottom - 112))
-        pygame.draw.polygon(page, (226, 204, 160), [(150, 112), (170, 112), (196, 172), (124, 172)])
-        for i, x in enumerate(range(20, WIDTH - 10, 22)):  # цветы
-            y = 150 + (i % 3) * 5
-            page.fill(FLAG_COLORS[i % len(FLAG_COLORS)], (x, y, 3, 3))
-        for x, y in ((40, 128), (290, 126)):  # кусты для огоньков
-            pygame.draw.circle(page, HILL_COLORS[1], (x, y), 10)
-        # Ленточка с подписью страницы.
-        ribbon = self.ribbon_rect(hires=not label)
-        pygame.draw.rect(page, CREAM_COLOR, ribbon)
-        pygame.draw.rect(page, PLUM_COLOR, ribbon, 1)
-        if label:
-            image = render_text(self._font, "Последняя страница", PLUM_COLOR)
-            page.blit(image, image.get_rect(center=ribbon.center))
-        return page

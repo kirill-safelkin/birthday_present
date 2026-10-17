@@ -38,6 +38,8 @@ from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites
 from game.story import cakes_dialogue as cakes_text  # noqa: E402
 from game.story import final_dialogue as final_text  # noqa: E402
 from game.story.final_scene import (  # noqa: E402
+    ALICE_POSITION,
+    CHUCHMEK_POSITION,
     CREDIT_STYLES,
     CREDITS_SECONDS,
     END_INPUT_DELAY,
@@ -338,8 +340,8 @@ class CharacterTest(SceneTestCase):
         rects = {}
         for command in self.sprites(layer):
             rects[command.rect.midbottom] = command
-        for who, manifest, pose, feet in (("alice", alice, scene.alice_pose, (104, 108)),
-                                          ("chuchmek", chuchmek, scene.chuchmek_pose, (218, 108))):
+        for who, manifest, pose, feet in (("alice", alice, scene.alice_pose, ALICE_POSITION),
+                                          ("chuchmek", chuchmek, scene.chuchmek_pose, CHUCHMEK_POSITION)):
             with self.subTest(who=who):
                 command = rects[feet]
                 self.assertEqual(command.rect.size, (48, 48))

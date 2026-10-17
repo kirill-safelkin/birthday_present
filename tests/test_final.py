@@ -18,8 +18,11 @@ import config  # noqa: E402
 from game.core.app import App  # noqa: E402
 from game.core.scenes import Scene, SceneManager  # noqa: E402
 from game.dialogue.box import HANGING_WORDS, DialogueBox  # noqa: E402
+from game.graphics.fireworks import MAX_CONFETTI, MAX_FLASHES, MAX_ROCKETS, MAX_SPARKS  # noqa: E402
+from game.graphics.hires import FillCommand, HiResLayer, SpriteCommand  # noqa: E402
 from game.graphics.sprite_manifest import CHARACTERS_DIR, load_character_sprites  # noqa: E402
 from game.story import cakes_dialogue  # noqa: E402
+from game.story import final_art  # noqa: E402
 from game.story import final_dialogue as text  # noqa: E402
 from game.story.final_scene import (  # noqa: E402
     ALICE_POSITION,
@@ -31,6 +34,8 @@ from game.story.final_scene import (  # noqa: E402
     CREDITS_SKIP_DELAY,
     DONE,
     END_INPUT_DELAY,
+    FIREWORKS_START,
+    FRAGMENT_TILE,
     GIFT,
     GIFT_REACTION,
     LETTER,
@@ -44,6 +49,7 @@ from game.story.final_scene import (  # noqa: E402
 from game.story.intro_dialogue import ALICE, CHUCHMEK  # noqa: E402
 from game.trials.cakes_scene import CHECK_ROW, ESCAPE_SECONDS  # noqa: E402
 from game.trials.forms_scene import CABINETS, GOOSE_POSITION, SLOT_XS, SLOT_Y  # noqa: E402
+from game.trials import sushi_dishes  # noqa: E402
 from game.trials.sushi_orders import RECIPES  # noqa: E402
 from game.trials.sushi_scene import STATIONS, TABLE as SUSHI_TABLE  # noqa: E402
 from game.world import hub_scenery  # noqa: E402
@@ -562,6 +568,260 @@ def play_cakes(cakes: Scene) -> None:
     press_e(cakes)
     finish_dialogue(cakes)
     finish_dialogue(cakes)
+
+
+class CelebrationTest(FinaleTestCase):
+    """Праздник вместо пустой страницы: стол, торт, суши, фрагменты, фонарики и фейерверк."""
+
+    def sprites(self, scene: FinalScene) -> list[SpriteCommand]:
+        layer = HiResLayer()
+        scene.draw(self.canvas, layer)
+        return [command for command in layer.commands if isinstance(command, SpriteCommand)]
+
+    def tile_commands(self, scene: FinalScene) -> dict[str, SpriteCommand]:
+        tiles = hub_scenery.table().fragments
+        sprites = self.sprites(scene)
+        return {trial_id: next(c for c in sprites if c.image is tile.image)
+                for trial_id, tile in tiles.items() if any(c.image is tile.image for c in sprites)}
+
+    def test_celebration_builds_up_in_order(self) -> None:
+        scene = self.scene
+        self.assertEqual((scene.festive, scene.table_reveal), (0.0, 0.0))
+        self.assertFalse(scene.show.running)
+        scene.update(ARRIVAL_SECONDS * 0.3)  # фрагменты ещё летят
+        self.assertFalse(scene.symbols_assembled())
+        self.assertEqual(scene.table_reveal, 0.0)
+        scene.update(ARRIVAL_SECONDS * 0.36)  # 0,66: фрагменты сложились, стол появился, в небе фейерверк
+        self.assertTrue(scene.symbols_assembled())
+        self.assertGreater(scene.table_reveal, 0.3)
+        self.assertLess(scene.festive, 0.3)  # фонарики ещё не горят
+        self.assertTrue(scene.show.running)
+        scene.update(ARRIVAL_SECONDS * 0.14)  # 0,8: загораются фонарики и гирлянды
+        self.assertGreater(scene.festive, 0.3)
+        scene.update(ARRIVAL_SECONDS * 0.3)
+        self.assertEqual(scene.phase, TALK)
+        self.assertEqual((scene.festive, scene.table_reveal), (1.0, 1.0))
+
+    def test_fireworks_wait_for_the_fragments_and_start_exactly_once(self) -> None:
+        scene = self.scene
+        scene.update(ARRIVAL_SECONDS * (FIREWORKS_START - 0.05))
+        self.assertFalse(scene.fireworks_started)
+        scene.update(ARRIVAL_SECONDS * 0.1)
+        self.assertTrue(scene.fireworks_started)
+        show, salvo = scene.show, scene.show.salvo_index
+        for _ in range(30):
+            scene.update(DT)
+        self.assertIs(scene.show, show)
+        self.assertEqual(scene.show.salvo_index, salvo)  # залп продолжается, а не начинается заново
+        for _ in range(5):  # повторные нажатия не запускают второй фейерверк и вторую сцену
+            press_e(scene)
+        self.assertIs(scene.show, show)
+        self.assertEqual(sum(isinstance(item, FinalScene) for item in self.manager.stack), 1)
+
+    def test_skipping_the_arrival_still_gives_the_whole_celebration(self) -> None:
+        scene = self.scene
+        press_e(scene)  # анимацию можно не ждать
+        self.assertEqual(scene.phase, TALK)
+        self.assertEqual((scene.festive, scene.table_reveal), (1.0, 1.0))
+        scene.update(DT)
+        self.assertTrue(scene.show.running)
+        scene.draw(self.canvas)
+
+    def test_fireworks_stop_when_the_letter_opens_and_never_return(self) -> None:
+        scene = self.scene
+        press_e(scene)
+        scene.update(4.0)
+        self.assertGreater(scene.show.particle_count, 0)
+        finish_dialogue(scene)
+        self.assertEqual(scene.phase, LETTER)
+        self.assertFalse(scene.show.running)
+        fired = scene.show.bursts_fired
+        pending = len(scene.show.rockets)  # ракеты, уже взлетевшие, ещё могут разорваться
+        for _ in range(round(9 / DT)):  # пока читают первую страницу
+            scene.update(DT)
+        self.assertEqual(scene.show.particle_count, 0)  # в небе тихо
+        self.assertLessEqual(scene.show.bursts_fired, fired + pending)
+        for _ in text.LETTER_PAGES:
+            read_page(scene)
+        for _ in range(round((PAUSE_SECONDS + 1) / DT)):
+            scene.update(DT)
+        self.assertEqual(scene.phase, GIFT)
+        self.assertFalse(scene.show.running)
+        self.assertEqual(scene.show.particle_count, 0)
+
+    def test_effects_stay_within_their_caps_through_the_whole_finale(self) -> None:
+        scene = self.scene
+        peak = 0
+        for _ in range(round(25 / DT)):  # долгий разговор: игрок никуда не торопится
+            scene.update(DT)
+            show = scene.show
+            self.assertLessEqual(len(show.sparks), MAX_SPARKS)
+            self.assertLessEqual(len(show.confetti), MAX_CONFETTI)
+            self.assertLessEqual(len(show.flashes), MAX_FLASHES)
+            self.assertLessEqual(len(show.rockets), MAX_ROCKETS)
+            peak = max(peak, show.particle_count)
+        self.assertGreater(peak, 50)
+        self.assertEqual(scene.phase, TALK)
+
+    def test_table_cake_and_sushi_appear_on_the_table(self) -> None:
+        art = final_art.finale_art()
+        self.assertEqual(len(art.plates), 2)
+        before = self.sprites(self.scene)
+        self.assertFalse(any(c.image is art.cake.image or c.image is art.table.image for c in before))
+        self.scene.update(ARRIVAL_SECONDS + 0.1)
+        images = [c.image for c in self.sprites(self.scene)]
+        self.assertTrue(any(image is art.table.image for image in images))
+        self.assertTrue(any(image is art.cake.image for image in images))
+        for plate in art.plates:
+            self.assertTrue(any(image is plate.image for image in images))
+        # Суши на тарелке рисуются тем же кодом, что и готовые блюда испытания суши.
+        expected = pygame.Surface((42, 28), pygame.SRCALPHA)
+        rect = pygame.Rect(0, 0, *sushi_dishes.PLATE_SIZE)
+        rect.center = (21, 19)
+        sushi_dishes.draw_plate(expected, rect)
+        sushi_dishes.draw_dish(expected, final_art.PLATE_DISHES[0], rect.center)
+        self.assertEqual(pygame.image.tobytes(art.plates[0].image, "RGBA"), pygame.image.tobytes(expected, "RGBA"))
+
+    def test_the_three_collected_fragments_are_the_mosaic_tiles_and_join_into_one(self) -> None:
+        tiles = hub_scenery.table().fragments
+        self.assertEqual(self.tile_commands(self.scene), {})  # в самом начале ещё ничего не летит
+        self.scene.update(ARRIVAL_SECONDS * 0.3)
+        flying = self.tile_commands(self.scene)
+        self.assertEqual(set(flying), set(TRIALS))  # те же плитки, что игрок собрал на площади
+        self.assertTrue(all(c.image is tiles[trial_id].image for trial_id, c in flying.items()))
+        self.scene.update(ARRIVAL_SECONDS * 0.5)
+        joined = self.tile_commands(self.scene)
+        for trial_id, command in joined.items():
+            self.assertEqual(command.rect.size, (FRAGMENT_TILE, FRAGMENT_TILE))
+            goal = final_art.EMBLEM_SPOTS[trial_id]
+            self.assertLessEqual(abs(command.rect.centerx - goal[0]) + abs(command.rect.centery - goal[1]), 4)
+        centers = [c.rect.center for c in joined.values()]
+        self.assertTrue(all(abs(a[0] - b[0]) <= 40 and abs(a[1] - b[1]) <= 16 for a in centers for b in centers))  # вместе
+
+    def test_flying_fragments_never_cross_the_title_ribbon(self) -> None:
+        ribbon = self.scene.ribbon_rect(hires=True)
+        seen = 0
+        for _ in range(round(ARRIVAL_SECONDS / DT)):
+            self.scene.update(DT)
+            for command in self.tile_commands(self.scene).values():
+                seen += 1
+                self.assertFalse(command.rect.colliderect(ribbon), command.rect)
+        self.assertGreater(seen, 100)
+
+    def test_only_fragments_actually_collected_are_shown(self) -> None:
+        for trials in ((), ("forms",), ("sushi", "cakes")):
+            with self.subTest(trials=trials):
+                scene = FinalScene(complete_progress(*trials))
+                scene.update(ARRIVAL_SECONDS)
+                self.assertEqual(set(self.tile_commands(scene)), set(trials))
+                scene.draw(self.canvas)  # без ошибок и при неполной мозаике
+                self.assertEqual(scene.progress.completed, trials)  # сцена прогресс не меняет
+
+    def test_composition_fits_the_screen_and_does_not_collide(self) -> None:
+        screen = pygame.Rect(0, 0, WIDTH, HEIGHT)
+        art = final_art.finale_art()
+        box = DialogueBox()
+        lowest_box = min((box.layout(node, hires).name_tab or box.layout(node, hires).box).top
+                         for script in text.all_scripts() for node in script.nodes.values() for hires in (False, True))
+        self.assertTrue(screen.contains(final_art.TABLE_RECT))  # стол не обрезан
+        self.assertLessEqual(final_art.TABLE_BOTTOM, lowest_box)  # и не закрыт окном реплики
+        self.assertLessEqual(final_art.CAKE_BASE_Y, final_art.TABLE_BOTTOM)
+        for piece in (art.cake, art.table, *art.plates, *(b.piece for b in art.balloons),
+                      *(lantern.piece for lantern in art.lanterns)):
+            self.assertTrue(screen.contains(piece.rect), piece.rect)
+        ribbons = (self.scene.ribbon_rect(hires=False), self.scene.ribbon_rect(hires=True))
+        cake_mask = pygame.mask.from_surface(art.cake.image)  # по настоящим пикселям торта, а не по прямоугольнику
+        for trial_id, (x, y) in final_art.EMBLEM_SPOTS.items():
+            tile = pygame.Rect(0, 0, FRAGMENT_TILE, FRAGMENT_TILE + 4)  # с запасом на качание
+            tile.center = (x, y)
+            self.assertTrue(screen.contains(tile))
+            self.assertFalse(any(tile.colliderect(ribbon) for ribbon in ribbons), trial_id)  # заголовок свободен
+            scale = art.cake.image.get_width() // art.cake.rect.width
+            offset = ((tile.x - art.cake.rect.x) * scale, (tile.y - art.cake.rect.y) * scale)
+            tile_mask = pygame.Mask((tile.width * scale, tile.height * scale), fill=True)
+            self.assertIsNone(cake_mask.overlap(tile_mask, offset), trial_id)  # мозаика над тортом, а не на нём
+        for flame in art.flame_spots:
+            self.assertTrue(all(not pygame.Rect(0, 0, 3, 6).move(flame[0] - 1, flame[1] - 6).colliderect(
+                pygame.Rect(0, 0, FRAGMENT_TILE, FRAGMENT_TILE).move(x - 7, y - 7))
+                for x, y in final_art.EMBLEM_SPOTS.values()), flame)  # свечи не упираются в плитки
+
+    def test_fireworks_never_cover_the_title_ribbon(self) -> None:
+        scene = self.scene
+        press_e(scene)
+        for _ in range(round(8 / DT)):
+            scene.update(DT)
+            scene.draw(self.canvas)
+        ribbon = scene.ribbon_rect(hires=False)
+        cream = final_scene_cream()
+        for corner in ((ribbon.left + 1, ribbon.top + 1), (ribbon.right - 2, ribbon.top + 1),
+                       (ribbon.left + 1, ribbon.bottom - 2), (ribbon.right - 2, ribbon.bottom - 2)):
+            self.assertEqual(self.canvas.get_at(corner)[:3], cream)  # искры идут позади ленточки
+
+    def test_everything_draws_with_and_without_the_layer_in_every_phase(self) -> None:
+        for hires in (False, True):
+            with self.subTest(hires=hires):
+                scene = FinalScene(complete_progress(*TRIALS))
+                layer = HiResLayer(strict=True) if hires else None
+                shown = []
+
+                def frame() -> None:
+                    if layer is not None:
+                        layer.clear()
+                    if layer is None:
+                        scene.draw(self.canvas)
+                    else:
+                        scene.draw(self.canvas, layer)
+                    shown.append(scene.phase)
+
+                for _ in range(round(ARRIVAL_SECONDS / DT) + 5):
+                    scene.update(DT)
+                    frame()
+                finish_dialogue(scene)
+                for _ in text.LETTER_PAGES:
+                    read_page(scene)
+                    frame()
+                scene.update(PAUSE_SECONDS + 0.01)
+                frame()
+                self.assertGreaterEqual(set(shown), {ARRIVAL, TALK, LETTER, GIFT})
+
+    def test_veil_clears_during_the_arrival_and_the_letter_still_dims_the_sky(self) -> None:
+        layer = HiResLayer()
+        self.scene.draw(self.canvas, layer)
+        fills = [c for c in layer.commands if isinstance(c, FillCommand)]
+        self.assertEqual(len(fills), 1)  # сначала сцена скрыта ночной темнотой
+        self.assertEqual(fills[0].alpha, 255)
+        self.scene.update(ARRIVAL_SECONDS)
+        layer.clear()
+        self.scene.draw(self.canvas, layer)
+        self.assertFalse([c for c in layer.commands if isinstance(c, FillCommand)])  # к концу темноты нет
+
+
+def final_scene_cream() -> tuple[int, int, int]:
+    from game.story.final_scene import CREAM_COLOR
+
+    return CREAM_COLOR
+
+
+class FinaleArtTest(unittest.TestCase):
+    """Оформление праздника собирается один раз, одинаково и без ошибок без окна."""
+
+    def test_art_is_built_once_and_is_complete(self) -> None:
+        art = final_art.finale_art()
+        self.assertIs(art, final_art.finale_art())
+        self.assertEqual(art.sky.get_size(), config.LOGICAL_SIZE)
+        self.assertEqual(art.land.get_size(), config.LOGICAL_SIZE)
+        self.assertEqual(set(art.tiles), set(TRIALS))
+        self.assertEqual(len(art.flame_frames), 3)
+        self.assertEqual(len(art.flame_spots), len(final_art.CANDLES))
+        self.assertGreaterEqual(len(art.balloons), 6)
+        self.assertGreaterEqual(len(art.lanterns), 4)
+        self.assertTrue(art.stars and art.lights and art.motes)
+
+    def test_sky_goes_from_night_to_a_warm_horizon(self) -> None:
+        sky = final_art.finale_art().sky
+        top, horizon = sky.get_at((160, 2)), sky.get_at((160, final_art.HORIZON - 4))
+        self.assertLess(sum(top[:3]), 200)  # вверху ночь
+        self.assertGreater(horizon[0], horizon[2])  # у горизонта тёплое сияние
 
 
 class AppIntegrationTest(unittest.TestCase):
